@@ -1,30 +1,105 @@
 /**
  * Google CC Briefing Agent
- * Utils.js — Fonctions utilitaires, nettoyage de contenu, sécurité et formatage
+ * Utils.js — Fonctions utilitaires, assainissement de texte, sécurité et formatage
  */
 
 const Utils = (function () {
   /**
-   * Décode les entités HTML préexistantes pour éviter les doubles échappements (ex: l&#039; -> l').
+   * Décode exhaustivement toutes les entités HTML (nommées, décimales et hexadécimales).
+   * Évite les artefacts tels que "&#039;", "&amp;", "&quot;", etc.
+   *
+   * @param {string} str - Chaîne potentiellement encodée
+   * @return {string} Chaîne en texte brut naturel
    */
   function decodeHtmlEntities(str) {
     if (!str) return '';
-    return String(str)
-      .replace(/&quot;/g, '"')
-      .replace(/&#039;/g, "'")
-      .replace(/&#39;/g, "'")
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&amp;/g, '&');
+    let text = String(str);
+
+    // 1. Décodage des entités hexadécimales (ex: &#x27; -> ')
+    text = text.replace(/&#x([0-9a-f]{1,6});/gi, function (_, hex) {
+      try {
+        return String.fromCodePoint(parseInt(hex, 16));
+      } catch (e) {
+        return '';
+      }
+    });
+
+    // 2. Décodage des entités décimales (ex: &#39; -> ')
+    text = text.replace(/&#([0-9]{1,7});/g, function (_, dec) {
+      try {
+        return String.fromCodePoint(parseInt(dec, 10));
+      } catch (e) {
+        return '';
+      }
+    });
+
+    // 3. Décodage des entités nommées courantes
+    const entityMap = {
+      '&quot;': '"',
+      '&apos;': "'",
+      '&amp;': '&',
+      '&lt;': '<',
+      '&gt;': '>',
+      '&nbsp;': ' ',
+      '&euro;': '€',
+      '&copy;': '©',
+      '&reg;': '®',
+      '&trade;': '™',
+      '&laquo;': '«',
+      '&raquo;': '»',
+      '&ndash;': '–',
+      '&mdash;': '—'
+    };
+
+    // Remplacement itératif pour traiter les doubles encodages (ex: &amp;#039;)
+    let previous;
+    do {
+      previous = text;
+      text = text.replace(/&(?:quot|apos|amp|lt|gt|nbsp|euro|copy|reg|trade|laquo|raquo|ndash|mdash);/gi, function (match) {
+        return entityMap[match.toLowerCase()] || match;
+      });
+    } while (text !== previous && text.indexOf('&') !== -1);
+
+    return text;
   }
 
   /**
-   * Échappement HTML strict après décodage pour prévenir toute injection dans le template.
+   * Supprime toute balise HTML résiduelle et syntaxe Markdown d'un texte brut.
+   * Empêche que des balises comme <strong> ou des astérisques ** ne fuitent dans le rendu.
+   *
+   * @param {string} str - Texte pouvant contenir des balises ou du markdown
+   * @return {string} Texte propre et fluide
+   */
+  function stripHtmlAndMarkdown(str) {
+    if (!str) return '';
+    let text = decodeHtmlEntities(str);
+
+    // Suppression des balises HTML (<...>)
+    text = text.replace(/<\/?[a-z0-9]+(?:\s+[^>]*?)?\/?>/gi, ' ');
+
+    // Suppression du formatage Markdown gras/italique (**texte**, *texte*, __texte__)
+    text = text.replace(/\*\*(.*?)\*\*/g, '$1');
+    text = text.replace(/__(.*?)__/g, '$1');
+    text = text.replace(/\*(.*?)\*/g, '$1');
+    text = text.replace(/_(.*?)_/g, '$1');
+
+    // Normalisation des espaces multiples
+    text = text.replace(/\s+/g, ' ').trim();
+
+    return text;
+  }
+
+  /**
+   * Échappement HTML strict après décodage et nettoyage.
+   * Garantit une injection 100% sécurisée dans le template sans artefact ni faille XSS.
+   *
+   * @param {string} str - Texte à sécuriser
+   * @return {string} Chaîne sécurisée pour inclusion dans le HTML
    */
   function escapeHtml(str) {
     if (str === null || str === undefined) return '';
-    const decoded = decodeHtmlEntities(String(str));
-    return decoded
+    const clean = stripHtmlAndMarkdown(String(str));
+    return clean
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
@@ -33,16 +108,32 @@ const Utils = (function () {
   }
 
   /**
-   * Nettoie le nom de l'expéditeur pour enlever les adresses d'en-tête lourdes.
+   * Nettoie le nom de l'expéditeur pour obtenir un nom humain élégant.
+   * Exemple : "kourf <notifications@github.com>" -> "kourf (GitHub)" ou "kourf"
    */
   function cleanSenderName(fromStr) {
     if (!fromStr) return '';
-    const decoded = decodeHtmlEntities(fromStr);
+    const decoded = decodeHtmlEntities(fromStr).trim();
+
+    // Cas spécial GitHub
+    if (decoded.toLowerCase().indexOf('notifications@github.com') !== -1) {
+      const ghUser = decoded.replace(/<.*>/, '').replace(/"/g, '').trim();
+      return ghUser ? ghUser + ' (GitHub)' : 'GitHub';
+    }
+
+    // Extraction standard : "Prénom Nom <email@domain.com>" -> "Prénom Nom"
     const match = decoded.match(/^"?([^"<]+)"?\s*(?:<.*>)?$/);
     if (match && match[1].trim()) {
       return match[1].trim();
     }
-    return decoded.replace(/<.*>/, '').trim() || decoded;
+
+    // Si seulement une adresse e-mail : "contact@domaine.com" -> "domaine.com"
+    const emailMatch = decoded.match(/<?([a-zA-Z0-9._%+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}))>?/);
+    if (emailMatch && emailMatch[2]) {
+      return emailMatch[2];
+    }
+
+    return decoded;
   }
 
   /**
@@ -75,44 +166,34 @@ const Utils = (function () {
   }
 
   /**
-   * Nettoie le corps d'un e-mail pour transmission économique et sécurisée à Gemini.
+   * Nettoie le corps d'un e-mail avant son analyse par Gemini.
    */
   function cleanEmailBody(rawBody, rawHtml) {
     let text = rawBody || '';
-
     if (!text && rawHtml) {
       text = rawHtml;
     }
-
     if (!text) return '';
 
-    // 1. Suppression des balises script et style et commentaires
+    // Décodage préalable des entités
+    text = decodeHtmlEntities(text);
+
+    // 1. Suppression des balises lourdes
     text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ');
     text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ');
     text = text.replace(/<!--[\s\S]*?-->/g, ' ');
 
-    // 2. Remplacement des sauts de ligne HTML et balises courantes
+    // 2. Remplacement des sauts de ligne HTML
     text = text.replace(/<br\s*[\/]?>/gi, '\n');
     text = text.replace(/<\/p>/gi, '\n\n');
     text = text.replace(/<\/div>/gi, '\n');
-    text = text.replace(/<[^>]+>/g, ' '); // Strip tout le reste des tags HTML
+    text = text.replace(/<[^>]+>/g, ' ');
 
-    // 3. Décodage basique des entités HTML courantes
-    text = text
-      .replace(/&nbsp;/gi, ' ')
-      .replace(/&amp;/gi, '&')
-      .replace(/&lt;/gi, '<')
-      .replace(/&gt;/gi, '>')
-      .replace(/&quot;/gi, '"')
-      .replace(/&#39;/gi, "'");
-
-    // 4. Suppression des blocs de citation répétés (citations d'historique)
-    // Ex: "Le 28 août 2026 à 14:00, ... a écrit :"
+    // 3. Suppression des citations et historiques
     text = text.replace(/(On\s.+?wrote:|Le\s.+?a écrit\s?:)[\s\S]*$/i, '');
-    // Lignes commençant par > (citations markdown / plain text)
     text = text.replace(/^\s*>+.*$/gm, '');
 
-    // 5. Suppression des signatures et pieds de page répétitifs types
+    // 4. Suppression des pieds de page de désabonnement standards
     const boilerplatePatterns = [
       /Cet e-mail a été envoyé à[\s\S]*$/i,
       /This email was sent to[\s\S]*$/i,
@@ -120,18 +201,18 @@ const Utils = (function () {
       /To unsubscribe[\s\S]*$/i,
       /Cliquez ici pour vous désabonner[\s\S]*$/i,
       /View in browser|Afficher dans le navigateur[\s\S]*$/i,
-      /--\s*\n[\s\S]*$/i // Signature standard délimitée par --
+      /--\s*\n[\s\S]*$/i
     ];
     for (let i = 0; i < boilerplatePatterns.length; i++) {
       text = text.replace(boilerplatePatterns[i], '');
     }
 
-    // 6. Normalisation des espaces et sauts de ligne
+    // 5. Normalisation des espaces
     text = text.replace(/[ \t]+/g, ' ');
     text = text.replace(/\n\s*\n\s*\n+/g, '\n\n');
     text = text.trim();
 
-    // 7. Tronquage sécurisé pour ne pas dépasser les quotas de tokens
+    // 6. Tronquage sécurisé pour respecter les quotas de tokens
     if (text.length > Config.DEFAULTS.MAX_BODY_CHARS) {
       text = text.substring(0, Config.DEFAULTS.MAX_BODY_CHARS) + '... [texte tronqué]';
     }
@@ -156,8 +237,8 @@ const Utils = (function () {
       }
     }
 
-    // Par défaut, si aucune mention spécifique n'est trouvée, c'est le compte principal
-    return Config.KNOWN_ACCOUNTS[1]; // Compte Principal
+    // Par défaut : compte principal
+    return Config.KNOWN_ACCOUNTS[1];
   }
 
   /**
@@ -174,32 +255,32 @@ const Utils = (function () {
    */
   function buildCalendarUrl(eventId) {
     if (!eventId) return 'https://calendar.google.com/calendar';
-    // Format de base Calendar Web
     return 'https://calendar.google.com/calendar/r/eventedit/' + encodeURIComponent(eventId);
   }
 
   /**
    * Formate une durée en minutes en chaîne lisible.
-   * Ex: 15 -> "15 min", 75 -> "1h15"
+   * Ex: 15 -> "15 min", 75 -> "1 h 15"
    */
   function formatDuration(minutes) {
     if (!minutes || isNaN(minutes) || minutes <= 0) return '';
     if (minutes < 60) return minutes + ' min';
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
-    return mins > 0 ? hours + 'h' + (mins < 10 ? '0' : '') + mins : hours + 'h';
+    return mins > 0 ? hours + ' h ' + (mins < 10 ? '0' : '') + mins : hours + ' h';
   }
 
   return {
+    decodeHtmlEntities: decodeHtmlEntities,
+    stripHtmlAndMarkdown: stripHtmlAndMarkdown,
     escapeHtml: escapeHtml,
+    cleanSenderName: cleanSenderName,
     formatDateFrench: formatDateFrench,
     formatTime: formatTime,
     cleanEmailBody: cleanEmailBody,
     detectDestinationAccount: detectDestinationAccount,
     buildGmailUrl: buildGmailUrl,
     buildCalendarUrl: buildCalendarUrl,
-    formatDuration: formatDuration,
-    cleanSenderName: cleanSenderName,
-    decodeHtmlEntities: decodeHtmlEntities
+    formatDuration: formatDuration
   };
 })();

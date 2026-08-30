@@ -3,17 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CC • Your day ahead</title>
+  <title>CC • Votre journée</title>
 </head>
 <body style="margin: 0; padding: 24px 16px; background-color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1F2937; line-height: 1.55;">
-  <div style="max-width: 580px; margin: 0 auto;">
+  <div style="max-width: 600px; margin: 0 auto;">
 
-    <!-- HEADER BRANDING GOOGLE CC -->
+    <!-- EN-TÊTE OFFICIEL GOOGLE CC -->
     <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 8px;">
       <tr>
         <td style="vertical-align: middle;">
           <span style="display: inline-block; background-color: #111827; color: #FFFFFF; font-weight: 800; font-size: 11px; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px; margin-right: 8px; vertical-align: middle;">CC</span>
-          <span style="font-size: 18px; font-weight: 700; color: #111827; letter-spacing: -0.3px; vertical-align: middle;">Your day ahead</span>
+          <span style="font-size: 18px; font-weight: 700; color: #111827; letter-spacing: -0.3px; vertical-align: middle;">Votre journée</span>
         </td>
         <? if (data.isTestMode) { ?>
         <td style="text-align: right; vertical-align: middle;">
@@ -25,33 +25,33 @@
 
     <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 12px 0 20px 0;">
 
-    <!-- SALUTATION & GAME PLAN -->
+    <!-- SALUTATION DU MATIN -->
     <div style="font-size: 16px; font-weight: 700; color: #111827; margin-bottom: 20px;">
       Bonjour, <?= Utils.escapeHtml(data.recipientName) ?>. Voici votre plan d'action pour aujourd'hui !
     </div>
 
-    <!-- SI TOUT EST CALME -->
+    <!-- ÉTAT CALME SI AUCUN ÉLÉMENT -->
     <? if (data.isCalm) { ?>
     <div style="font-size: 14px; color: #4B5563; margin-bottom: 24px; padding: 12px 16px; background-color: #F9FAFB; border-radius: 6px;">
       &#x2600;&#xFE0F; Tout est calme ce matin. Aucun e-mail critique ni événement urgent à signaler.
     </div>
     <? } ?>
 
-    <!-- SECTION 1 : TOP OF MIND (PRIORITÉS ET ACTIONS) -->
-    <? if (data.topOfMind.length > 0) { ?>
+    <!-- SECTION 1 : PRIORITÉS URGENTES -->
+    <? if (data.urgentPriorities.length > 0) { ?>
     <div style="margin-bottom: 22px;">
-      <div style="font-size: 14px; font-weight: 700; color: #111827; margin-bottom: 8px;">
-        &#x1F9E0; Top of mind
+      <div style="font-size: 14.5px; font-weight: 700; color: #111827; margin-bottom: 8px;">
+        &#x1F9E0; Priorités urgentes
       </div>
       <ul style="margin: 0; padding-left: 20px; list-style-type: disc;">
-        <? for (var i = 0; i < data.topOfMind.length; i++) { 
-             var item = data.topOfMind[i];
+        <? for (var i = 0; i < data.urgentPriorities.length; i++) { 
+             var item = data.urgentPriorities[i];
         ?>
         <li style="margin-bottom: 10px; font-size: 14px; line-height: 1.5; color: #1F2937;">
           <span style="color: #6B7280; font-size: 13px;">&#x23F1; <?= item.timeEstimate ?> &bull; </span>
           <strong><?= Utils.escapeHtml(item.actionTitle) ?></strong> : <?= Utils.escapeHtml(item.context) ?>
           <? if (item.deadline) { ?>
-            <span style="color: #DC2626; font-size: 12.5px; font-weight: 500;">(échéance : <?= Utils.escapeHtml(item.deadline) ?>)</span>
+            <span style="color: #DC2626; font-size: 12.5px; font-weight: 600;">(échéance : <?= Utils.escapeHtml(item.deadline) ?>)</span>
           <? } ?>
           <a href="<?= item.webUrl ?>" target="_blank" style="color: #6B7280; text-decoration: underline; font-size: 12.5px; margin-left: 4px; white-space: nowrap;">&#x1F517; Détails</a>
         </li>
@@ -61,11 +61,11 @@
     <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 18px 0 20px 0;">
     <? } ?>
 
-    <!-- SECTION 2 : FYI (POUR INFORMATION REGROUPÉ PAR THÉMATIQUE) -->
+    <!-- SECTION 2 : POUR INFORMATION (CATÉGORIES INTUITIVES) -->
     <? if (data.fyiCategories.length > 0) { ?>
     <div style="margin-bottom: 22px;">
-      <div style="font-size: 14px; font-weight: 700; color: #111827; margin-bottom: 10px;">
-        &#x1F514; FYI
+      <div style="font-size: 14.5px; font-weight: 700; color: #111827; margin-bottom: 10px;">
+        &#x1F514; Pour information
       </div>
       <ul style="margin: 0; padding-left: 20px; list-style-type: disc;">
         <? for (var g = 0; g < data.fyiCategories.length; g++) { 
@@ -78,8 +78,8 @@
                  var bullet = cat.items[k];
             ?>
             <li style="margin-bottom: 6px; font-size: 13.5px; line-height: 1.45; color: #374151;">
-              <?= bullet.htmlText ?>
-              <a href="<?= bullet.linkUrl ?>" target="_blank" style="color: #6B7280; text-decoration: underline; font-size: 12px; margin-left: 4px; white-space: nowrap;">&#x1F517; <?= bullet.linkText ?></a>
+              <strong><?= Utils.escapeHtml(bullet.prefixBold) ?> :</strong> <?= Utils.escapeHtml(bullet.description) ?>
+              <a href="<?= bullet.linkUrl ?>" target="_blank" style="color: #6B7280; text-decoration: underline; font-size: 12px; margin-left: 4px; white-space: nowrap;">&#x1F517; <?= Utils.escapeHtml(bullet.linkText) ?></a>
             </li>
             <? } ?>
           </ul>
@@ -90,10 +90,10 @@
     <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 18px 0 20px 0;">
     <? } ?>
 
-    <!-- SECTION 3 : CALENDAR (ON YOUR CALENDAR) -->
+    <!-- SECTION 3 : VOTRE PLANNING DU JOUR -->
     <div style="margin-bottom: 22px;">
-      <div style="font-size: 14px; font-weight: 700; color: #111827; margin-bottom: 10px;">
-        &#x1F4C5; On your calendar
+      <div style="font-size: 14.5px; font-weight: 700; color: #111827; margin-bottom: 10px;">
+        &#x1F4C5; Votre planning du jour
       </div>
       <? if (data.todayEvents.length === 0) { ?>
       <div style="font-size: 13.5px; color: #6B7280; margin-left: 20px;">
@@ -107,7 +107,7 @@
         <li style="margin-bottom: 10px; font-size: 14px; line-height: 1.5; color: #1F2937;">
           <strong><?= Utils.escapeHtml(ev.timeFormatted) ?> : <?= Utils.escapeHtml(ev.title) ?></strong>
           <? if (ev.durationFormatted) { ?> <span style="color: #6B7280; font-size: 13px;">(<?= ev.durationFormatted ?>)</span><? } ?>
-          <a href="<?= ev.calendarUrl ?>" target="_blank" style="color: #6B7280; text-decoration: underline; font-size: 12.5px; margin-left: 4px; white-space: nowrap;">&#x1F517; Événement</a>
+          <a href="<?= ev.calendarUrl ?>" target="_blank" style="color: #6B7280; text-decoration: underline; font-size: 12.5px; margin-left: 4px; white-space: nowrap;">&#x1F517; Agenda</a>
 
           <? if (ev.location || ev.conferenceLink) { ?>
           <ul style="margin: 4px 0 0 0; padding-left: 20px; list-style-type: circle;">
@@ -127,7 +127,7 @@
       <? } ?>
     </div>
 
-    <!-- SECTION 4 : À ANTICIPER DEMAIN (SI ÉVÉNEMENTS) -->
+    <!-- SECTION 4 : À ANTICIPER DEMAIN (SI PRÉSENT) -->
     <? if (data.tomorrowEvents.length > 0) { ?>
     <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 18px 0 20px 0;">
     <div style="margin-bottom: 22px;">
@@ -147,11 +147,11 @@
     </div>
     <? } ?>
 
-    <!-- FOOTER GOOGLE CC -->
+    <!-- PIED DE PAGE GOOGLE CC -->
     <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 24px 0 16px 0;">
 
     <div style="font-size: 14px; color: #374151; margin-bottom: 12px;">
-      Have a wonderful day!
+      Passez une excellente journée !
     </div>
 
     <table cellpadding="0" cellspacing="0">

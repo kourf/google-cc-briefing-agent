@@ -1,13 +1,14 @@
 /**
  * Google CC Briefing Agent
- * GeminiService.js — Analyse par Gemini API (Google AI Studio Free Tier), sorties structurées & résilience
+ * GeminiService.js — Intégration de l'API Gemini Developer (Google AI Studio Free Tier),
+ * sorties structurées JSON en français pur, résilience et gestion des quotas.
  */
 
 const GeminiService = (function () {
   /**
-   * Analyse une liste de messages e-mails via l'API Gemini par lots.
+   * Analyse une liste de messages e-mails via l'API Gemini par lots de taille raisonnable.
    * @param {Array<Object>} emailsList - Messages nettoyés
-   * @return {Array<Object>} Messages enrichis avec résumé ELI15, priorités, actions
+   * @return {Array<Object>} Messages enrichis avec résumé ELI15, priorités, actions et catégories françaises
    */
   function analyzeEmails(emailsList) {
     if (!emailsList || emailsList.length === 0) {
@@ -40,7 +41,7 @@ const GeminiService = (function () {
         enrichedResults.push(Object.assign({}, originalMsg, aiData));
       }
 
-      // Petite pause préventive entre les lots pour respecter le rate limit Free Tier (15 RPM)
+      // Pause préventive entre les lots pour respecter le rate limit Free Tier
       if (i + batchSize < emailsList.length) {
         Utilities.sleep(1200);
       }
@@ -50,7 +51,7 @@ const GeminiService = (function () {
   }
 
   /**
-   * Traite un lot avec retry et backoff exponentiel.
+   * Traite un lot avec retry et backoff exponentiel en cas de saturation temporaire (429 ou 503).
    */
   function analyzeBatchWithRetry(batch, apiKey) {
     let model = Config.getGeminiModel();
@@ -96,29 +97,37 @@ const GeminiService = (function () {
     const emailsPayload = batch.map(function (msg) {
       return {
         emailId: msg.id,
-        expediteur: msg.from,
+        expediteur: Utils.cleanSenderName(msg.from),
         destinataireCompte: msg.targetAccount ? msg.targetAccount.label : '',
-        objet: msg.subject,
+        objet: Utils.decodeHtmlEntities(msg.subject),
         date: msg.dateFormatted + ' ' + msg.timeFormatted,
         contenu: msg.body
       };
     });
 
     const systemPrompt =
-      "Tu es l'analyste principal du Google CC Briefing Agent. " +
-      'Pour chaque e-mail fourni, analyse son contenu et fournis une analyse rigoureuse en FRANÇAIS simple : ' +
-      '1. summary : Résumé en français très simple, niveau ELI15 (compréhensible par un adolescent de 15 ans), en 1 à 2 phrases MAXIMUM. ' +
-      'Sois naturel, direct et explicite. Conserve impérativement les noms importants, montants, dates et la demande principale. Évite tout jargon technique. ' +
-      '2. priority : "CRITICAL" (urgent, incident de production, échec de build/déploiement, deadline aujourd\'hui), ' +
-      '"HIGH" (demande importante d\'un client/collaborateur, facture à régler, décision requise), ' +
-      '"MEDIUM" (utile mais sans urgence immédiate), ou "LOW" (newsletter, notification automatique de sécurité ou d\'emploi, promo). ' +
-      '3. actionRequired : true si une action concrète ou une réponse est requise de la part de l\'utilisateur, false sinon. ' +
-      '4. actionTitle : Titre court et percutant de l\'action (ex: "Corriger l\'échec de déploiement GitHub", "Valider le devis client", "Confirmer le rendez-vous"), ou "Aucune action". ' +
-      '5. action : Description concise de ce qu\'il faut faire, ou "Aucune action". ' +
-      '6. needsReply : "oui", "non", ou "probablement". ' +
-      '7. deadline : Échéance explicite ou déduite (ex: "Aujourd\'hui", "Avant 17h", "Demain"), ou "Aucune". ' +
-      '8. category : Choisis impérativement parmi : "Sécurité & Accès", "Opportunités & Emploi", "Projets & Code", "Finance & Factures", "Offres & Achats", "Voyages & Loisirs", "Notifications générales". ' +
-      '9. estimatedActionMinutes : Estimation réaliste en minutes pour traiter l\'action (5, 10, 15, 30...).';
+      "Tu es l'analyste en chef du Google CC Briefing Agent. Ton rôle est de fournir des synthèses matinales limpides, directes et en français très simple.\n\n" +
+      "RÈGLES ABSOLUES SUR LE TEXTE :\n" +
+      "1. Réponds STRICTEMENT en français simple et naturel (niveau ELI15, compréhensible par un adolescent de 15 ans).\n" +
+      "2. N'inclus JAMAIS de balises HTML (comme <strong>, <b>, <em>, <br>) ni de syntaxe Markdown (comme **texte**) à l'intérieur des valeurs texte de ta réponse.\n" +
+      "3. Conserve impérativement les montants d'argent, dates, noms importants et l'action principale. Ne perds aucune information critique.\n\n" +
+      "INSTRUCTIONS SUR LES CHAMPS PAR E-MAIL :\n" +
+      "- summary : Résumé clair de la situation en 1 à 2 phrases courtes maximum.\n" +
+      "- priority : 'CRITICAL' (incident en cours, panne de déploiement, urgence bloquante), 'HIGH' (décision importante requise, facture client, demande directe), 'MEDIUM' (e-mail utile sans urgence), ou 'LOW' (simple notification, alerte de connexion, offre commerciale).\n" +
+      "- actionRequired : true si l'utilisateur doit faire une action ou donner une réponse, false sinon.\n" +
+      "- actionTitle : Titre court et percutant de l'action en quelques mots (ex: 'Examiner l'échec de déploiement GitHub', 'Régler la facture Stripe', 'Valider le devis'). Si aucune action : 'Aucune action'.\n" +
+      "- action : Description simple de ce qu'il faut faire en 1 phrase.\n" +
+      "- needsReply : 'oui', 'non', ou 'probablement'.\n" +
+      "- deadline : Échéance explicite ou déduite (ex: 'Aujourd'hui', 'Avant 17h', 'Demain') ou null si aucune échéance.\n" +
+      "- category : Choisis impérativement l'une de ces catégories françaises exactes :\n" +
+      "  'Sécurité & Alertes',\n" +
+      "  'Opportunités & Emploi',\n" +
+      "  'Achats & Bons plans',\n" +
+      "  'Voyages & Loisirs',\n" +
+      "  'Finance & Factures',\n" +
+      "  'Projets & Code',\n" +
+      "  'Informations générales'.\n" +
+      "- estimatedActionMinutes : Estimation réaliste du temps requis pour agir (5, 10, 15, 30...) ou 0 si aucune action.";
 
     const responseSchema = {
       type: 'ARRAY',
@@ -134,7 +143,18 @@ const GeminiService = (function () {
           action: { type: 'STRING' },
           needsReply: { type: 'STRING', enum: ['oui', 'non', 'probablement'] },
           deadline: { type: 'STRING' },
-          category: { type: 'STRING' },
+          category: {
+            type: 'STRING',
+            enum: [
+              'Sécurité & Alertes',
+              'Opportunités & Emploi',
+              'Achats & Bons plans',
+              'Voyages & Loisirs',
+              'Finance & Factures',
+              'Projets & Code',
+              'Informations générales'
+            ]
+          },
           estimatedActionMinutes: { type: 'INTEGER' }
         },
         required: ['emailId', 'summary', 'priority', 'actionRequired', 'actionTitle', 'action', 'needsReply', 'category']
@@ -149,7 +169,7 @@ const GeminiService = (function () {
             {
               text:
                 systemPrompt +
-                '\n\nVoici les e-mails à analyser sous forme JSON :\n' +
+                '\n\nVoici les e-mails à analyser :\n' +
                 JSON.stringify(emailsPayload)
             }
           ]
@@ -199,14 +219,14 @@ const GeminiService = (function () {
         const item = parsedArray[i];
         if (item && item.emailId) {
           resultMap[item.emailId] = {
-            summary: item.summary || 'Résumé indisponible.',
+            summary: Utils.stripHtmlAndMarkdown(item.summary || 'Résumé indisponible.'),
             priority: item.priority || 'MEDIUM',
             actionRequired: Boolean(item.actionRequired),
-            actionTitle: item.actionTitle || (item.actionRequired ? 'Action requise' : 'Aucune action'),
-            action: item.action || 'Aucune action',
+            actionTitle: Utils.stripHtmlAndMarkdown(item.actionTitle || (item.actionRequired ? 'Action requise' : 'Aucune action')),
+            action: Utils.stripHtmlAndMarkdown(item.action || 'Aucune action'),
             needsReply: item.needsReply || 'non',
-            deadline: item.deadline && item.deadline !== 'Aucune' ? item.deadline : null,
-            category: item.category || 'Général',
+            deadline: item.deadline && item.deadline !== 'Aucune' ? Utils.stripHtmlAndMarkdown(item.deadline) : null,
+            category: item.category || 'Informations générales',
             estimatedActionMinutes: item.estimatedActionMinutes || 0
           };
         }
@@ -221,14 +241,14 @@ const GeminiService = (function () {
    */
   function getFallbackAiData(msg) {
     return {
-      summary: msg.subject ? 'Objet : ' + msg.subject : 'Nouveau message reçu.',
+      summary: msg.subject ? 'Objet : ' + Utils.stripHtmlAndMarkdown(msg.subject) : 'Nouveau message reçu.',
       priority: 'MEDIUM',
       actionRequired: false,
       actionTitle: 'Aucune action',
       action: 'Vérifier l’e-mail directement si nécessaire.',
       needsReply: 'non',
       deadline: null,
-      category: 'Notifications générales',
+      category: 'Informations générales',
       estimatedActionMinutes: 2
     };
   }
