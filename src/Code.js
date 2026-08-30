@@ -1,7 +1,25 @@
 /**
- * Google CC Briefing Agent
- * Code.js — Points d'entrée publics, orchestration et cycle de vie
+ * Initialisation complète en 1 clic : configure la clé, installe le déclencheur à 06:00 et lance le test !
  */
+function setupProjectAndRunTest() {
+  console.log('=== INITIALISATION COMPLÈTE DU PROJET ===');
+  
+  // 1. Initialisation de la clé API Gemini
+  const apiKey = Config.getGeminiApiKey();
+  console.log('✓ Clé Gemini configurée.');
+
+  // 2. Initialisation du checkpoint de production
+  setupInitialCheckpoint();
+  console.log('✓ Checkpoint initial enregistré (vos anciens e-mails ne seront pas retraités).');
+
+  // 3. Installation du déclencheur quotidien automatique (06:00 Paris)
+  installDailyTrigger();
+  console.log('✓ Déclencheur quotidien configuré pour 06:00.');
+
+  // 4. Lancement immédiat du test
+  console.log('✓ Lancement du briefing test...');
+  runBriefingTest();
+}
 
 /**
  * Exécution principale de Production (appelée automatiquement par le déclencheur quotidien).

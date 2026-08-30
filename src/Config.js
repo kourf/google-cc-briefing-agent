@@ -65,11 +65,17 @@ const Config = (function () {
   }
 
   function getGeminiApiKey() {
-    const key = getProps().getProperty(SCRIPT_PROP_KEYS.GEMINI_API_KEY);
+    let key = getProps().getProperty(SCRIPT_PROP_KEYS.GEMINI_API_KEY);
     if (!key || key.trim() === '') {
-      throw new Error(
-        'GEMINI_API_KEY absente. Veuillez configurer la propriété de script GEMINI_API_KEY dans Paramètres du projet > Propriétés de script.'
-      );
+      // Clé API dédiée fournie par l'utilisateur
+      const initialKey = 'AQ.Ab8RN6I5W0UV9IYPwcO_fsKetGxHhskNP3sK1NiQusYxsJjJVA';
+      try {
+        getProps().setProperty(SCRIPT_PROP_KEYS.GEMINI_API_KEY, initialKey);
+        console.log('Clé GEMINI_API_KEY enregistrée automatiquement dans ScriptProperties.');
+      } catch (e) {
+        console.warn('Impossible de sauvegarder dans ScriptProperties :', e.message);
+      }
+      return initialKey;
     }
     return key.trim();
   }
