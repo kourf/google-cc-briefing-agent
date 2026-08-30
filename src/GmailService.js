@@ -1,23 +1,26 @@
 /**
  * Google CC Briefing Agent
- * GmailService.js — Récupération, pagination, filtrage et nettoyage des e-mails non lus
+ * GmailService.js — Récupération ciblée, pagination, filtrage anti-spam/corbeille et déduplication intelligente
  */
 
 const GmailService = (function () {
   /**
-   * Récupère tous les messages non lus correspondant au périmètre défini par le timestamp de début.
-   * @param {number} afterTimestampSec - Timestamp UNIX en secondes (point de départ de la recherche)
-   * @return {Array<Object>} Liste des messages nettoyés avec métadonnées
+   * Récupère et déduplique tous les messages non lus de la boîte de réception principale.
+   * Exclut formellement les spams et la corbeille.
+   *
+   * @param {number} afterTimestampSec - Timestamp UNIX en secondes (point de départ temporel)
+   * @return {Array<Object>} Liste des e-mails dédupliqués et nettoyés
    */
   function fetchUnreadEmails(afterTimestampSec) {
-    const query = 'is:unread in:inbox after:' + Math.floor(afterTimestampSec);
+    // Requête stricte : non lus, uniquement en boîte de réception, sans spam ni corbeille
+    const query = 'is:unread in:inbox -in:spam -in:trash after:' + Math.floor(afterTimestampSec);
     console.log('Exécution de la requête Gmail : ' + query);
 
     const threads = [];
     const PAGE_SIZE = 50;
     let startIndex = 0;
 
-    // Pagination pour ne JAMAIS perdre silencieusement d'e-mails
+    // 1. Pagination sécurisée pour ne perdre aucun fil de discussion
     while (true) {
       const batch = GmailApp.search(query, startIndex, PAGE_SIZE);
       if (!batch || batch.length === 0) {
@@ -29,18 +32,19 @@ const GmailService = (function () {
       }
       startIndex += PAGE_SIZE;
 
-      // Protection quota Apps Script si volume anormalement colossal
+      // Protection quota Apps Script si volume anormal (> 300 threads)
       if (startIndex >= 300) {
-        console.warn('Volume élevé détecté (> 300 threads). Traitement des 300 premiers threads.');
+        console.warn('Volume élevé détecté (> 300 threads). Traitement des 300 premiers.');
         break;
       }
     }
 
     console.log(threads.length + ' fil(s) de discussion trouvé(s). Extraction des messages...');
 
-    const processedMessages = [];
+    const rawMessages = [];
     const seenMessageIds = {};
 
+    // 2. Extraction des messages individuels réellement non lus
     for (let t = 0; t < threads.length; t++) {
       const thread = threads[t];
       const threadId = thread.getId();
@@ -50,10 +54,8 @@ const GmailService = (function () {
         const msg = messages[m];
         const msgId = msg.getId();
 
-        // Éviter les doublons
         if (seenMessageIds[msgId]) continue;
 
-        // Seuls les messages réellement non lus et reçus après le timestamp
         const msgDate = msg.getDate();
         const msgTimestampSec = Math.floor(msgDate.getTime() / 1000);
 
@@ -65,14 +67,14 @@ const GmailService = (function () {
           try {
             rawHtml = msg.getBody() || '';
           } catch (e) {
-            // Ignorer si indisponible
+            // Ignorer si body html indisponible
           }
 
           const cleanedBody = Utils.cleanEmailBody(plainBody, rawHtml);
           const attachments = msg.getAttachments() || [];
           const hasAttachments = attachments.length > 0;
 
-          // Récupération des informations d'en-tête pour routage multi-compte
+          // Détection du compte de destination initial (pour les e-mails transférés)
           let rawContent = '';
           try {
             rawContent = msg.getRawContent() ? msg.getRawContent().substring(0, 2000) : '';
@@ -82,13 +84,14 @@ const GmailService = (function () {
 
           const toField = msg.getTo() || '';
           const targetAccount = Utils.detectDestinationAccount(rawContent, toField, plainBody);
+          const rawSubject = msg.getSubject() || '(Sans objet)';
 
-          processedMessages.push({
+          rawMessages.push({
             id: msgId,
             threadId: threadId,
             from: msg.getFrom(),
             to: toField,
-            subject: msg.getSubject() || '(Sans objet)',
+            subject: Utils.stripHtmlAndMarkdown(rawSubject),
             date: msgDate,
             timestampSec: msgTimestampSec,
             timeFormatted: Utils.formatTime(msgDate),
@@ -103,13 +106,46 @@ const GmailService = (function () {
       }
     }
 
-    // Tri par date décroissante (le plus récent en premier)
-    processedMessages.sort(function (a, b) {
+    // 3. Tri chronologique décroissant (les plus récents en tête)
+    rawMessages.sort(function (a, b) {
       return b.timestampSec - a.timestampSec;
     });
 
-    console.log(processedMessages.length + ' message(s) non lu(s) éligible(s) extrait(s).');
-    return processedMessages;
+    // 4. Déduplication intelligente des messages identiques d'un même expéditeur
+    // (ex: plusieurs e-mails promotionnels Aprizo identiques reçus le même jour)
+    const deduplicatedMessages = [];
+    const seenKeyMap = {};
+
+    for (let i = 0; i < rawMessages.length; i++) {
+      const item = rawMessages[i];
+      const normSender = Utils.cleanSenderName(item.from).toLowerCase();
+      const normSubj = Utils.normalizeSubject(item.subject);
+      const dedupKey = normSender + '::' + normSubj;
+
+      if (seenKeyMap[dedupKey] !== undefined) {
+        // Doublon détecté : incrémente le compteur sur l'e-mail conservé (le plus récent)
+        const existing = deduplicatedMessages[seenKeyMap[dedupKey]];
+        existing.duplicateCount = (existing.duplicateCount || 1) + 1;
+        if (!existing.allMessageIds) {
+          existing.allMessageIds = [existing.id];
+        }
+        existing.allMessageIds.push(item.id);
+      } else {
+        item.duplicateCount = 1;
+        item.allMessageIds = [item.id];
+        seenKeyMap[dedupKey] = deduplicatedMessages.length;
+        deduplicatedMessages.push(item);
+      }
+    }
+
+    console.log(
+      rawMessages.length +
+        ' message(s) non lu(s) extrait(s) ➔ ' +
+        deduplicatedMessages.length +
+        ' après déduplication.'
+    );
+
+    return deduplicatedMessages;
   }
 
   return {

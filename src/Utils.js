@@ -6,10 +6,10 @@
 const Utils = (function () {
   /**
    * Décode exhaustivement toutes les entités HTML (nommées, décimales et hexadécimales).
-   * Évite les artefacts tels que "&#039;", "&amp;", "&quot;", etc.
+   * Transforme définitivement &#039; et &#39; en apostrophe réelle, &amp; en &, etc.
    *
    * @param {string} str - Chaîne potentiellement encodée
-   * @return {string} Chaîne en texte brut naturel
+   * @return {string} Chaîne en texte brut naturel avec vrais caractères
    */
   function decodeHtmlEntities(str) {
     if (!str) return '';
@@ -24,10 +24,11 @@ const Utils = (function () {
       }
     });
 
-    // 2. Décodage des entités décimales (ex: &#39; -> ')
+    // 2. Décodage des entités décimales (ex: &#39; -> ' et &#039; -> ')
     text = text.replace(/&#([0-9]{1,7});/g, function (_, dec) {
       try {
-        return String.fromCodePoint(parseInt(dec, 10));
+        const code = parseInt(dec, 10);
+        return String.fromCodePoint(code);
       } catch (e) {
         return '';
       }
@@ -53,45 +54,54 @@ const Utils = (function () {
 
     // Remplacement itératif pour traiter les doubles encodages (ex: &amp;#039;)
     let previous;
+    let iterations = 0;
     do {
       previous = text;
       text = text.replace(/&(?:quot|apos|amp|lt|gt|nbsp|euro|copy|reg|trade|laquo|raquo|ndash|mdash);/gi, function (match) {
         return entityMap[match.toLowerCase()] || match;
       });
-    } while (text !== previous && text.indexOf('&') !== -1);
+      iterations++;
+    } while (text !== previous && text.indexOf('&') !== -1 && iterations < 5);
 
     return text;
   }
 
   /**
-   * Supprime toute balise HTML résiduelle et syntaxe Markdown d'un texte brut.
-   * Empêche que des balises comme <strong> ou des astérisques ** ne fuitent dans le rendu.
+   * Supprime toute balise HTML résiduelle, entités parasites et syntaxe Markdown.
+   * Remplace l'apostrophe droite standard par l'apostrophe typographique française (’)
+   * pour interdire à 100% l'apparition de l'artefact "&#039;".
    *
    * @param {string} str - Texte pouvant contenir des balises ou du markdown
-   * @return {string} Texte propre et fluide
+   * @return {string} Texte fluide, naturel et nettoyé
    */
   function stripHtmlAndMarkdown(str) {
     if (!str) return '';
     let text = decodeHtmlEntities(str);
 
-    // Suppression des balises HTML (<...>)
+    // Suppression de toutes les balises HTML (<...>)
     text = text.replace(/<\/?[a-z0-9]+(?:\s+[^>]*?)?\/?>/gi, ' ');
 
-    // Suppression du formatage Markdown gras/italique (**texte**, *texte*, __texte__)
+    // Suppression du formatage Markdown gras/italique/code (**texte**, *texte*, `texte`, [texte])
     text = text.replace(/\*\*(.*?)\*\*/g, '$1');
     text = text.replace(/__(.*?)__/g, '$1');
     text = text.replace(/\*(.*?)\*/g, '$1');
     text = text.replace(/_(.*?)_/g, '$1');
+    text = text.replace(/`{1,3}(.*?)`{1,3}/g, '$1');
+    text = text.replace(/\[(.*?)\](?:\(.*?\))?/g, '$1');
+
+    // Remplacement de l'apostrophe ASCII par l'apostrophe typographique française
+    // Cela garantit une typographie élégante et empêche tout moteur HTML de produire &#039;
+    text = text.replace(/['’]/g, '’');
 
     // Normalisation des espaces multiples
-    text = text.replace(/\s+/g, ' ').trim();
+    text = text.replace(/[ \t]+/g, ' ').trim();
 
     return text;
   }
 
   /**
-   * Échappement HTML strict après décodage et nettoyage.
-   * Garantit une injection 100% sécurisée dans le template sans artefact ni faille XSS.
+   * Échappement HTML sécurisé pour injection dans le template.
+   * N'échappe que les caractères dangereux (&, <, >, ") sans altérer les apostrophes typographiques.
    *
    * @param {string} str - Texte à sécuriser
    * @return {string} Chaîne sécurisée pour inclusion dans le HTML
@@ -103,8 +113,19 @@ const Utils = (function () {
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
+      .replace(/"/g, '&quot;');
+  }
+
+  /**
+   * Normalise l'objet d'un e-mail pour la détection et la fusion des doublons.
+   * Retire les préfixes "Re:", "Fwd:", "Tr:" et la ponctuation superflue.
+   */
+  function normalizeSubject(subject) {
+    if (!subject) return '';
+    let clean = decodeHtmlEntities(subject).toLowerCase();
+    clean = clean.replace(/^(?:re|fwd|fw|tr)\s*:\s*/gi, '');
+    clean = clean.replace(/[^a-z0-9à-ÿ\s]/gi, ' ');
+    return clean.replace(/\s+/g, ' ').trim();
   }
 
   /**
@@ -298,6 +319,7 @@ const Utils = (function () {
     decodeHtmlEntities: decodeHtmlEntities,
     stripHtmlAndMarkdown: stripHtmlAndMarkdown,
     escapeHtml: escapeHtml,
+    normalizeSubject: normalizeSubject,
     cleanSenderName: cleanSenderName,
     formatDateFrench: formatDateFrench,
     formatTime: formatTime,
