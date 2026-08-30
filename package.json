@@ -1,0 +1,26 @@
+{
+  "name": "google-cc-briefing-agent",
+  "version": "1.0.0",
+  "description": "Assistant de briefing quotidien automatique Gmail & Google Calendar propulsé par Gemini AI",
+  "main": "Code.js",
+  "scripts": {
+    "push": "clasp push",
+    "pull": "clasp pull",
+    "open": "clasp open",
+    "login": "clasp login",
+    "create": "clasp create --type standalone --title \"Google CC Briefing Agent\""
+  },
+  "keywords": [
+    "apps-script",
+    "gmail",
+    "calendar",
+    "gemini",
+    "ai",
+    "briefing"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@google/clasp": "^2.4.2"
+  }
+}
