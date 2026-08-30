@@ -41,6 +41,8 @@ const BriefingService = (function () {
     }
 
     // 2. Regroupement thématique en français des e-mails informatifs (FYI)
+    // Même en cas d'indisponibilité partielle de l'API Gemini (mode dégradé), les e-mails
+    // de secours sont classés proprement sous "Informations générales" sans faire échouer le briefing.
     const fyiCategories = groupFyiEmails(fyiPool);
 
     const todayDate = new Date();

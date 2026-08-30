@@ -23,7 +23,7 @@ const Config = (function () {
     GEMINI_FALLBACK_MODEL: 'gemini-3.7-flash',
     GEMINI_API_BASE_URL: 'https://generativelanguage.googleapis.com/v1beta/models',
     BATCH_SIZE: 6,
-    MAX_RETRIES: 3,
+    MAX_RETRIES: 4,
     INITIAL_BACKOFF_MS: 1500,
     LOCK_TIMEOUT_MS: 30000,
     MAX_BODY_CHARS: 3500 // Longueur maximale par e-mail après nettoyage pour respecter les tokens

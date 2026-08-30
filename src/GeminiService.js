@@ -1,14 +1,17 @@
 /**
  * Google CC Briefing Agent
- * GeminiService.js — Intégration de l'API Gemini Developer (Google AI Studio Free Tier),
- * sorties structurées JSON en français pur, résilience et gestion des quotas.
+ * GeminiService.js — Intégration résiliente de l'API Gemini Developer (Google AI Studio),
+ * avec retry automatique, backoff exponentiel avec gigue (jitter), protection anti-saturation
+ * et mode dégradé gracieux (Graceful Fallback).
  */
 
 const GeminiService = (function () {
   /**
    * Analyse une liste de messages e-mails via l'API Gemini par lots de taille raisonnable.
+   * Protège contre les pics de charge et les pannes temporaires (HTTP 429, 500, 503, 504).
+   *
    * @param {Array<Object>} emailsList - Messages nettoyés
-   * @return {Array<Object>} Messages enrichis avec résumé ELI15, priorités, actions et catégories françaises
+   * @return {Array<Object>} Messages enrichis avec résumés, priorités et catégories
    */
   function analyzeEmails(emailsList) {
     if (!emailsList || emailsList.length === 0) {
@@ -17,21 +20,24 @@ const GeminiService = (function () {
 
     const apiKey = Config.getGeminiApiKey();
     const batchSize = Config.DEFAULTS.BATCH_SIZE;
+    const totalBatches = Math.ceil(emailsList.length / batchSize);
     const enrichedResults = [];
 
     for (let i = 0; i < emailsList.length; i += batchSize) {
+      const batchIndex = Math.floor(i / batchSize) + 1;
       const batch = emailsList.slice(i, i + batchSize);
+
       console.log(
         'Analyse du lot Gemini ' +
-          (Math.floor(i / batchSize) + 1) +
+          batchIndex +
           '/' +
-          Math.ceil(emailsList.length / batchSize) +
+          totalBatches +
           ' (' +
           batch.length +
           ' e-mails)...'
       );
 
-      const batchAnalysis = analyzeBatchWithRetry(batch, apiKey);
+      const batchAnalysis = analyzeBatchWithRetry(batch, apiKey, batchIndex, totalBatches);
 
       // Fusion des résultats structurés avec les métadonnées locales
       for (let b = 0; b < batch.length; b++) {
@@ -41,9 +47,9 @@ const GeminiService = (function () {
         enrichedResults.push(Object.assign({}, originalMsg, aiData));
       }
 
-      // Pause préventive entre les lots pour respecter le rate limit Free Tier
+      // Pause préventive entre les lots pour lisser la consommation de quota (anti-rate-spike)
       if (i + batchSize < emailsList.length) {
-        Utilities.sleep(1200);
+        Utilities.sleep(800);
       }
     }
 
@@ -51,44 +57,91 @@ const GeminiService = (function () {
   }
 
   /**
-   * Traite un lot avec retry et backoff exponentiel en cas de saturation temporaire (429 ou 503).
+   * Traite un lot avec boucle de retry et backoff exponentiel avec gigue.
+   * Gère gracieusement les erreurs temporaires (429, 500, 502, 503, 504) et la bascule de modèle (404).
    */
-  function analyzeBatchWithRetry(batch, apiKey) {
+  function analyzeBatchWithRetry(batch, apiKey, batchIndex, totalBatches) {
     let model = Config.getGeminiModel();
-    let retries = 0;
-    let delay = Config.DEFAULTS.INITIAL_BACKOFF_MS;
+    const maxAttempts = Config.DEFAULTS.MAX_RETRIES || 4;
+    const baseDelayMs = Config.DEFAULTS.INITIAL_BACKOFF_MS || 1500;
+    const transientStatusCodes = [429, 500, 502, 503, 504];
 
-    while (retries < Config.DEFAULTS.MAX_RETRIES) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         return callGeminiApi(batch, apiKey, model);
       } catch (e) {
-        console.warn('Erreur Gemini (tentative ' + (retries + 1) + ') : ' + e.message);
+        const statusCode = e.statusCode || 0;
+        const sanitizedMsg = Utils.redactSensitive(e.message);
 
-        // Si le modèle n'est pas trouvé (404), basculer sur le modèle de fallback
-        if (e.message.indexOf('404') !== -1 && model !== Config.DEFAULTS.GEMINI_FALLBACK_MODEL) {
-          console.info('Bascule automatique sur le modèle de secours : ' + Config.DEFAULTS.GEMINI_FALLBACK_MODEL);
+        // 1. Cas spécifique 404 : Modèle déprécié ou indisponible -> Bascule immédiate sur le fallback
+        if (statusCode === 404 && model !== Config.DEFAULTS.GEMINI_FALLBACK_MODEL) {
+          console.warn(
+            'Modèle ' +
+              model +
+              ' non disponible (404). Bascule automatique sur ' +
+              Config.DEFAULTS.GEMINI_FALLBACK_MODEL
+          );
           model = Config.DEFAULTS.GEMINI_FALLBACK_MODEL;
+          // Retente immédiatement avec le nouveau modèle sans consommer le compteur d'attente
+          attempt--;
           continue;
         }
 
-        retries++;
-        if (retries >= Config.DEFAULTS.MAX_RETRIES) {
-          console.error('Échec définitif du lot Gemini après ' + retries + ' tentatives.');
+        // 2. Erreurs non récupérables (ex: 400 Bad Request, 401 Unauthorized / clé invalide)
+        if (statusCode > 0 && !transientStatusCodes.includes(statusCode) && statusCode !== 404) {
+          console.error(
+            'Erreur non récupérable de l’API Gemini (' +
+              sanitizedMsg +
+              '). Bascule immédiate en mode dégradé pour le lot ' +
+              batchIndex +
+              '.'
+          );
           break;
         }
 
-        // Backoff exponentiel
-        Utilities.sleep(delay);
-        delay *= 2;
+        // 3. Erreurs temporaires (429 rate limit, 503 haute demande, 500/502/504 serveur, coupure réseau)
+        if (attempt < maxAttempts) {
+          const delay = Utils.calculateBackoffWithJitter(attempt, baseDelayMs);
+          console.warn(
+            'API Gemini temporairement indisponible (' +
+              sanitizedMsg +
+              '). Tentative ' +
+              attempt +
+              '/' +
+              maxAttempts +
+              ' — Nouvelle tentative dans ' +
+              delay +
+              ' ms...'
+          );
+          Utilities.sleep(delay);
+        } else {
+          console.error(
+            'Échec définitif du lot ' +
+              batchIndex +
+              '/' +
+              totalBatches +
+              ' après ' +
+              maxAttempts +
+              ' tentatives (' +
+              sanitizedMsg +
+              '). Bascule en mode dégradé sécurisé.'
+          );
+        }
       }
     }
 
-    // En cas d'échec complet du lot, retourner un dictionnaire vide (les messages utiliseront le fallback sécurisé)
-    return {};
+    // Graceful Batch Fallback : Génère des fiches de secours propres pour chaque e-mail du lot
+    const fallbackResult = {};
+    for (let i = 0; i < batch.length; i++) {
+      const msg = batch[i];
+      fallbackResult[msg.id] = getFallbackAiData(msg);
+    }
+    return fallbackResult;
   }
 
   /**
    * Effectue la requête HTTP vers la Gemini Developer API avec schéma structuré JSON forcé.
+   * Masque toute clé d'API dans les messages d'erreur et attache le code HTTP à l'objet Exception.
    */
   function callGeminiApi(batch, apiKey, model) {
     const endpoint =
@@ -189,12 +242,30 @@ const GeminiService = (function () {
       muteHttpExceptions: true
     };
 
-    const response = UrlFetchApp.fetch(endpoint, options);
+    let response;
+    try {
+      response = UrlFetchApp.fetch(endpoint, options);
+    } catch (networkErr) {
+      const netEx = new Error('Erreur réseau de communication avec l’API : ' + networkErr.message);
+      netEx.statusCode = 0;
+      throw netEx;
+    }
+
     const statusCode = response.getResponseCode();
     const responseText = response.getContentText();
 
     if (statusCode !== 200) {
-      throw new Error('HTTP ' + statusCode + ' : ' + responseText.substring(0, 300));
+      let parsedMessage = responseText.substring(0, 200);
+      try {
+        const errJson = JSON.parse(responseText);
+        if (errJson && errJson.error && errJson.error.message) {
+          parsedMessage = errJson.error.message;
+        }
+      } catch (_) {}
+
+      const err = new Error('HTTP ' + statusCode + ' : ' + parsedMessage);
+      err.statusCode = statusCode;
+      throw err;
     }
 
     const data = JSON.parse(responseText);
@@ -208,7 +279,9 @@ const GeminiService = (function () {
       data.candidates[0].content.parts[0].text;
 
     if (!candidateText) {
-      throw new Error('Réponse Gemini vide ou format inattendu.');
+      const emptyErr = new Error('Réponse Gemini vide ou format inattendu.');
+      emptyErr.statusCode = 502;
+      throw emptyErr;
     }
 
     const parsedArray = JSON.parse(candidateText);
@@ -237,11 +310,14 @@ const GeminiService = (function () {
   }
 
   /**
-   * Données de secours fiables si Gemini ne parvient pas à analyser un message particulier.
+   * Données de secours fiables (Graceful Fallback) si Gemini ne parvient pas à analyser un message particulier.
+   * Présente proprement l'expéditeur et l'objet sans bloquer le briefing.
    */
   function getFallbackAiData(msg) {
+    const sender = Utils.cleanSenderName(msg.from);
+    const subject = Utils.stripHtmlAndMarkdown(msg.subject) || 'Nouveau message reçu';
     return {
-      summary: msg.subject ? 'Objet : ' + Utils.stripHtmlAndMarkdown(msg.subject) : 'Nouveau message reçu.',
+      summary: sender + ' : ' + subject,
       priority: 'MEDIUM',
       actionRequired: false,
       actionTitle: 'Aucune action',

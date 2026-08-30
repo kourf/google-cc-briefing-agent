@@ -270,6 +270,30 @@ const Utils = (function () {
     return mins > 0 ? hours + ' h ' + (mins < 10 ? '0' : '') + mins : hours + ' h';
   }
 
+  /**
+   * Masque les données sensibles (clés d'API, tokens) des logs et messages d'erreur.
+   */
+  function redactSensitive(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/key=[a-zA-Z0-9._-]+/gi, 'key=[MASQUÉ]')
+      .replace(/Bearer\s+[a-zA-Z0-9._-]+/gi, 'Bearer [MASQUÉ]')
+      .replace(/AIza[0-9A-Za-z-_]{35}/g, '[MASQUÉ]')
+      .replace(/AQ\.[a-zA-Z0-9._-]+/g, '[MASQUÉ]');
+  }
+
+  /**
+   * Calcule le délai d'attente exponentiel avec gigue aléatoire (jitter).
+   * Formule : baseDelayMs * 2^(attempt - 1) + jitter aléatoire (100 à 400 ms).
+   */
+  function calculateBackoffWithJitter(attempt, baseDelayMs) {
+    const base = baseDelayMs || 1500;
+    const exponent = Math.max(0, attempt - 1);
+    const exponentialDelay = base * Math.pow(2, exponent);
+    const jitter = Math.floor(Math.random() * 400) + 100;
+    return Math.min(exponentialDelay + jitter, 30000);
+  }
+
   return {
     decodeHtmlEntities: decodeHtmlEntities,
     stripHtmlAndMarkdown: stripHtmlAndMarkdown,
@@ -281,6 +305,8 @@ const Utils = (function () {
     detectDestinationAccount: detectDestinationAccount,
     buildGmailUrl: buildGmailUrl,
     buildCalendarUrl: buildCalendarUrl,
-    formatDuration: formatDuration
+    formatDuration: formatDuration,
+    redactSensitive: redactSensitive,
+    calculateBackoffWithJitter: calculateBackoffWithJitter
   };
 })();
