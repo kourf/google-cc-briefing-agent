@@ -23,7 +23,18 @@ const Utils = (function () {
    */
   function formatDateFrench(date) {
     if (!date) return '';
-    return Utilities.formatDate(date, Config.DEFAULTS.TIMEZONE, "EEEE d MMMM yyyy", "fr_FR");
+    try {
+      const formatted = date.toLocaleDateString('fr-FR', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        timeZone: Config.DEFAULTS.TIMEZONE
+      });
+      return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+    } catch (e) {
+      return Utilities.formatDate(date, Config.DEFAULTS.TIMEZONE, 'dd/MM/yyyy');
+    }
   }
 
   /**
