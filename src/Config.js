@@ -1,6 +1,6 @@
 /**
  * Google CC Briefing Agent
- * Config.js — Configuration centralisée & gestion des Script Properties
+ * Config.js — Configuration centralisée, modèles Gemini ultra-rapides et gestion des Script Properties
  */
 
 const Config = (function () {
@@ -19,14 +19,18 @@ const Config = (function () {
     BRIEFING_RECIPIENT_EMAIL: 'kouroufia15@gmail.com',
     WEEKEND_ENABLED: true,
     TEST_LOOKBACK_HOURS: 24,
-    GEMINI_MODEL: 'gemini-3.6-flash',
-    GEMINI_FALLBACK_MODEL: 'gemini-3.7-flash',
+    // Modèle principal optimisé pour la vitesse (< 2s par lot) et haute disponibilité
+    GEMINI_MODEL: 'gemini-flash-lite-latest',
+    // Modèle de secours officiel
+    GEMINI_FALLBACK_MODEL: 'gemini-flash-latest',
     GEMINI_API_BASE_URL: 'https://generativelanguage.googleapis.com/v1beta/models',
     BATCH_SIZE: 6,
     MAX_RETRIES: 4,
     INITIAL_BACKOFF_MS: 1500,
+    MAX_OUTPUT_TOKENS: 2048,
+    TEMPERATURE: 0.2,
     LOCK_TIMEOUT_MS: 30000,
-    MAX_BODY_CHARS: 3500 // Longueur maximale par e-mail après nettoyage pour respecter les tokens
+    MAX_BODY_CHARS: 1200 // Optimisé pour réduire les tokens et accélérer l'analyse sous 60s
   };
 
   // Comptes connus pour le routage et l'étiquetage des messages transférés
@@ -52,73 +56,93 @@ const Config = (function () {
     {
       email: 'dkouroufia27@outlook.fr',
       label: 'Ancien Perso',
-      type: 'legacy',
-      badgeBg: '#FAF5FF',
-      badgeColor: '#6B21A8',
-      badgeBorder: '#E9D5FF',
+      type: 'old_personal',
+      badgeBg: '#F5F3FF',
+      badgeColor: '#6D28D9',
+      badgeBorder: '#DDD6FE',
       icon: '✉️'
     }
   ];
 
-  function getProps() {
-    return PropertiesService.getScriptProperties();
+  function getScriptProperty(key, defaultValue) {
+    try {
+      const val = PropertiesService.getScriptProperties().getProperty(key);
+      if (val !== null && val !== undefined && val !== '') {
+        return val;
+      }
+    } catch (e) {
+      console.warn('Impossible de lire la Script Property ' + key + ' : ' + e.message);
+    }
+    return defaultValue;
+  }
+
+  function setScriptProperty(key, value) {
+    try {
+      PropertiesService.getScriptProperties().setProperty(key, String(value));
+    } catch (e) {
+      console.error('Impossible d’écrire la Script Property ' + key + ' : ' + e.message);
+    }
   }
 
   function getGeminiApiKey() {
-    let key = getProps().getProperty(SCRIPT_PROP_KEYS.GEMINI_API_KEY);
-    if (!key || key.trim() === '') {
-      // Clé API dédiée fournie par l'utilisateur
-      const initialKey = 'AQ.Ab8RN6I5W0UV9IYPwcO_fsKetGxHhskNP3sK1NiQusYxsJjJVA';
-      try {
-        getProps().setProperty(SCRIPT_PROP_KEYS.GEMINI_API_KEY, initialKey);
-        console.log('Clé GEMINI_API_KEY enregistrée automatiquement dans ScriptProperties.');
-      } catch (e) {
-        console.warn('Impossible de sauvegarder dans ScriptProperties :', e.message);
-      }
-      return initialKey;
+    let key = getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_API_KEY, null);
+    if (!key) {
+      const fallbackKey = 'AQ.Ab8RN6I5W0UV9IYPwcO_fsKetGxHhskNP3sK1NiQusYxsJjJVA';
+      console.info('Initialisation automatique de GEMINI_API_KEY dans les Script Properties.');
+      setScriptProperty(SCRIPT_PROP_KEYS.GEMINI_API_KEY, fallbackKey);
+      key = fallbackKey;
     }
-    return key.trim();
+    return key;
   }
 
   function getRecipientEmail() {
-    const custom = getProps().getProperty(SCRIPT_PROP_KEYS.BRIEFING_RECIPIENT_EMAIL);
-    if (custom && custom.trim()) {
-      return custom.trim();
-    }
-    return DEFAULTS.BRIEFING_RECIPIENT_EMAIL;
+    return getScriptProperty(SCRIPT_PROP_KEYS.BRIEFING_RECIPIENT_EMAIL, DEFAULTS.BRIEFING_RECIPIENT_EMAIL);
   }
 
   function isWeekendEnabled() {
-    const val = getProps().getProperty(SCRIPT_PROP_KEYS.WEEKEND_ENABLED);
-    if (val === null || val === undefined) {
-      return DEFAULTS.WEEKEND_ENABLED;
-    }
-    return val.toLowerCase() === 'true';
+    const val = getScriptProperty(SCRIPT_PROP_KEYS.WEEKEND_ENABLED, String(DEFAULTS.WEEKEND_ENABLED));
+    return val === 'true';
   }
 
   function getTestLookbackHours() {
-    const val = getProps().getProperty(SCRIPT_PROP_KEYS.TEST_LOOKBACK_HOURS);
-    if (val) {
-      const parsed = parseInt(val, 10);
-      if (!isNaN(parsed) && parsed > 0) return parsed;
-    }
-    return DEFAULTS.TEST_LOOKBACK_HOURS;
+    const val = getScriptProperty(SCRIPT_PROP_KEYS.TEST_LOOKBACK_HOURS, String(DEFAULTS.TEST_LOOKBACK_HOURS));
+    const num = parseInt(val, 10);
+    return isNaN(num) ? DEFAULTS.TEST_LOOKBACK_HOURS : num;
   }
 
   function getGeminiModel() {
-    const val = getProps().getProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL);
-    return val && val.trim() ? val.trim() : DEFAULTS.GEMINI_MODEL;
+    return getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, DEFAULTS.GEMINI_MODEL);
+  }
+
+  function getLastCheckpointTime() {
+    const val = getScriptProperty(SCRIPT_PROP_KEYS.LAST_CHECKPOINT_TIME, null);
+    return val ? parseInt(val, 10) : null;
+  }
+
+  function setLastCheckpointTime(timestampMs) {
+    setScriptProperty(SCRIPT_PROP_KEYS.LAST_CHECKPOINT_TIME, timestampMs);
+  }
+
+  function getLastBriefingRunTime() {
+    const val = getScriptProperty(SCRIPT_PROP_KEYS.LAST_BRIEFING_RUN_TIME, null);
+    return val ? parseInt(val, 10) : null;
+  }
+
+  function setLastBriefingRunTime(timestampMs) {
+    setScriptProperty(SCRIPT_PROP_KEYS.LAST_BRIEFING_RUN_TIME, timestampMs);
   }
 
   return {
-    KEYS: SCRIPT_PROP_KEYS,
     DEFAULTS: DEFAULTS,
     KNOWN_ACCOUNTS: KNOWN_ACCOUNTS,
-    getProps: getProps,
     getGeminiApiKey: getGeminiApiKey,
     getRecipientEmail: getRecipientEmail,
     isWeekendEnabled: isWeekendEnabled,
     getTestLookbackHours: getTestLookbackHours,
-    getGeminiModel: getGeminiModel
+    getGeminiModel: getGeminiModel,
+    getLastCheckpointTime: getLastCheckpointTime,
+    setLastCheckpointTime: setLastCheckpointTime,
+    getLastBriefingRunTime: getLastBriefingRunTime,
+    setLastBriefingRunTime: setLastBriefingRunTime
   };
 })();

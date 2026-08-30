@@ -1,12 +1,12 @@
 /**
  * Google CC Briefing Agent
- * GeminiService.js — Analyse IA avec Gemini, sorties structurées JSON en français pur,
- * interdiction formelle des entités/balises HTML et catégorisation thématique soignée.
+ * GeminiService.js — Intégration résiliente et ultra-rapide de l'API Gemini,
+ * payload compacté, limitation de tokens et backoff exponentiel avec gigue.
  */
 
 const GeminiService = (function () {
   /**
-   * Analyse une liste de messages e-mails via l'API Gemini par lots.
+   * Analyse une liste de messages e-mails via l'API Gemini par lots optimisés.
    *
    * @param {Array<Object>} emailsList - Messages dédupliqués et nettoyés
    * @return {Array<Object>} Messages enrichis avec résumés, priorités et catégories
@@ -43,9 +43,9 @@ const GeminiService = (function () {
         enrichedResults.push(Object.assign({}, originalMsg, aiData));
       }
 
-      // Pause préventive entre les lots pour lisser les quotas
+      // Pause préventive légère pour lisser la consommation de quota
       if (i + batchSize < emailsList.length) {
-        Utilities.sleep(800);
+        Utilities.sleep(600);
       }
     }
 
@@ -68,7 +68,7 @@ const GeminiService = (function () {
         const statusCode = e.statusCode || 0;
         const sanitizedMsg = Utils.redactSensitive(e.message);
 
-        // 1. Modèle indisponible (404) -> Bascule automatique
+        // 1. Modèle indisponible (404) -> Bascule automatique sur le modèle de secours
         if (statusCode === 404 && model !== Config.DEFAULTS.GEMINI_FALLBACK_MODEL) {
           console.warn(
             'Modèle ' +
@@ -132,13 +132,20 @@ const GeminiService = (function () {
   }
 
   /**
-   * Effectue la requête HTTP vers la Gemini Developer API avec schéma structuré JSON forcé.
+   * Effectue la requête HTTP vers la Gemini Developer API avec payload allégé et limitation de tokens.
    */
   function callGeminiApi(batch, apiKey, model) {
     const endpoint =
       Config.DEFAULTS.GEMINI_API_BASE_URL + '/' + encodeURIComponent(model) + ':generateContent?key=' + apiKey;
 
+    // Payload optimisé : extrait compacté à 1000 caractères max pour accélérer l'analyse
     const emailsPayload = batch.map(function (msg) {
+      let compactSnippet = msg.body || '';
+      if (compactSnippet.length > 1000) {
+        compactSnippet = compactSnippet.substring(0, 1000) + '...';
+      }
+      compactSnippet = compactSnippet.replace(/\s+/g, ' ').trim();
+
       return {
         emailId: msg.id,
         expediteur: Utils.cleanSenderName(msg.from),
@@ -146,7 +153,7 @@ const GeminiService = (function () {
         objet: Utils.stripHtmlAndMarkdown(msg.subject),
         date: msg.dateFormatted + ' ' + msg.timeFormatted,
         doublonsIdentiques: msg.duplicateCount > 1 ? msg.duplicateCount : 1,
-        contenu: msg.body
+        extrait: compactSnippet
       };
     });
 
@@ -221,7 +228,8 @@ const GeminiService = (function () {
         }
       ],
       generationConfig: {
-        temperature: 0.2,
+        temperature: Config.DEFAULTS.TEMPERATURE || 0.2,
+        maxOutputTokens: Config.DEFAULTS.MAX_OUTPUT_TOKENS || 2048,
         responseMimeType: 'application/json',
         responseSchema: responseSchema
       }

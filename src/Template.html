@@ -23,8 +23,15 @@
       </tr>
     </table>
 
-    <div style="font-size: 12px; color: #6B7280; font-weight: 500; margin-bottom: 12px;">
+    <div style="font-size: 12px; color: #6B7280; font-weight: 500; margin-bottom: 8px;">
       Synthèse de votre boîte de réception (E-mails non lus)
+    </div>
+
+    <!-- BADGE MÉTRIQUE DU BRIEFING -->
+    <div style="margin-bottom: 14px;">
+      <span style="display: inline-block; background-color: #F3F4F6; color: #374151; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 6px; border: 1px solid #E5E7EB;">
+        &#x1F4CA; <?= data.stats.totalEmails ?> e-mails analysés &bull; <?= data.stats.urgentCount ?> action<?= data.stats.urgentCount > 1 ? 's' : '' ?> requise<?= data.stats.urgentCount > 1 ? 's' : '' ?>
+      </span>
     </div>
 
     <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 0 0 20px 0;">
