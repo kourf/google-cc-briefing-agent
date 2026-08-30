@@ -5,16 +5,44 @@
 
 const Utils = (function () {
   /**
-   * Échappement HTML strict pour prévenir toute injection dans le template.
+   * Décode les entités HTML préexistantes pour éviter les doubles échappements (ex: l&#039; -> l').
+   */
+  function decodeHtmlEntities(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&quot;/g, '"')
+      .replace(/&#039;/g, "'")
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+  }
+
+  /**
+   * Échappement HTML strict après décodage pour prévenir toute injection dans le template.
    */
   function escapeHtml(str) {
     if (str === null || str === undefined) return '';
-    return String(str)
+    const decoded = decodeHtmlEntities(String(str));
+    return decoded
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  /**
+   * Nettoie le nom de l'expéditeur pour enlever les adresses d'en-tête lourdes.
+   */
+  function cleanSenderName(fromStr) {
+    if (!fromStr) return '';
+    const decoded = decodeHtmlEntities(fromStr);
+    const match = decoded.match(/^"?([^"<]+)"?\s*(?:<.*>)?$/);
+    if (match && match[1].trim()) {
+      return match[1].trim();
+    }
+    return decoded.replace(/<.*>/, '').trim() || decoded;
   }
 
   /**
@@ -170,6 +198,8 @@ const Utils = (function () {
     detectDestinationAccount: detectDestinationAccount,
     buildGmailUrl: buildGmailUrl,
     buildCalendarUrl: buildCalendarUrl,
-    formatDuration: formatDuration
+    formatDuration: formatDuration,
+    cleanSenderName: cleanSenderName,
+    decodeHtmlEntities: decodeHtmlEntities
   };
 })();

@@ -105,19 +105,20 @@ const GeminiService = (function () {
     });
 
     const systemPrompt =
-      "Tu es l'analyste principal d'un agent de briefing quotidien de haut niveau (Google CC Briefing Agent). " +
+      "Tu es l'analyste principal du Google CC Briefing Agent. " +
       'Pour chaque e-mail fourni, analyse son contenu et fournis une analyse rigoureuse en FRANÇAIS simple : ' +
       '1. summary : Résumé en français très simple, niveau ELI15 (compréhensible par un adolescent de 15 ans), en 1 à 2 phrases MAXIMUM. ' +
-      'Conserve impérativement les noms, montants, dates et la demande principale. Évite le jargon. ' +
-      '2. priority : "CRITICAL" (urgent, blocage, deadline immédiate, incident), "HIGH" (important, décision client/facture/demande directe), ' +
-      '"MEDIUM" (utile mais sans urgence immédiate), ou "LOW" (purement informatif, newsletter, notification automatique, reçu). ' +
-      '3. actionRequired : true si une action ou réponse est requise de la part de l' +
-      "utilisateur, false sinon. " +
-      '4. action : Description très concise de l\'action à faire (ex: "Valider le devis", "Envoyer la pièce d\'identité"), ou "Aucune action". ' +
-      '5. needsReply : "oui", "non", ou "probablement". ' +
-      '6. deadline : Échéance explicite ou raisonnablement déduite (ex: "Aujourd\'hui avant 17h", "Vendredi 4 septembre"), ou "Aucune". ' +
-      '7. category : Catégorie courte (ex: "Projet", "Finance / Facture", "Administratif", "Commercial", "Notification", "Autre"). ' +
-      '8. estimatedActionMinutes : Estimation réaliste en minutes du temps nécessaire pour traiter l\'action (0 si aucune action).';
+      'Sois naturel, direct et explicite. Conserve impérativement les noms importants, montants, dates et la demande principale. Évite tout jargon technique. ' +
+      '2. priority : "CRITICAL" (urgent, incident de production, échec de build/déploiement, deadline aujourd\'hui), ' +
+      '"HIGH" (demande importante d\'un client/collaborateur, facture à régler, décision requise), ' +
+      '"MEDIUM" (utile mais sans urgence immédiate), ou "LOW" (newsletter, notification automatique de sécurité ou d\'emploi, promo). ' +
+      '3. actionRequired : true si une action concrète ou une réponse est requise de la part de l\'utilisateur, false sinon. ' +
+      '4. actionTitle : Titre court et percutant de l\'action (ex: "Corriger l\'échec de déploiement GitHub", "Valider le devis client", "Confirmer le rendez-vous"), ou "Aucune action". ' +
+      '5. action : Description concise de ce qu\'il faut faire, ou "Aucune action". ' +
+      '6. needsReply : "oui", "non", ou "probablement". ' +
+      '7. deadline : Échéance explicite ou déduite (ex: "Aujourd\'hui", "Avant 17h", "Demain"), ou "Aucune". ' +
+      '8. category : Choisis impérativement parmi : "Sécurité & Accès", "Opportunités & Emploi", "Projets & Code", "Finance & Factures", "Offres & Achats", "Voyages & Loisirs", "Notifications générales". ' +
+      '9. estimatedActionMinutes : Estimation réaliste en minutes pour traiter l\'action (5, 10, 15, 30...).';
 
     const responseSchema = {
       type: 'ARRAY',
@@ -129,13 +130,14 @@ const GeminiService = (function () {
           summary: { type: 'STRING' },
           priority: { type: 'STRING', enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] },
           actionRequired: { type: 'BOOLEAN' },
+          actionTitle: { type: 'STRING' },
           action: { type: 'STRING' },
           needsReply: { type: 'STRING', enum: ['oui', 'non', 'probablement'] },
           deadline: { type: 'STRING' },
           category: { type: 'STRING' },
           estimatedActionMinutes: { type: 'INTEGER' }
         },
-        required: ['emailId', 'summary', 'priority', 'actionRequired', 'action', 'needsReply', 'category']
+        required: ['emailId', 'summary', 'priority', 'actionRequired', 'actionTitle', 'action', 'needsReply', 'category']
       }
     };
 
@@ -200,6 +202,7 @@ const GeminiService = (function () {
             summary: item.summary || 'Résumé indisponible.',
             priority: item.priority || 'MEDIUM',
             actionRequired: Boolean(item.actionRequired),
+            actionTitle: item.actionTitle || (item.actionRequired ? 'Action requise' : 'Aucune action'),
             action: item.action || 'Aucune action',
             needsReply: item.needsReply || 'non',
             deadline: item.deadline && item.deadline !== 'Aucune' ? item.deadline : null,
@@ -221,10 +224,11 @@ const GeminiService = (function () {
       summary: msg.subject ? 'Objet : ' + msg.subject : 'Nouveau message reçu.',
       priority: 'MEDIUM',
       actionRequired: false,
+      actionTitle: 'Aucune action',
       action: 'Vérifier l’e-mail directement si nécessaire.',
       needsReply: 'non',
       deadline: null,
-      category: 'E-mail entrant',
+      category: 'Notifications générales',
       estimatedActionMinutes: 2
     };
   }
