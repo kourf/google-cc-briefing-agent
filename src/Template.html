@@ -60,6 +60,7 @@
       <ul style="margin: 0; padding-left: 20px; list-style-type: disc;">
         <? for (var i = 0; i < data.urgentActions.length; i++) { 
              var item = data.urgentActions[i];
+             var directLink = item.webUrl || (item.threadId ? 'https://mail.google.com/mail/u/0/#all/' + encodeURIComponent(item.threadId) : 'https://mail.google.com/mail/u/0/#inbox');
         ?>
         <li style="margin-bottom: 10px; font-size: 14px; line-height: 1.5; color: #1F2937;">
           <span style="color: #6B7280; font-size: 13px;">&#x23F1; <?= item.timeEstimate ?> &bull; </span>
@@ -67,7 +68,7 @@
           <? if (item.deadline) { ?>
             <span style="color: #DC2626; font-size: 12.5px; font-weight: 600;">(échéance : <?= Utils.escapeHtml(item.deadline) ?>)</span>
           <? } ?>
-          <a href="<?= item.webUrl ?>" target="_blank" style="color: #6B7280; text-decoration: underline; font-size: 12.5px; margin-left: 4px; white-space: nowrap;">&#x1F517; Détails</a>
+          <a href="<?= directLink ?>" target="_blank" style="color: #2563EB; text-decoration: underline; font-size: 12.5px; margin-left: 4px; white-space: nowrap; font-weight: 500;">&#x1F517; Détails</a>
         </li>
         <? } ?>
       </ul>
@@ -96,7 +97,7 @@
             ?>
             <li style="margin-bottom: 6px; font-size: 13.5px; line-height: 1.45; color: #374151;">
               <strong><?= Utils.escapeHtml(bullet.prefixBold) ?> :</strong> <?= Utils.escapeHtml(bullet.description) ?>
-              <a href="<?= bullet.linkUrl ?>" target="_blank" style="color: #6B7280; text-decoration: underline; font-size: 12px; margin-left: 4px; white-space: nowrap;">&#x1F517; <?= Utils.escapeHtml(bullet.linkText) ?></a>
+              <a href="<?= bullet.linkUrl ?>" target="_blank" style="color: #2563EB; text-decoration: underline; font-size: 12px; margin-left: 4px; white-space: nowrap; font-weight: 500;">&#x1F517; <?= Utils.escapeHtml(bullet.linkText) ?></a>
             </li>
             <? } ?>
           </ul>
@@ -124,7 +125,7 @@
         <li style="margin-bottom: 10px; font-size: 14px; line-height: 1.5; color: #1F2937;">
           <strong><?= Utils.escapeHtml(ev.timeFormatted) ?> : <?= Utils.escapeHtml(ev.title) ?></strong>
           <? if (ev.durationFormatted) { ?> <span style="color: #6B7280; font-size: 13px;">(<?= ev.durationFormatted ?>)</span><? } ?>
-          <a href="<?= ev.calendarUrl ?>" target="_blank" style="color: #6B7280; text-decoration: underline; font-size: 12.5px; margin-left: 4px; white-space: nowrap;">&#x1F517; Agenda</a>
+          <a href="<?= ev.calendarUrl ?>" target="_blank" style="color: #2563EB; text-decoration: underline; font-size: 12.5px; margin-left: 4px; white-space: nowrap; font-weight: 500;">&#x1F517; Agenda</a>
 
           <? if (ev.location || ev.conferenceLink) { ?>
           <ul style="margin: 4px 0 0 0; padding-left: 20px; list-style-type: circle;">
@@ -133,7 +134,7 @@
             <? } ?>
             <? if (ev.conferenceLink) { ?>
             <li style="font-size: 13px; color: #047857;">
-              Visioconférence : <a href="<?= ev.conferenceLink ?>" target="_blank" style="color: #047857; text-decoration: underline; font-weight: 500;">Rejoindre la réunion</a>
+              Visioconférence : <a href="<?= ev.conferenceLink ?>" target="_blank" style="color: #047857; text-decoration: underline; font-weight: 600;">Rejoindre la réunion</a>
             </li>
             <? } ?>
           </ul>
@@ -157,7 +158,7 @@
         ?>
         <li style="margin-bottom: 6px; font-size: 13.5px; color: #4B5563;">
           <strong><?= Utils.escapeHtml(tmEv.timeFormatted) ?> : <?= Utils.escapeHtml(tmEv.title) ?></strong>
-          <a href="<?= tmEv.calendarUrl ?>" target="_blank" style="color: #6B7280; text-decoration: underline; font-size: 12px; margin-left: 4px;">&#x1F517; Détails</a>
+          <a href="<?= tmEv.calendarUrl ?>" target="_blank" style="color: #2563EB; text-decoration: underline; font-size: 12px; margin-left: 4px;">&#x1F517; Détails</a>
         </li>
         <? } ?>
       </ul>

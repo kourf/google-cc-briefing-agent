@@ -117,15 +117,58 @@ const Utils = (function () {
   }
 
   /**
+   * Extrait le domaine d'un expéditeur e-mail (ex: "aprizo.com", "linkedin.com").
+   */
+  function extractSenderDomain(fromStr) {
+    if (!fromStr) return '';
+    const match = String(fromStr).match(/@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+    return match ? match[1].toLowerCase() : cleanSenderName(fromStr).toLowerCase();
+  }
+
+  /**
    * Normalise l'objet d'un e-mail pour la détection et la fusion des doublons.
-   * Retire les préfixes "Re:", "Fwd:", "Tr:" et la ponctuation superflue.
+   * Retire les préfixes "Re:", "Fwd:", "Tr:", la ponctuation et les dates.
    */
   function normalizeSubject(subject) {
     if (!subject) return '';
     let clean = decodeHtmlEntities(subject).toLowerCase();
-    clean = clean.replace(/^(?:re|fwd|fw|tr)\s*:\s*/gi, '');
+    clean = clean.replace(/^(?:re|fwd|fw|tr|copie|rappel|urgent)\s*:\s*/gi, '');
     clean = clean.replace(/[^a-z0-9à-ÿ\s]/gi, ' ');
     return clean.replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * Génère une clé de déduplication stricte basée sur l'expéditeur et le sujet racine.
+   * Permet de regrouper les e-mails promotionnels multiples du même expéditeur (ex: Aprizo).
+   */
+  function generateDeduplicationKey(from, subject) {
+    const domain = extractSenderDomain(from);
+    const sender = cleanSenderName(from).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const normSubj = normalizeSubject(subject);
+
+    // Détection des campagnes promotionnelles répétitives (ex: Aprizo, Asos)
+    if (domain.indexOf('aprizo') !== -1 || sender.indexOf('aprizo') !== -1) {
+      return 'aprizo::marketing';
+    }
+    if (domain.indexOf('asos') !== -1 || sender.indexOf('asos') !== -1) {
+      return 'asos::marketing';
+    }
+    if (
+      domain.indexOf('google.com') !== -1 &&
+      (normSubj.indexOf('securite') !== -1 || normSubj.indexOf('connexion') !== -1 || normSubj.indexOf('alerte') !== -1)
+    ) {
+      return 'google::security_alert';
+    }
+    if (
+      domain.indexOf('linkedin.com') !== -1 &&
+      (normSubj.indexOf('emploi') !== -1 || normSubj.indexOf('poste') !== -1 || normSubj.indexOf('recrutement') !== -1)
+    ) {
+      return 'linkedin::job_alert';
+    }
+
+    // Règle générale : expéditeur + les 4 premiers mots clés du sujet
+    const subjStem = normSubj.split(' ').slice(0, 4).join(' ');
+    return (domain || sender) + '::' + subjStem;
   }
 
   /**
@@ -263,12 +306,18 @@ const Utils = (function () {
   }
 
   /**
-   * Construit l'URL web directe d'ouverture d'un message/thread Gmail.
+   * Construit l'URL web directe d'ouverture d'un fil de discussion Gmail.
+   * Utilise le format universel /#all/<threadId> pour ouvrir le message directement
+   * sur ordinateur comme sur l'application mobile Gmail.
+   *
+   * @param {string} threadId - Identifiant du fil Gmail
+   * @param {string} messageId - Identifiant de secours du message
+   * @return {string} URL directe vers le message
    */
   function buildGmailUrl(threadId, messageId) {
-    const id = messageId || threadId;
-    if (!id) return 'https://mail.google.com/mail/u/0/#inbox';
-    return 'https://mail.google.com/mail/u/0/#inbox/' + encodeURIComponent(id);
+    const targetId = threadId || messageId;
+    if (!targetId) return 'https://mail.google.com/mail/u/0/#inbox';
+    return 'https://mail.google.com/mail/u/0/#all/' + encodeURIComponent(targetId);
   }
 
   /**
@@ -319,7 +368,9 @@ const Utils = (function () {
     decodeHtmlEntities: decodeHtmlEntities,
     stripHtmlAndMarkdown: stripHtmlAndMarkdown,
     escapeHtml: escapeHtml,
+    extractSenderDomain: extractSenderDomain,
     normalizeSubject: normalizeSubject,
+    generateDeduplicationKey: generateDeduplicationKey,
     cleanSenderName: cleanSenderName,
     formatDateFrench: formatDateFrench,
     formatTime: formatTime,

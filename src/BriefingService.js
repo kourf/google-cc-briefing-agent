@@ -1,7 +1,7 @@
 /**
  * Google CC Briefing Agent
  * BriefingService.js — Agrégation des données, ventilation thématique,
- * déduplication des promotions et construction du briefing quotidien.
+ * déduplication des promotions, liens directs et expédition du briefing quotidien.
  */
 
 const BriefingService = (function () {
@@ -34,7 +34,8 @@ const BriefingService = (function () {
           duplicateCount: email.duplicateCount || 1,
           accountLabel: email.targetAccount ? email.targetAccount.label : '',
           accountIcon: email.targetAccount ? email.targetAccount.icon : '',
-          webUrl: email.webUrl
+          threadId: email.threadId,
+          webUrl: email.webUrl || Utils.buildGmailUrl(email.threadId, email.id)
         });
       } else {
         fyiPool.push(email);
@@ -69,25 +70,24 @@ const BriefingService = (function () {
     const htmlBody = renderTemplate(templateData);
     const plainTextBody = renderPlainText(templateData);
 
-    // 5. Objet de l'e-mail clair et percutant
+    // 5. Objet de l'e-mail propre (zéro emoji dans le sujet pour bannir définitivement l'artefact )
     let emailSubject = '';
     if (isTestMode) {
-      emailSubject = '🧪 Briefing test • Google CC (' + formattedDate + ')';
+      emailSubject = '[TEST] Briefing quotidien - Google CC (' + formattedDate + ')';
     } else {
       if (urgentActions.length > 0) {
         emailSubject =
-          '🔴 (' +
+          '(Action requise : ' +
           urgentActions.length +
-          ' action' +
-          (urgentActions.length > 1 ? 's' : '') +
-          ') Briefing du matin — ' +
-          formattedDate;
+          ') Briefing quotidien - Google CC (' +
+          formattedDate +
+          ')';
       } else {
-        emailSubject = 'CC • Votre journée du ' + formattedDate;
+        emailSubject = 'Briefing quotidien - Google CC (' + formattedDate + ')';
       }
     }
 
-    // 6. Envoi effectif de l'e-mail via GmailApp
+    // 6. Envoi effectif de l'e-mail via GmailApp avec encodage UTF-8
     console.log('Envoi du briefing Google CC à : ' + recipientEmail + ' (Sujet : ' + emailSubject + ')');
     GmailApp.sendEmail(recipientEmail, emailSubject, plainTextBody, {
       htmlBody: htmlBody,
@@ -104,7 +104,7 @@ const BriefingService = (function () {
 
   /**
    * Regroupe intelligemment les e-mails d'information par catégories thématiques enrichies.
-   * Gère les doublons promotionnels d'un même expéditeur (ex: Aprizo (2 e-mails reçus) : ...).
+   * Consolide strictement les messages multiples d'un même expéditeur.
    */
   function groupFyiEmails(emails) {
     if (!emails || emails.length === 0) return [];
@@ -118,7 +118,7 @@ const BriefingService = (function () {
       const fromLower = (email.from || '').toLowerCase();
       const subjLower = (email.subject || '').toLowerCase();
 
-      // Ajustement thématique d'appoint si nécessaire
+      // Ajustement thématique de sécurité ou plateforme
       if (
         fromLower.indexOf('google.com') !== -1 ||
         subjLower.indexOf('alerte de sécurité') !== -1 ||
@@ -161,16 +161,16 @@ const BriefingService = (function () {
       const items = groups[groupName];
       const bulletItems = [];
 
-      // Synthèse consolidée pour les alertes de sécurité répétées
+      // 1. Synthèse unique consolidée pour les alertes de sécurité Google
       if (groupName.indexOf('Sécurité') !== -1 && items.length > 1) {
         bulletItems.push({
           prefixBold: items.length + ' alertes de sécurité Google',
-          description: 'Concernant des connexions récentes et autorisations d’accès accordées sur vos comptes.',
+          description: 'Notifications concernant des connexions récentes et autorisations d’accès accordées sur vos comptes.',
           linkUrl: items[0].webUrl,
           linkText: 'Détails'
         });
       }
-      // Synthèse consolidée pour les offres LinkedIn
+      // 2. Synthèse unique consolidée pour les offres LinkedIn
       else if (groupName.indexOf('Opportunités') !== -1 && items.length > 1) {
         const highlights = items
           .map(function (it) {
@@ -186,32 +186,31 @@ const BriefingService = (function () {
 
         bulletItems.push({
           prefixBold: 'Synthèse de ' + items.length + ' offres d’emploi reçues',
-          description: highlights ? highlights + ', etc.' : 'Nouvelles alertes reçues.',
+          description: highlights ? highlights + ', etc.' : 'Nouvelles alertes de postes reçues.',
           linkUrl: items[0].webUrl,
           linkText: 'Voir sur LinkedIn'
         });
       }
-      // E-mails du même expéditeur ou e-mails doublonnés (ex: Aprizo)
+      // 3. E-mails multiples d'un même expéditeur commercial (ex: Aprizo)
       else if (items.length > 1 && items.every(function (it) { return it.from === items[0].from; })) {
         const senderName = Utils.cleanSenderName(items[0].from);
         const totalCount = items.reduce(function (sum, it) { return sum + (it.duplicateCount || 1); }, 0);
         bulletItems.push({
-          prefixBold: senderName + ' (' + totalCount + ' e-mails reçus)',
+          prefixBold: senderName + ' (' + totalCount + ' messages reçus)',
           description: items[0].summary,
           linkUrl: items[0].webUrl,
           linkText: 'Détails'
         });
       }
-      // Affichage individuel standard
+      // 4. Affichage individuel standard pour les autres messages
       else {
         for (let j = 0; j < items.length; j++) {
           const it = items[j];
           const senderName = Utils.cleanSenderName(it.from);
           let boldTitle = it.subject;
 
-          // Si un e-mail a des doublons fusionnés (ex: 2 messages identiques)
           if (it.duplicateCount > 1) {
-            boldTitle = senderName + ' (' + it.duplicateCount + ' e-mails reçus) : ' + it.subject;
+            boldTitle = senderName + ' (' + it.duplicateCount + ' messages reçus)';
           }
 
           bulletItems.push({
@@ -247,7 +246,7 @@ const BriefingService = (function () {
    */
   function renderPlainText(data) {
     const lines = [];
-    lines.push('CC • VOTRE JOURNÉE');
+    lines.push('CC - VOTRE JOURNÉE');
     lines.push(data.dateTitle);
     lines.push('Bonjour, ' + data.recipientName + '. Voici votre plan d\'action pour aujourd\'hui !');
     lines.push('');
@@ -255,7 +254,7 @@ const BriefingService = (function () {
     if (data.urgentActions.length > 0) {
       lines.push('=== ACTIONS REQUISES AUJOURD\'HUI ===');
       data.urgentActions.forEach(function (e) {
-        lines.push('• ⏱ ' + e.timeEstimate + ' : ' + e.actionTitle + ' — ' + e.context);
+        lines.push('• ' + e.timeEstimate + ' : ' + e.actionTitle + ' — ' + e.context);
         if (e.deadline) lines.push('  Échéance : ' + e.deadline);
         lines.push('  Lien : ' + e.webUrl);
       });
@@ -288,7 +287,7 @@ const BriefingService = (function () {
 
     lines.push('');
     lines.push('Passez une excellente journée !');
-    lines.push('CC • ' + data.recipientEmail);
+    lines.push('CC - ' + data.recipientEmail);
 
     return lines.join('\n');
   }

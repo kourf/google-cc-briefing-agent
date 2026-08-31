@@ -1,7 +1,7 @@
 /**
  * Google CC Briefing Agent
- * GeminiService.js — Intégration résiliente et ultra-rapide de l'API Gemini,
- * payload compacté, limitation de tokens et backoff exponentiel avec gigue.
+ * GeminiService.js — Synthèses détaillées et explicites en français pur,
+ * interdiction stricte des balises/entités HTML et intégration de l'API Gemini.
  */
 
 const GeminiService = (function () {
@@ -9,7 +9,7 @@ const GeminiService = (function () {
    * Analyse une liste de messages e-mails via l'API Gemini par lots optimisés.
    *
    * @param {Array<Object>} emailsList - Messages dédupliqués et nettoyés
-   * @return {Array<Object>} Messages enrichis avec résumés, priorités et catégories
+   * @return {Array<Object>} Messages enrichis avec résumés détaillés, priorités et catégories
    */
   function analyzeEmails(emailsList) {
     if (!emailsList || emailsList.length === 0) {
@@ -158,15 +158,20 @@ const GeminiService = (function () {
     });
 
     const systemPrompt =
-      "Tu es l'analyste en chef du Google CC Briefing Agent. Ton rôle est de fournir des synthèses matinales limpides, directes et en français très simple.\n\n" +
-      "RÈGLES ABSOLUES SUR LA LANGUE ET LA FORME :\n" +
-      "1. Réponds EXCLUSIVEMENT en français simple, fluide et naturel (niveau ELI15, compréhensible par un adolescent de 15 ans).\n" +
-      "2. INTERDICTION FORMELLE DES BALISES HTML ET DES ENTITÉS : N'inclus JAMAIS d'entités HTML (comme &#039;, &amp;, &quot;, &lt;, &gt;) ni de balises (comme <strong>, <b>, <em>, <br>). Écris directement avec de vraies apostrophes françaises (').\n" +
-      "3. Conserve impérativement les montants financiers, dates, noms importants et l'action principale sans perte d'information.\n\n" +
+      "Tu es l'analyste en chef du Google CC Briefing Agent. Ton rôle est de rédiger des résumés d'e-mails riches, précis et parfaitement compréhensibles en français direct.\n\n" +
+      "RÈGLES MAJEURES SUR LE CONTENU :\n" +
+      "Chaque valeur du champ 'summary' doit impérativement préciser :\n" +
+      "1. L'expéditeur ou la plateforme concernée (ex: 'GitHub', 'Google', 'Aprizo', 'LinkedIn', un client...).\n" +
+      "2. Le message central explicite : de quoi s'agit-il exactement ? (ex: 'Alerte de sécurité concernant une nouvelle connexion Windows', 'Offre promotionnelle 4 articles achetés + 1 offert', 'Échec du déploiement CI/CD sur GCP/Firebase').\n" +
+      "3. L'action concrète à faire ou l'échéance s'il y en a une.\n\n" +
+      "RÈGLES ABSOLUES SUR LA FORME ET LE TEXTE :\n" +
+      "- Rédige EXCLUSIVEMENT en français naturel, élégant et fluide.\n" +
+      "- INTERDICTION FORMELLE DES BALISES HTML ET DES ENTITÉS : N'inclus JAMAIS d'entités comme &amp;, &#039;, &quot;, &lt;, &gt;, ni de balises comme <strong> ou <br>. Utilise directement de vraies apostrophes (').\n" +
+      "- Conserve impérativement les montants financiers, dates, noms de projets et l'action principale.\n\n" +
       "INSTRUCTIONS SUR LES CHAMPS PAR E-MAIL :\n" +
-      "- summary : Résumé clair de la situation en 1 à 2 phrases courtes maximum.\n" +
-      "- priority : 'CRITICAL' (incident en cours, panne de déploiement CI/CD, urgence bloquante), 'HIGH' (décision importante requise, facture client à régler, demande directe), 'MEDIUM' (e-mail utile sans urgence immédiate), ou 'LOW' (notification automatique, alerte de connexion, offre commerciale).\n" +
-      "- actionRequired : true si l'utilisateur doit accomplir une action concrète ou répondre aujourd'hui, false sinon.\n" +
+      "- summary : Résumé explicite et contextuel en 1 ou 2 phrases complètes.\n" +
+      "- priority : 'CRITICAL' (incident technique, panne CI/CD, blocage majeur), 'HIGH' (action requise aujourd'hui, facture à régler, décision importante), 'MEDIUM' (e-mail informatif sans urgence), ou 'LOW' (offre commerciale, notification courante, alerte informative).\n" +
+      "- actionRequired : true si une action concrète ou réponse est attendue aujourd'hui, false sinon.\n" +
       "- actionTitle : Titre court et percutant de l'action en quelques mots (ex: 'Examiner l'échec de déploiement GitHub', 'Régler la facture Stripe', 'Valider le devis'). Si aucune action : 'Aucune action'.\n" +
       "- action : Description simple de l'action à mener en 1 phrase.\n" +
       "- needsReply : 'oui', 'non', ou 'probablement'.\n" +
@@ -315,7 +320,7 @@ const GeminiService = (function () {
   function getFallbackAiData(msg) {
     const sender = Utils.cleanSenderName(msg.from);
     const subject = Utils.stripHtmlAndMarkdown(msg.subject) || 'Nouveau message reçu';
-    const duplicateNotice = msg.duplicateCount > 1 ? ' (' + msg.duplicateCount + ' e-mails reçus)' : '';
+    const duplicateNotice = msg.duplicateCount > 1 ? ' (' + msg.duplicateCount + ' messages)' : '';
 
     return {
       summary: sender + duplicateNotice + ' : ' + subject,

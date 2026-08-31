@@ -1,6 +1,6 @@
 /**
  * Google CC Briefing Agent
- * GmailService.js — Récupération ciblée, pagination, filtrage anti-spam/corbeille et déduplication intelligente
+ * GmailService.js — Récupération ciblée, pagination, filtrage anti-spam/corbeille et déduplication stricte
  */
 
 const GmailService = (function () {
@@ -9,7 +9,7 @@ const GmailService = (function () {
    * Exclut formellement les spams et la corbeille.
    *
    * @param {number} afterTimestampSec - Timestamp UNIX en secondes (point de départ temporel)
-   * @return {Array<Object>} Liste des e-mails dédupliqués et nettoyés
+   * @return {Array<Object>} Liste des e-mails dédupliqués avec URLs directes vers les fils Gmail
    */
   function fetchUnreadEmails(afterTimestampSec) {
     // Requête stricte : non lus, uniquement en boîte de réception, sans spam ni corbeille
@@ -28,7 +28,7 @@ const GmailService = (function () {
       }
       threads.push.apply(threads, batch);
       if (batch.length < PAGE_SIZE) {
-        break; // Dernier lot atteint
+        break;
       }
       startIndex += PAGE_SIZE;
 
@@ -86,6 +86,9 @@ const GmailService = (function () {
           const targetAccount = Utils.detectDestinationAccount(rawContent, toField, plainBody);
           const rawSubject = msg.getSubject() || '(Sans objet)';
 
+          // Deep-link direct vers le fil Gmail (/u/0/#all/<threadId>)
+          const directGmailUrl = Utils.buildGmailUrl(threadId, msgId);
+
           rawMessages.push({
             id: msgId,
             threadId: threadId,
@@ -100,7 +103,7 @@ const GmailService = (function () {
             hasAttachments: hasAttachments,
             attachmentsCount: attachments.length,
             targetAccount: targetAccount,
-            webUrl: Utils.buildGmailUrl(threadId, msgId)
+            webUrl: directGmailUrl
           });
         }
       }
@@ -111,16 +114,14 @@ const GmailService = (function () {
       return b.timestampSec - a.timestampSec;
     });
 
-    // 4. Déduplication intelligente des messages identiques d'un même expéditeur
-    // (ex: plusieurs e-mails promotionnels Aprizo identiques reçus le même jour)
+    // 4. Déduplication stricte basée sur SenderDomain + Sujet Racine
+    // (ex: fusionne les multiples messages Aprizo, alertes Google récurrentes, etc.)
     const deduplicatedMessages = [];
     const seenKeyMap = {};
 
     for (let i = 0; i < rawMessages.length; i++) {
       const item = rawMessages[i];
-      const normSender = Utils.cleanSenderName(item.from).toLowerCase();
-      const normSubj = Utils.normalizeSubject(item.subject);
-      const dedupKey = normSender + '::' + normSubj;
+      const dedupKey = Utils.generateDeduplicationKey(item.from, item.subject);
 
       if (seenKeyMap[dedupKey] !== undefined) {
         // Doublon détecté : incrémente le compteur sur l'e-mail conservé (le plus récent)
@@ -130,6 +131,10 @@ const GmailService = (function () {
           existing.allMessageIds = [existing.id];
         }
         existing.allMessageIds.push(item.id);
+        // S'assurer de conserver l'URL du thread le plus récent
+        if (item.webUrl) {
+          existing.webUrl = item.webUrl;
+        }
       } else {
         item.duplicateCount = 1;
         item.allMessageIds = [item.id];
@@ -142,7 +147,7 @@ const GmailService = (function () {
       rawMessages.length +
         ' message(s) non lu(s) extrait(s) ➔ ' +
         deduplicatedMessages.length +
-        ' après déduplication.'
+        ' après déduplication stricte.'
     );
 
     return deduplicatedMessages;
