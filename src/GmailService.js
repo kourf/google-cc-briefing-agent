@@ -1,19 +1,21 @@
 /**
  * Google CC Briefing Agent
- * GmailService.js — Récupération ciblée, filtrage strict et déduplication pré-LLM
+ * GmailService.js — Récupération ciblée, exclusion de l'agenda et déduplication pré-LLM
  */
 
 const GmailService = (function () {
   /**
    * Récupère et déduplique tous les messages non lus de la boîte de réception principale.
-   * Déduplication stricte effectuée AVANT l'envoi à Gemini pour économiser les quotas et éviter les répétitions.
+   * Exclut explicitement les notifications d'agenda Google Calendar pour éviter les doublons avec la section agenda.
    *
    * @param {number} afterTimestampSec - Timestamp UNIX en secondes
    * @return {Array<Object>} Liste des e-mails dédupliqués avec URLs directes vers les fils Gmail
    */
   function fetchUnreadEmails(afterTimestampSec) {
-    // Requête stricte : non lus, boîte de réception principale, hors spam et corbeille
-    const query = 'is:unread in:inbox -in:spam -in:trash after:' + Math.floor(afterTimestampSec);
+    // Requête durcie : non lus, boîte principale, hors spam/corbeille et sans notifications d'agenda
+    const query =
+      'is:unread in:inbox -in:spam -in:trash -from:calendar-notification@google.com -subject:"agenda quotidien" after:' +
+      Math.floor(afterTimestampSec);
     console.log('Exécution de la requête Gmail : ' + query);
 
     const threads = [];
@@ -59,6 +61,17 @@ const GmailService = (function () {
         const msgTimestampSec = Math.floor(msgDate.getTime() / 1000);
 
         if (msg.isUnread() && msgTimestampSec >= afterTimestampSec) {
+          const fromRaw = msg.getFrom() || '';
+          const subjectRaw = msg.getSubject() || '(Sans objet)';
+
+          // Filtre de sécurité additionnel contre les notifications Calendar
+          if (
+            fromRaw.indexOf('calendar-notification@google.com') !== -1 ||
+            subjectRaw.toLowerCase().indexOf('agenda quotidien') !== -1
+          ) {
+            continue;
+          }
+
           seenMessageIds[msgId] = true;
 
           const plainBody = msg.getPlainBody() || '';
@@ -77,14 +90,13 @@ const GmailService = (function () {
 
           const toField = msg.getTo() || '';
           const targetAccount = Utils.detectDestinationAccount(rawContent, toField, plainBody);
-          const rawSubject = msg.getSubject() || '(Sans objet)';
-          const cleanSubject = Utils.cleanText(rawSubject);
-          const senderName = Utils.cleanSenderName(msg.getFrom());
+          const cleanSubject = Utils.cleanText(subjectRaw);
+          const senderName = Utils.cleanSenderName(fromRaw);
 
           rawMessages.push({
             id: msgId,
             threadId: threadId,
-            from: msg.getFrom(),
+            from: fromRaw,
             senderName: senderName,
             to: toField,
             subject: cleanSubject,
@@ -96,7 +108,7 @@ const GmailService = (function () {
             hasAttachments: attachments.length > 0,
             attachmentsCount: attachments.length,
             targetAccount: targetAccount,
-            // Deep-link exact vers le fil de discussion universel
+            // Deep-link exact vers le fil universel
             webUrl: Utils.buildGmailUrl(threadId)
           });
         }
@@ -109,7 +121,6 @@ const GmailService = (function () {
     });
 
     // 4. Déduplication stricte pré-LLM
-    // Regroupe par Expéditeur + Sujet normalisé (ou domaine marketing identique)
     const deduplicated = [];
     const seenIndexByKey = {};
 
@@ -125,8 +136,9 @@ const GmailService = (function () {
         dedupKey = 'promo::aprizo';
       } else if (domain.indexOf('asos') !== -1 || senderKey.indexOf('asos') !== -1) {
         dedupKey = 'promo::asos';
+      } else if (domain.indexOf('twistshake') !== -1 || senderKey.indexOf('twistshake') !== -1) {
+        dedupKey = 'promo::twistshake';
       } else {
-        // Racine du sujet (premiers 5 mots signifiants)
         const stem = normSubj.split(' ').slice(0, 5).join(' ');
         dedupKey = senderKey + '::' + stem;
       }

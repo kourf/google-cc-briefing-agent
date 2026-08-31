@@ -1,19 +1,23 @@
 /**
  * Google CC Briefing Agent
- * GeminiService.js — Analyse IA avec Gemini, prompt en français naturel,
- * schéma de catégories strictes et assainissement intégral des sorties.
+ * GeminiService.js — Analyse IA avec Gemini 2.0 Flash, taxonomie stricte à 9 catégories,
+ * résumés actifs en français pur (zéro formulation robotique) et traduction des titres anglophones.
  */
 
 const GeminiService = (function () {
   /**
-   * Catégories fixes et explicites demandées pour le briefing
+   * Les 9 catégories mutuellement exclusives demandées
    */
   const CATEGORIES = {
-    ACTIONS_URGENTES: 'actions_urgentes',
-    SECURITE_ALERTES: 'securite_alertes',
-    OPPORTUNITES_PRO: 'opportunites_pro',
-    ACHATS_PROMOTIONS: 'achats_promotions',
-    AUTRES_INFORMATIONS: 'autres_informations'
+    ACTIONS_IMMEDIATES: 'actions_immediates',
+    SECURITE_ACCES: 'securite_acces',
+    EMPLOI_CARRIERE: 'emploi_carriere',
+    TECH_DEV: 'tech_dev',
+    VOYAGES_LOISIRS: 'voyages_loisirs',
+    ACHATS_PROMOS: 'achats_promos',
+    SANTE_DEMARCHES: 'sante_demarches',
+    RESEAUX_SOCIAUX: 'reseaux_sociaux',
+    VEILLE_CULTURE: 'veille_culture'
   };
 
   /**
@@ -142,7 +146,7 @@ const GeminiService = (function () {
   }
 
   /**
-   * Effectue la requête HTTP vers Gemini avec un prompt repensé et un schéma strict.
+   * Effectue la requête HTTP vers Gemini avec la taxonomie à 9 catégories et les règles strictes anti-robotique.
    */
   function callGeminiApi(batch, apiKey, model) {
     const endpoint =
@@ -166,24 +170,30 @@ const GeminiService = (function () {
     });
 
     const systemPrompt =
-      "Tu es le rédacteur exécutif du Google CC Briefing Agent. Ta mission est de produire un résumé matinal limpide, professionnel et agréable à lire.\n\n" +
-      "RÈGLES DE RÉDACTION STRICTES (NIVEAU CADRE SUPÉRIEUR) :\n" +
-      "1. Écris TOUJOURS en français direct, simple et naturel.\n" +
-      "2. Chaque résumé ('summary') doit faire STRICTEMENT 1 ou 2 phrases courtes répondant précisément à 3 questions :\n" +
-      "   - Qui écrit ? (Nom clair de l'expéditeur ou de l'entreprise)\n" +
-      "   - De quoi s'agit-il exactement ? (Explication concrète sans jargon)\n" +
-      "   - Quelle action concrète est attendue ? (Si aucune action : 'Aucune action requise')\n" +
-      "3. INTERDICTIONS FORMELLES :\n" +
-      "   - JAMAIS de symboles de mise en forme markdown (*, _, `, ~, #).\n" +
-      "   - JAMAIS de symboles mathématiques ou de délimiteurs de formules (interdiction absolue du signe dollar '$', pas de formule LaTeX comme $(m/w/d)$).\n" +
-      "   - JAMAIS d'entités HTML (&amp;, &#039;, &quot;, &lt;, &gt;) : utilise directement de vraies apostrophes (').\n" +
-      "   - JAMAIS de tournures robotiques comme 'Synthèse de X offres'. Explique directement le contenu.\n\n" +
-      "ATTRIBUTION DES CATÉGORIES EXACTES (choisis obligatoirement l'une de ces 5 clés) :\n" +
-      "- 'actions_urgentes' : Problème bloquant, échec de build/déploiement CI/CD, facture client à payer d'urgence, action requise aujourd'hui.\n" +
-      "- 'securite_alertes' : Alertes de sécurité (Google, GitHub, Microsoft), connexions depuis un nouvel appareil, codes d'authentification.\n" +
-      "- 'opportunites_pro' : Offres d'emploi (LinkedIn, recruteurs), prises de contact pro, propositions de missions ou postes.\n" +
-      "- 'achats_promotions' : Offres commerciales, bons de réduction, soldes, e-commerce (ex: Aprizo, Asos).\n" +
-      "- 'autres_informations' : Tout e-mail informatif ne rentrant pas dans les catégories précédentes.";
+      "Tu es l'analyste exécutif en chef de 'Mon Briefing Quotidien'. Ta mission est de produire un condensé limpide, vivant et direct en français pour chaque e-mail.\n\n" +
+      "RÈGLES DE RÉDACTION STRICTES :\n" +
+      "1. Rédige TOUJOURS en français direct, élégant et naturel.\n" +
+      "2. TRADUCTION OBLIGATOIRE : Si le sujet ou le contenu est en anglais (ex: Lumosity, newsletters, GitHub), traduis-le et explique-le en français naturel (pas de titres laissés en anglais brut).\n" +
+      "3. INTERDICTION FORMELLE DE BOILERPLATE ROBOTIQUE :\n" +
+      "   - Ne commence JAMAIS par '[Expéditeur] vous a envoyé un e-mail'.\n" +
+      "   - N'écris JAMAIS 'Aucune action requise' dans le résumé.\n" +
+      "   - N'utilise JAMAIS de symboles markdown (*, _, `, ~, #), mathématiques ($) ou d'entités HTML (&amp;, &#039;).\n" +
+      "4. Chaque résumé ('summary') doit faire STRICTEMENT 1 SEULE phrase concise et active expliquant clairement de quoi il s'agit.\n" +
+      "   Exemples de style attendu :\n" +
+      "   - Pour GitHub : 'Le pipeline d'intégration continue de Lumina Analytics a rencontré une erreur lors du déploiement vers Google Cloud.'\n" +
+      "   - Pour Lumosity : 'Lumosity propose une nouvelle série d'exercices cérébraux personnalisés axés sur la concentration et la mémoire.'\n" +
+      "   - Pour easyJet : 'easyJet annonce des réductions exclusives sur les vols européens avec des billets démarrant à 29 €.'\n" +
+      "   - Pour LinkedIn : 'Trois recruteurs ont consulté votre profil et vous proposent des opportunités en développement logiciel.'\n\n" +
+      "TAXONOMIE DES 9 CATÉGORIES MUTUELLEMENT EXCLUSIVES (choisis obligatoirement l'une de ces 9 clés) :\n" +
+      "- 'actions_immediates' : Incident bloquant, panne critique, facture à régler d'urgence aujourd'hui, validation bloquante.\n" +
+      "- 'securite_acces' : Connexions depuis un nouvel appareil, codes d'authentification 2FA / OTP, alertes de compte Google/Microsoft/Apple.\n" +
+      "- 'emploi_carriere' : Alertes d'emploi, prises de contact de recruteurs, suivi de candidatures (LinkedIn, HelloWork, France Travail, Apec).\n" +
+      "- 'tech_dev' : GitHub (PR, commits, issues, CI/CD), Firebase, Google Cloud, Sentry, Vercel, hébergement et serveurs.\n" +
+      "- 'voyages_loisirs' : Billets d'avion, réservations d'hôtel, guides et sorties de voyage (easyJet, GetYourGuide, Airbnb, Booking, SNCF).\n" +
+      "- 'achats_promos' : Offres promotionnelles e-commerce, réductions, codes promo, ventes privées (ASOS, Twistshake, Amazon, Aprizo).\n" +
+      "- 'sante_demarches' : Rendez-vous médicaux, ordonnances, téléconsultations, démarches administratives (Doctolib, Qare, Ameli, impôts).\n" +
+      "- 'reseaux_sociaux' : Invitations d'amis, interactions et nouveautés sur les plateformes sociales (TikTok, Facebook, Instagram, X/Twitter).\n" +
+      "- 'veille_culture' : Newsletters thématiques, apprentissage, jeux éducatifs et articles de fond (Lumosity, Medium, presse).";
 
     const responseSchema = {
       type: 'ARRAY',
@@ -195,21 +205,25 @@ const GeminiService = (function () {
           category: {
             type: 'STRING',
             enum: [
-              'actions_urgentes',
-              'securite_alertes',
-              'opportunites_pro',
-              'achats_promotions',
-              'autres_informations'
+              'actions_immediates',
+              'securite_acces',
+              'emploi_carriere',
+              'tech_dev',
+              'voyages_loisirs',
+              'achats_promos',
+              'sante_demarches',
+              'reseaux_sociaux',
+              'veille_culture'
             ]
           },
           summary: {
             type: 'STRING',
-            description: '1 ou 2 phrases courtes et explicites en français naturel'
+            description: '1 phrase concise, active et naturelle en français (sans formule robotique)'
           },
           actionRequired: { type: 'BOOLEAN' },
           actionTitle: {
             type: 'STRING',
-            description: "Titre court de l'action en quelques mots (ex: 'Relancer le déploiement sur GitHub') ou 'Aucune action'."
+            description: "Titre court de l'action en 3 à 5 mots (ex: 'Relancer le déploiement') ou 'Aucune action'."
           },
           deadline: { type: 'STRING' },
           estimatedMinutes: { type: 'INTEGER' }
@@ -226,7 +240,7 @@ const GeminiService = (function () {
             {
               text:
                 systemPrompt +
-                '\n\nVoici les e-mails à résumer :\n' +
+                '\n\nVoici les e-mails à analyser et synthétiser :\n' +
                 JSON.stringify(emailsPayload)
             }
           ]
@@ -289,20 +303,7 @@ const GeminiService = (function () {
       throw emptyErr;
     }
 
-    let parsedArray;
-    try {
-      let cleanText = candidateText.trim();
-      // Remove markdown formatting if present
-      cleanText = cleanText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-      // Replace unescaped control characters with spaces to prevent JSON.parse from failing
-      cleanText = cleanText.replace(/[\n\r\t]/g, " ");
-      parsedArray = JSON.parse(cleanText);
-    } catch (e) {
-      const err = new Error('Invalid JSON response from Gemini: ' + e.message);
-      err.statusCode = 502;
-      throw err;
-    }
-
+    const parsedArray = JSON.parse(candidateText);
     const resultMap = {};
 
     if (Array.isArray(parsedArray)) {
@@ -310,8 +311,8 @@ const GeminiService = (function () {
         const item = parsedArray[i];
         if (item && item.emailId) {
           resultMap[item.emailId] = {
-            category: item.category || 'autres_informations',
-            summary: Utils.cleanText(item.summary || 'Message reçu sans description.'),
+            category: item.category || 'veille_culture',
+            summary: Utils.cleanText(item.summary || 'Nouvelles informations partagées.'),
             actionRequired: Boolean(item.actionRequired),
             actionTitle: Utils.cleanText(item.actionTitle || (item.actionRequired ? 'Action requise' : 'Aucune action')),
             deadline: item.deadline && item.deadline !== 'Aucune' ? Utils.cleanText(item.deadline) : null,
@@ -325,29 +326,46 @@ const GeminiService = (function () {
   }
 
   /**
-   * Mode dégradé robuste si un lot échoue.
+   * Mode dégradé robuste et non-robotique si un lot échoue.
    */
   function getFallbackAiData(msg) {
     const sender = msg.senderDisplayName || msg.senderName || 'Expéditeur inconnu';
     const cleanSubj = Utils.cleanText(msg.subject) || 'Nouveau message';
-
-    let cat = 'autres_informations';
     const lower = (msg.from + ' ' + msg.subject).toLowerCase();
-    if (lower.indexOf('google.com') !== -1 || lower.indexOf('securite') !== -1) {
-      cat = 'securite_alertes';
-    } else if (lower.indexOf('linkedin') !== -1 || lower.indexOf('recrutement') !== -1) {
-      cat = 'opportunites_pro';
-    } else if (lower.indexOf('aprizo') !== -1 || lower.indexOf('promo') !== -1) {
-      cat = 'achats_promotions';
+
+    let cat = 'veille_culture';
+    let fallbackSummary = sender + ' partage des informations : ' + cleanSubj + '.';
+
+    if (lower.indexOf('github') !== -1 || lower.indexOf('firebase') !== -1 || lower.indexOf('cloud') !== -1) {
+      cat = 'tech_dev';
+      fallbackSummary = 'Mise à jour technique de ' + sender + ' concernant ' + cleanSubj + '.';
+    } else if (lower.indexOf('google.com') !== -1 || lower.indexOf('securite') !== -1 || lower.indexOf('connexion') !== -1) {
+      cat = 'securite_acces';
+      fallbackSummary = 'Notification de sécurité de ' + sender + ' au sujet de ' + cleanSubj + '.';
+    } else if (lower.indexOf('linkedin') !== -1 || lower.indexOf('recrutement') !== -1 || lower.indexOf('emploi') !== -1) {
+      cat = 'emploi_carriere';
+      fallbackSummary = 'Nouvelles opportunités professionnelles partagées par ' + sender + ' : ' + cleanSubj + '.';
+    } else if (lower.indexOf('easyjet') !== -1 || lower.indexOf('getyourguide') !== -1 || lower.indexOf('voyage') !== -1) {
+      cat = 'voyages_loisirs';
+      fallbackSummary = sender + ' propose des offres de voyages et loisirs : ' + cleanSubj + '.';
+    } else if (lower.indexOf('asos') !== -1 || lower.indexOf('twistshake') !== -1 || lower.indexOf('aprizo') !== -1 || lower.indexOf('promo') !== -1) {
+      cat = 'achats_promos';
+      fallbackSummary = sender + ' annonce des réductions et offres promotionnelles : ' + cleanSubj + '.';
+    } else if (lower.indexOf('doctolib') !== -1 || lower.indexOf('qare') !== -1 || lower.indexOf('sante') !== -1) {
+      cat = 'sante_demarches';
+      fallbackSummary = 'Notification médicale ou administrative de ' + sender + ' concernant ' + cleanSubj + '.';
+    } else if (lower.indexOf('tiktok') !== -1 || lower.indexOf('facebook') !== -1 || lower.indexOf('instagram') !== -1) {
+      cat = 'reseaux_sociaux';
+      fallbackSummary = 'Activité et notifications sur vos réseaux sociaux via ' + sender + '.';
     }
 
     return {
       category: cat,
-      summary: sender + ' vous a envoyé un e-mail : ' + cleanSubj + '. Aucune action urgente requise.',
+      summary: fallbackSummary,
       actionRequired: false,
       actionTitle: 'Aucune action',
       deadline: null,
-      estimatedMinutes: 2
+      estimatedMinutes: 0
     };
   }
 

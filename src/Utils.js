@@ -1,6 +1,6 @@
 /**
  * Google CC Briefing Agent
- * Utils.js — Utilitaires, assainissement de texte, sécurité et formatage
+ * Utils.js — Utilitaires, assainissement de texte, gestion temporelle et sécurité
  */
 
 const Utils = (function () {
@@ -155,25 +155,27 @@ const Utils = (function () {
 
   /**
    * Nettoie le nom de l'expéditeur pour obtenir un affichage élégant et humain.
-   * Ex: "kourf <notifications@github.com>" -> "GitHub"
-   * Ex: "Aprizo <contact@aprizo.com>" -> "Aprizo"
    */
   function cleanSenderName(fromStr) {
     if (!fromStr) return 'Expéditeur';
     const decoded = decodeHtmlEntities(fromStr).trim();
 
-    // Cas spécial GitHub
-    if (decoded.toLowerCase().indexOf('github.com') !== -1) {
-      return 'GitHub';
-    }
-    // Cas spécial Google
-    if (decoded.toLowerCase().indexOf('google.com') !== -1) {
-      return 'Google';
-    }
-    // Cas spécial LinkedIn
-    if (decoded.toLowerCase().indexOf('linkedin.com') !== -1) {
-      return 'LinkedIn';
-    }
+    const lower = decoded.toLowerCase();
+    if (lower.indexOf('github.com') !== -1) return 'GitHub';
+    if (lower.indexOf('google.com') !== -1) return 'Google';
+    if (lower.indexOf('linkedin.com') !== -1) return 'LinkedIn';
+    if (lower.indexOf('hellowork.com') !== -1) return 'HelloWork';
+    if (lower.indexOf('francetravail.fr') !== -1 || lower.indexOf('pole-emploi.fr') !== -1) return 'France Travail';
+    if (lower.indexOf('easyjet.com') !== -1) return 'easyJet';
+    if (lower.indexOf('getyourguide.com') !== -1) return 'GetYourGuide';
+    if (lower.indexOf('doctolib.fr') !== -1) return 'Doctolib';
+    if (lower.indexOf('qare.fr') !== -1) return 'Qare';
+    if (lower.indexOf('lumosity.com') !== -1) return 'Lumosity';
+    if (lower.indexOf('twistshake.com') !== -1) return 'Twistshake';
+    if (lower.indexOf('asos.com') !== -1) return 'ASOS';
+    if (lower.indexOf('tiktok.com') !== -1) return 'TikTok';
+    if (lower.indexOf('facebookmail.com') !== -1) return 'Facebook';
+    if (lower.indexOf('instagram.com') !== -1) return 'Instagram';
 
     // Extraction standard du nom complet : "Prénom Nom <email@...>" -> "Prénom Nom"
     const match = decoded.match(/^"?([^"<]+)"?\s*(?:<.*>)?$/);
@@ -236,6 +238,37 @@ const Utils = (function () {
   function formatTime(date) {
     if (!date) return '';
     return Utilities.formatDate(date, Config.DEFAULTS.TIMEZONE, 'HH:mm');
+  }
+
+  /**
+   * Calcule la salutation temporelle adaptée à l'heure d'envoi.
+   * < 12:00 -> "Bonjour Kouroufia, voici votre synthèse matinale !"
+   * 12:00 à 18:00 -> "Bonjour Kouroufia, voici votre point de situation !"
+   * >= 18:00 -> "Bonsoir Kouroufia, voici votre synthèse de la journée !"
+   */
+  function getTemporalGreeting(date, recipientName) {
+    const d = date || new Date();
+    const name = recipientName || 'Kouroufia';
+    const hourStr = Utilities.formatDate(d, Config.DEFAULTS.TIMEZONE, 'HH');
+    const hour = parseInt(hourStr, 10);
+
+    if (hour < 12) {
+      return 'Bonjour ' + name + ', voici votre synthèse matinale !';
+    } else if (hour < 18) {
+      return 'Bonjour ' + name + ', voici votre point de situation !';
+    } else {
+      return 'Bonsoir ' + name + ', voici votre synthèse de la journée !';
+    }
+  }
+
+  /**
+   * Formule de politesse de fin adaptée à l'heure d'envoi.
+   */
+  function getTemporalSignoff(date) {
+    const d = date || new Date();
+    const hourStr = Utilities.formatDate(d, Config.DEFAULTS.TIMEZONE, 'HH');
+    const hour = parseInt(hourStr, 10);
+    return hour >= 18 ? 'Passez une excellente soirée !' : 'Passez une excellente journée !';
   }
 
   /**
@@ -348,6 +381,8 @@ const Utils = (function () {
     buildCalendarUrl: buildCalendarUrl,
     formatDateFrench: formatDateFrench,
     formatTime: formatTime,
+    getTemporalGreeting: getTemporalGreeting,
+    getTemporalSignoff: getTemporalSignoff,
     formatDuration: formatDuration,
     cleanEmailBody: cleanEmailBody,
     detectDestinationAccount: detectDestinationAccount,
