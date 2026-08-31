@@ -1,10 +1,70 @@
 /**
  * Google CC Briefing Agent
  * BriefingService.js — Ventilation par 9 catégories, salutation temporelle dynamique,
- * branding épuré "Mon Briefing Quotidien" et expédition sans émojis problématiques.
+ * branding épuré "Mon Briefing Quotidien" et expédition sécurisée.
  */
 
 const BriefingService = (function () {
+  /**
+   * Métadonnées d'affichage pour les 9 catégories thématiques
+   */
+  const CATEGORY_META = [
+    {
+      key: 'actions_immediates',
+      title: '⚡ Actions immédiates requises',
+      subtitle: 'Nécessitent une intervention ou réponse aujourd’hui',
+      accentColor: '#DC2626'
+    },
+    {
+      key: 'securite_acces',
+      title: '🛡️ Sécurité & Accès',
+      subtitle: 'Connexions, codes 2FA et vérifications de compte',
+      accentColor: '#1E40AF'
+    },
+    {
+      key: 'emploi_carriere',
+      title: '💼 Emploi & Carrière',
+      subtitle: 'Alertes de postes, recruteurs et opportunités pro',
+      accentColor: '#047857'
+    },
+    {
+      key: 'tech_dev',
+      title: '💻 Tech & Développement',
+      subtitle: 'GitHub, intégration continue, cloud et hébergement',
+      accentColor: '#4F46E5'
+    },
+    {
+      key: 'voyages_loisirs',
+      title: '✈️ Voyages & Loisirs',
+      subtitle: 'Billets d’avion, réservations et sorties',
+      accentColor: '#0891B2'
+    },
+    {
+      key: 'achats_promos',
+      title: '🏷️ Achats & Bons plans',
+      subtitle: 'Offres promotionnelles, soldes et commandes',
+      accentColor: '#B45309'
+    },
+    {
+      key: 'sante_demarches',
+      title: '🩺 Santé & Démarches',
+      subtitle: 'Rendez-vous médicaux et démarches administratives',
+      accentColor: '#059669'
+    },
+    {
+      key: 'reseaux_sociaux',
+      title: '📱 Réseaux sociaux',
+      subtitle: 'Mises à jour et interactions de votre réseau',
+      accentColor: '#7C3AED'
+    },
+    {
+      key: 'veille_culture',
+      title: '📚 Veille & Culture',
+      subtitle: 'Articles, apprentissage et actualités',
+      accentColor: '#4B5563'
+    }
+  ];
+
   /**
    * Construit et expédie le briefing quotidien.
    *
@@ -23,12 +83,17 @@ const BriefingService = (function () {
     const temporalGreeting = Utils.getTemporalGreeting(now, recipientName);
     const temporalSignoff = Utils.getTemporalSignoff(now);
 
-        const urgentItems = [];
-    const groupedInfo = {};
-    let urgentCount = 0;
+    const urgentItems = [];
+    const categorizedMap = {};
+    for (let c = 0; c < CATEGORY_META.length; c++) {
+      categorizedMap[CATEGORY_META[c].key] = [];
+    }
 
+    // 1. Tri et ventilation des e-mails
     for (let i = 0; i < emails.length; i++) {
       const email = emails[i];
+      let catKey = email.category || 'veille_culture';
+
       const itemData = {
         id: email.id,
         threadId: email.threadId,
@@ -44,23 +109,42 @@ const BriefingService = (function () {
         webUrl: Utils.buildGmailUrl(email.threadId)
       };
 
-      if (email.actionRequired) {
+      if (email.actionRequired || catKey === 'actions_immediates') {
         urgentItems.push(itemData);
-        urgentCount++;
       } else {
-        const catKey = email.category || 'Pour information';
-        if (!groupedInfo[catKey]) {
-          groupedInfo[catKey] = [];
+        if (!categorizedMap[catKey]) {
+          catKey = 'veille_culture';
         }
-        groupedInfo[catKey].push(itemData);
+        categorizedMap[catKey].push(itemData);
       }
     }
 
-    // 4. Préparation des variables du template
+    // 2. Construction de la liste ordonnée des catégories d'information non vides
+    const displayCategories = [];
+    for (let m = 0; m < CATEGORY_META.length; m++) {
+      const meta = CATEGORY_META[m];
+      // Ignorer actions_immediates ici car déjà dans urgentItems
+      if (meta.key === 'actions_immediates') continue;
+
+      const items = categorizedMap[meta.key] || [];
+      if (items.length > 0) {
+        displayCategories.push({
+          key: meta.key,
+          title: meta.title,
+          subtitle: meta.subtitle,
+          accentColor: meta.accentColor,
+          items: items
+        });
+      }
+    }
+
+    const urgentCount = urgentItems.length;
+
+    // 3. Préparation des variables du template
     const templateData = {
       isTestMode: isTestMode,
-      dateTitle: "Votre journée à venir",
-      greeting: "Bonjour Kouroufia. Voici votre programme pour la journée !",
+      dateTitle: formattedDate,
+      greeting: temporalGreeting,
       signoff: temporalSignoff,
       recipientName: recipientName,
       recipientEmail: recipientEmail,
@@ -70,13 +154,13 @@ const BriefingService = (function () {
         todayEventsCount: agenda.todayEvents.length
       },
       urgentItems: urgentItems,
-      groupedInfo: groupedInfo,
+      displayCategories: displayCategories,
       todayEvents: agenda.todayEvents,
       tomorrowEvents: agenda.tomorrowEvents,
       isCalm: emails.length === 0 && agenda.todayEvents.length === 0
     };
 
-    // 5. Sujet propre sans émojis problématiques (zéro caractère de remplacement )
+    // 4. Sujet propre sans émojis problématiques (zéro caractère de remplacement )
     let emailSubject = '';
     if (isTestMode) {
       emailSubject = '[TEST] Mon Briefing Quotidien • ' + formattedDate;
@@ -94,11 +178,11 @@ const BriefingService = (function () {
       emailSubject = 'Mon Briefing Quotidien • ' + formattedDate;
     }
 
-    // 6. Rendu HTML et Texte brut
+    // 5. Rendu HTML et Texte brut
     const htmlBody = renderTemplate(templateData);
     const plainTextBody = renderPlainText(templateData);
 
-    // 7. Expédition via GmailApp avec le nom clair "Mon Briefing Quotidien"
+    // 6. Expédition via GmailApp avec le nom clair "Mon Briefing Quotidien"
     console.log(
       'Envoi du briefing à : ' +
         recipientEmail +
@@ -139,23 +223,23 @@ const BriefingService = (function () {
     lines.push(data.greeting);
     lines.push('');
 
-    if (data.urgentItems && data.urgentItems.length > 0) {
-      lines.push('=== ACTIONS PRIORITAIRES ===');
-      data.urgentItems.forEach(function (it) {
-        let line = '• ' + it.sender + ' : ' + it.summary;
-        if (it.actionTitle) line += ' [Action : ' + it.actionTitle + ']';
-        if (it.deadline) line += ' (Échéance : ' + it.deadline + ')';
-        line += ' — ' + it.webUrl;
-        lines.push(line);
+    if (data.urgentItems.length > 0) {
+      lines.push('=== ACTIONS IMMÉDIATES REQUISES ===');
+      data.urgentItems.forEach(function (e) {
+        lines.push('• ' + e.sender + ' : ' + e.actionTitle + ' — ' + e.summary);
+        if (e.deadline) lines.push('  Échéance : ' + e.deadline);
+        lines.push('  Lien : ' + e.webUrl);
       });
       lines.push('');
     }
 
-    const categories = Object.keys(data.groupedInfo || {});
-    categories.forEach(function (cat) {
-      lines.push('=== ' + cat.toUpperCase() + ' ===');
-      data.groupedInfo[cat].forEach(function (it) {
+    data.displayCategories.forEach(function (cat) {
+      lines.push('=== ' + cat.title.toUpperCase() + ' ===');
+      cat.items.forEach(function (it) {
         let line = '• ' + it.sender + ' : ' + it.summary;
+        if (it.deadline) {
+          line += ' (Échéance : ' + it.deadline + ')';
+        }
         line += ' — ' + it.webUrl;
         lines.push(line);
       });

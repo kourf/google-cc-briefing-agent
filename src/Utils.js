@@ -108,9 +108,11 @@ const Utils = (function () {
     return text.trim();
   }
 
-
   /**
-   * Échappe le HTML puis transforme le markdown gras (**texte**) en balise <strong>.
+   * Échappe le HTML puis transforme de façon sécurisée la syntaxe Markdown **texte** en <strong>texte</strong>.
+   *
+   * @param {string} str - Texte avec syntaxe markdown
+   * @return {string} HTML sécurisé avec balises <strong>
    */
   function formatSummaryHtml(str) {
     if (!str) return '';
@@ -134,7 +136,11 @@ const Utils = (function () {
    */
   function escapeHtml(str) {
     if (str === null || str === undefined) return '';
-    const clean = cleanText(String(str));
+    const clean = decodeHtmlEntities(String(str))
+      .replace(/<\/?[a-z0-9]+(?:\s+[^>]*?)?\/?>/gi, ' ')
+      .replace(/['’]/g, '’')
+      .replace(/&[a-zA-Z0-9#]+;/g, '');
+
     return clean
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
@@ -230,7 +236,18 @@ const Utils = (function () {
    */
   function formatDateFrench(date) {
     if (!date) return '';
-    return Utilities.formatDate(date, Config.DEFAULTS.TIMEZONE, 'dd/MM/yyyy');
+    try {
+      const formatted = date.toLocaleDateString('fr-FR', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        timeZone: Config.DEFAULTS.TIMEZONE
+      });
+      return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+    } catch (e) {
+      return Utilities.formatDate(date, Config.DEFAULTS.TIMEZONE, 'dd/MM/yyyy');
+    }
   }
 
   /**
