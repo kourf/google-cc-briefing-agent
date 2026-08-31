@@ -12,7 +12,7 @@
     <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 6px;">
       <tr>
         <td style="vertical-align: middle;">
-          <span style="font-size: 19px; font-weight: 800; color: #111827; letter-spacing: -0.4px;">Mon Briefing Quotidien</span>
+          <span style="font-size: 19px; font-weight: 800; color: #111827; letter-spacing: -0.4px;"><?= Utils.escapeHtml(data.dateTitle) ?></span>
         </td>
         <? if (data.isTestMode) { ?>
         <td style="text-align: right; vertical-align: middle;">
@@ -22,9 +22,7 @@
       </tr>
     </table>
 
-    <div style="font-size: 12.5px; color: #6B7280; font-weight: 500; margin-bottom: 10px;">
-      <?= Utils.escapeHtml(data.dateTitle) ?>
-    </div>
+
 
     <!-- BADGE MÉTRIQUE DU BRIEFING -->
     <div style="margin-bottom: 16px;">
@@ -48,46 +46,68 @@
     <? } ?>
 
     <!-- BOUCLE SUR LES CATÉGORIES THÉMATIQUES ACTIVES -->
-    <? for (var c = 0; c < data.displayCategories.length; c++) { 
-         var cat = data.displayCategories[c];
-         var isUrgent = (cat.key === 'actions_immediates');
-    ?>
-    <div style="margin-bottom: 24px; <? if (isUrgent) { ?>background-color: #FEF2F2; padding: 14px 14px 10px 14px; border-radius: 8px; border: 1px solid #FCA5A5;<? } ?>">
-      <div style="font-size: 15px; font-weight: 700; color: <?= cat.accentColor ?>; margin-bottom: 2px;">
-        <?= Utils.escapeHtml(cat.title) ?>
-      </div>
-      <div style="font-size: 12px; color: #6B7280; margin-bottom: 12px;">
-        <?= Utils.escapeHtml(cat.subtitle) ?>
+        <!-- ACTIONS PRIORITAIRES -->
+    <? if (data.urgentItems && data.urgentItems.length > 0) { ?>
+    <div style="margin-bottom: 24px;">
+      <div style="font-size: 15px; font-weight: 700; color: #DC2626; margin-bottom: 8px;">
+        🧠 Actions prioritaires
       </div>
       <ul style="margin: 0; padding-left: 20px; list-style-type: disc;">
-        <? for (var i = 0; i < cat.items.length; i++) { 
-             var item = cat.items[i];
+        <? for (var i = 0; i < data.urgentItems.length; i++) {
+             var item = data.urgentItems[i];
         ?>
         <li style="margin-bottom: 10px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
-          <? if (isUrgent) { ?>
-            <span style="color: #6B7280; font-size: 12px;">&#x23F1; <?= item.timeEstimate ?> &bull; </span>
-            <strong><?= Utils.escapeHtml(item.actionTitle) ?></strong>
-            <span style="color: #4B5563;">(<?= Utils.escapeHtml(item.sender) ?>)</span> : 
-            <?= Utils.escapeHtml(item.summary) ?>
-            <? if (item.deadline) { ?>
-              <span style="color: #DC2626; font-weight: 600; font-size: 12px;">[Échéance : <?= Utils.escapeHtml(item.deadline) ?>]</span>
-            <? } ?>
-          <? } else { ?>
-            <strong><?= Utils.escapeHtml(item.sender) ?> :</strong>
-            <?= Utils.escapeHtml(item.summary) ?>
+          <span style="color: #6B7280; font-size: 12px;">&#x23F1; <?= item.timeEstimate ?> &bull; </span>
+          <strong><?= Utils.escapeHtml(item.actionTitle) ?></strong>
+          <span style="color: #4B5563;">(<?= Utils.escapeHtml(item.sender) ?>)</span> :
+          <?!= Utils.formatSummaryHtml(item.summary) ?>
+          <? if (item.deadline) { ?>
+            <span style="color: #DC2626; font-weight: 600; font-size: 12px;">[Échéance : <?= Utils.escapeHtml(item.deadline) ?>]</span>
           <? } ?>
           <a href="<?= item.webUrl ?>" target="_blank" style="color: #2563EB; text-decoration: underline; font-size: 12px; margin-left: 4px; font-weight: 600; white-space: nowrap;">&#x1F517; Détails</a>
         </li>
         <? } ?>
       </ul>
     </div>
-    <? if (!isUrgent && c < data.displayCategories.length - 1) { ?>
     <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 16px 0 20px 0;">
     <? } ?>
+
+    <!-- POUR INFORMATION -->
+    <?
+       var infoCategories = Object.keys(data.groupedInfo || {});
+       if (infoCategories.length > 0) {
+    ?>
+    <div style="margin-bottom: 24px;">
+      <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 8px;">
+        🔔 Pour information
+      </div>
+
+      <? for (var c = 0; c < infoCategories.length; c++) {
+           var catName = infoCategories[c];
+           var items = data.groupedInfo[catName];
+      ?>
+      <div style="margin-bottom: 16px;">
+        <div style="font-size: 13px; font-weight: 700; color: #4B5563; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">
+          <?= Utils.escapeHtml(catName) ?>
+        </div>
+        <ul style="margin: 0; padding-left: 20px; list-style-type: disc;">
+          <? for (var i = 0; i < items.length; i++) {
+               var item = items[i];
+          ?>
+          <li style="margin-bottom: 8px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
+            <strong><?= Utils.escapeHtml(item.sender) ?> :</strong>
+            <?!= Utils.formatSummaryHtml(item.summary) ?>
+            <a href="<?= item.webUrl ?>" target="_blank" style="color: #2563EB; text-decoration: underline; font-size: 12px; margin-left: 4px; font-weight: 600; white-space: nowrap;">&#x1F517; Détails</a>
+          </li>
+          <? } ?>
+        </ul>
+      </div>
+      <? } ?>
+    </div>
     <? } ?>
 
     <!-- PLANNING DU JOUR -->
-    <? if (data.todayEvents.length > 0 || data.displayCategories.length > 0) { ?>
+    <? if (data.todayEvents.length > 0 || (data.urgentItems && data.urgentItems.length > 0) || (Object.keys(data.groupedInfo || {}).length > 0)) { ?>
     <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 20px 0 20px 0;">
     <div style="margin-bottom: 24px;">
       <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 8px;">
