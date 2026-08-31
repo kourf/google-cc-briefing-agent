@@ -289,7 +289,20 @@ const GeminiService = (function () {
       throw emptyErr;
     }
 
-    const parsedArray = JSON.parse(candidateText);
+    let parsedArray;
+    try {
+      let cleanText = candidateText.trim();
+      // Remove markdown formatting if present
+      cleanText = cleanText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+      // Replace unescaped control characters with spaces to prevent JSON.parse from failing
+      cleanText = cleanText.replace(/[\n\r\t]/g, " ");
+      parsedArray = JSON.parse(cleanText);
+    } catch (e) {
+      const err = new Error('Invalid JSON response from Gemini: ' + e.message);
+      err.statusCode = 502;
+      throw err;
+    }
+
     const resultMap = {};
 
     if (Array.isArray(parsedArray)) {
