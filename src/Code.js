@@ -1,13 +1,18 @@
 /**
- * Initialisation complète en 1 clic : configure la clé, installe le déclencheur à 06:00 et lance le test !
+ * Google CC Briefing Agent
+ * Code.js — Points d'entrée, orchestration des tests et fonctions déclenchées
+ */
+
+/**
+ * Initialisation complète en 1 clic : configure le modèle, installe le déclencheur à 06:00 et lance le test !
  */
 function setupProjectAndRunTest() {
   console.log('=== INITIALISATION COMPLÈTE DU PROJET ===');
   
   // 1. Initialisation de la clé API Gemini et du modèle
   const apiKey = Config.getGeminiApiKey();
-  PropertiesService.getScriptProperties().setProperty('GEMINI_MODEL', 'gemini-2.0-flash');
-  console.log('✓ Clé Gemini et modèle gemini-2.0-flash configurés.');
+  Config.setGeminiModel('gemini-flash-lite-latest');
+  console.log('✓ Modèle Gemini ultra-rapide (Flash-Lite) configuré.');
 
   // 2. Initialisation du checkpoint de production
   setupInitialCheckpoint();
@@ -125,6 +130,13 @@ function runBriefingTest() {
     console.error('Erreur lors du test manuel :', error.stack || error.message);
     throw error;
   }
+}
+
+/**
+ * Alias pratique pour exécuter le test rapide sous le nom 'runBriefTest'.
+ */
+function runBriefTest() {
+  runBriefingTest();
 }
 
 /**

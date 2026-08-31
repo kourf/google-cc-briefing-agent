@@ -84,13 +84,16 @@ const Config = (function () {
     }
   }
 
+  /**
+   * Récupère la clé API Gemini depuis les Script Properties sécurisées.
+   * Aucune clé n'est stockée en dur dans le code source.
+   */
   function getGeminiApiKey() {
-    let key = getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_API_KEY, null);
+    const key = getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_API_KEY, null);
     if (!key) {
-      const fallbackKey = 'AQ.Ab8RN6I5W0UV9IYPwcO_fsKetGxHhskNP3sK1NiQusYxsJjJVA';
-      console.info('Initialisation automatique de GEMINI_API_KEY dans les Script Properties.');
-      setScriptProperty(SCRIPT_PROP_KEYS.GEMINI_API_KEY, fallbackKey);
-      key = fallbackKey;
+      throw new Error(
+        'La clé GEMINI_API_KEY est manquante dans les Paramètres du projet > Propriétés du script.'
+      );
     }
     return key;
   }
@@ -112,6 +115,10 @@ const Config = (function () {
 
   function getGeminiModel() {
     return getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, DEFAULTS.GEMINI_MODEL);
+  }
+
+  function setGeminiModel(model) {
+    setScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, model);
   }
 
   function getLastCheckpointTime() {
@@ -140,6 +147,7 @@ const Config = (function () {
     isWeekendEnabled: isWeekendEnabled,
     getTestLookbackHours: getTestLookbackHours,
     getGeminiModel: getGeminiModel,
+    setGeminiModel: setGeminiModel,
     getLastCheckpointTime: getLastCheckpointTime,
     setLastCheckpointTime: setLastCheckpointTime,
     getLastBriefingRunTime: getLastBriefingRunTime,
