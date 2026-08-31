@@ -1,6 +1,6 @@
 /**
  * Google CC Briefing Agent
- * Config.js — Configuration centralisée, modèles Gemini ultra-rapides et gestion des Script Properties
+ * Config.js — Configuration centralisée, modèles Gemini fiables et gestion des Script Properties
  */
 
 const Config = (function () {
@@ -19,14 +19,15 @@ const Config = (function () {
     BRIEFING_RECIPIENT_EMAIL: 'kouroufia15@gmail.com',
     WEEKEND_ENABLED: true,
     TEST_LOOKBACK_HOURS: 24,
-    // Modèle principal optimisé pour la vitesse (< 2s par lot) et haute disponibilité
+    // Modèle officiel stable à haut débit sans rate-limit sévère
     GEMINI_MODEL: 'gemini-2.0-flash',
     // Modèle de secours officiel
     GEMINI_FALLBACK_MODEL: 'gemini-1.5-flash',
     GEMINI_API_BASE_URL: 'https://generativelanguage.googleapis.com/v1beta/models',
-    BATCH_SIZE: 6,
+    // Tout traiter en un seul lot (jusqu'à 25 e-mails) pour éliminer les erreurs 429
+    BATCH_SIZE: 25,
     MAX_RETRIES: 4,
-    INITIAL_BACKOFF_MS: 1500,
+    INITIAL_BACKOFF_MS: 2000,
     MAX_OUTPUT_TOKENS: 2048,
     TEMPERATURE: 0.2,
     LOCK_TIMEOUT_MS: 30000,
@@ -86,7 +87,6 @@ const Config = (function () {
 
   /**
    * Récupère la clé API Gemini depuis les Script Properties sécurisées.
-   * Aucune clé n'est stockée en dur dans le code source.
    */
   function getGeminiApiKey() {
     const key = getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_API_KEY, null);
@@ -113,8 +113,17 @@ const Config = (function () {
     return isNaN(num) ? DEFAULTS.TEST_LOOKBACK_HOURS : num;
   }
 
+  /**
+   * Renvoie le modèle Gemini configuré.
+   * Nettoie automatiquement les anciens modèles non viables (ex: gemini-3.6-flash) qui causaient l'erreur 429.
+   */
   function getGeminiModel() {
-    return getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, DEFAULTS.GEMINI_MODEL);
+    let model = getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, DEFAULTS.GEMINI_MODEL);
+    if (!model || model.indexOf('3.6') !== -1 || model.indexOf('lite') !== -1) {
+      model = DEFAULTS.GEMINI_MODEL;
+      setScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, model);
+    }
+    return model;
   }
 
   function setGeminiModel(model) {

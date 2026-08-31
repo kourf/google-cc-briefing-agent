@@ -22,97 +22,88 @@
       </tr>
     </table>
 
-    <div style="font-size: 12.5px; color: #6B7280; font-weight: 500; margin-bottom: 10px;">
-      <?= Utils.escapeHtml(data.dateTitle) ?>
+    <div style="font-size: 12.5px; color: #6B7280; font-weight: 500; margin-bottom: 12px;">
+      <?= data.dateTitle ?>
+    </div>
+
+    <!-- SALUTATION TEMPORELLE DYNAMIQUE -->
+    <div style="font-size: 15.5px; font-weight: 700; color: #111827; margin-bottom: 10px;">
+      <?= data.greeting ?>
     </div>
 
     <!-- BADGE MÉTRIQUE DU BRIEFING -->
-    <div style="margin-bottom: 16px;">
+    <div style="margin-bottom: 18px;">
       <span style="display: inline-block; background-color: #F3F4F6; color: #374151; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 6px; border: 1px solid #E5E7EB;">
         &#x1F4CA; <?= data.stats.totalEmails ?> e-mails analysés &bull; <?= data.stats.urgentCount ?> action<?= data.stats.urgentCount > 1 ? 's' : '' ?> requise<?= data.stats.urgentCount > 1 ? 's' : '' ?>
       </span>
     </div>
 
-    <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 0 0 18px 0;">
-
-    <!-- SALUTATION TEMPORELLE DYNAMIQUE -->
-    <div style="font-size: 15.5px; font-weight: 700; color: #111827; margin-bottom: 20px;">
-      <?= Utils.escapeHtml(data.greeting) ?>
-    </div>
+    <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
 
     <!-- ÉTAT CALME SI AUCUN ÉLÉMENT -->
     <? if (data.isCalm) { ?>
-    <div style="font-size: 14px; color: #4B5563; margin-bottom: 24px; padding: 12px 16px; background-color: #F9FAFB; border-radius: 6px; border: 1px solid #E5E7EB;">
+    <div style="font-size: 14px; color: #4B5563; margin-bottom: 20px; padding: 12px 16px; background-color: #F9FAFB; border-radius: 6px; border: 1px solid #E5E7EB;">
       &#x2600;&#xFE0F; Tout est calme aujourd'hui. Aucun e-mail prioritaire ni rendez-vous à signaler.
     </div>
     <? } ?>
 
-    <!-- ACTIONS IMMÉDIATES REQUISES -->
+    <!-- 1. ACTIONS PRIORITAIRES (TOP OF MIND) -->
     <? if (data.urgentItems && data.urgentItems.length > 0) { ?>
-    <div style="margin-bottom: 24px; background-color: #FEF2F2; padding: 14px 14px 10px 14px; border-radius: 8px; border: 1px solid #FCA5A5;">
-      <div style="font-size: 15px; font-weight: 700; color: #DC2626; margin-bottom: 2px;">
-        &#x26A1; Actions immédiates requises
-      </div>
-      <div style="font-size: 12px; color: #7F1D1D; margin-bottom: 12px;">
-        Nécessitent une intervention ou réponse aujourd’hui
+    <div style="margin-bottom: 20px;">
+      <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 10px;">
+        &#x1F9E0; Actions prioritaires
       </div>
       <ul style="margin: 0; padding-left: 20px; list-style-type: disc;">
         <? for (var i = 0; i < data.urgentItems.length; i++) { 
              var item = data.urgentItems[i];
         ?>
-        <li style="margin-bottom: 10px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
-          <span style="color: #7F1D1D; font-size: 12px;">&#x23F1; <?= item.timeEstimate ?> &bull; </span>
-          <strong><?= Utils.escapeHtml(item.actionTitle) ?></strong>
-          <span style="color: #4B5563;">(<?= Utils.escapeHtml(item.sender) ?>)</span> : 
-          <?!= Utils.formatSummaryHtml(item.summary) ?>
-          <? if (item.deadline) { ?>
-            <span style="color: #DC2626; font-weight: 600; font-size: 12px;">[Échéance : <?= Utils.escapeHtml(item.deadline) ?>]</span>
-          <? } ?>
+        <li style="margin-bottom: 8px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
+          <span style="color: #6B7280; font-size: 12px;">&#x23F1;&#xFE0F; <?= item.timeEstimate ?> &bull; </span>
+          <strong><?= item.actionTitle ?></strong><? if (item.deadline) { ?> <span style="color: #6B7280;">(<?= item.deadline ?>)</span><? } ?>.
           <a href="<?= item.webUrl ?>" target="_blank" style="color: #2563EB; text-decoration: underline; font-size: 12px; margin-left: 4px; font-weight: 600; white-space: nowrap;">&#x1F517; Détails</a>
         </li>
         <? } ?>
       </ul>
     </div>
-    <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 18px 0 20px 0;">
+    <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
     <? } ?>
 
-    <!-- BOUCLE SUR LES CATÉGORIES THÉMATIQUES ACTIVES -->
-    <? for (var c = 0; c < data.displayCategories.length; c++) { 
-         var cat = data.displayCategories[c];
-    ?>
-    <div style="margin-bottom: 24px;">
-      <div style="font-size: 15px; font-weight: 700; color: <?= cat.accentColor ?>; margin-bottom: 2px;">
-        <?= Utils.escapeHtml(cat.title) ?>
-      </div>
-      <div style="font-size: 12px; color: #6B7280; margin-bottom: 12px;">
-        <?= Utils.escapeHtml(cat.subtitle) ?>
+    <!-- 2. POUR INFORMATION (FYI) AVEC SOUS-CATÉGORIES DYNAMIQUES -->
+    <? if (data.sortedInfoGroups && data.sortedInfoGroups.length > 0) { ?>
+    <div style="margin-bottom: 20px;">
+      <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 12px;">
+        &#x1F514; Pour information
       </div>
       <ul style="margin: 0; padding-left: 20px; list-style-type: disc;">
-        <? for (var j = 0; j < cat.items.length; j++) { 
-             var cItem = cat.items[j];
+        <? for (var g = 0; g < data.sortedInfoGroups.length; g++) { 
+             var group = data.sortedInfoGroups[g];
         ?>
-        <li style="margin-bottom: 10px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
-          <strong><?= Utils.escapeHtml(cItem.sender) ?> :</strong>
-          <?!= Utils.formatSummaryHtml(cItem.summary) ?>
-          <a href="<?= cItem.webUrl ?>" target="_blank" style="color: #2563EB; text-decoration: underline; font-size: 12px; margin-left: 4px; font-weight: 600; white-space: nowrap;">&#x1F517; Détails</a>
+        <li style="margin-bottom: 14px; font-size: 13.8px; line-height: 1.5; color: #111827;">
+          <strong><?= group.name ?> :</strong>
+          <ul style="margin: 6px 0 4px 0; padding-left: 20px; list-style-type: circle;">
+            <? for (var j = 0; j < group.items.length; j++) { 
+                 var cItem = group.items[j];
+            ?>
+            <li style="margin-bottom: 7px; font-size: 13.5px; line-height: 1.5; color: #374151;">
+              <strong><?= cItem.sender ?> :</strong> <?!= Utils.formatSummaryHtml(cItem.summary) ?>
+              <a href="<?= cItem.webUrl ?>" target="_blank" style="color: #2563EB; text-decoration: underline; font-size: 12px; margin-left: 4px; font-weight: 600; white-space: nowrap;">&#x1F517; Détails</a>
+            </li>
+            <? } ?>
+          </ul>
         </li>
         <? } ?>
       </ul>
     </div>
-    <? if (c < data.displayCategories.length - 1) { ?>
-    <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 16px 0 20px 0;">
-    <? } ?>
+    <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
     <? } ?>
 
-    <!-- PLANNING DU JOUR -->
-    <? if (data.todayEvents.length > 0 || (data.urgentItems && data.urgentItems.length > 0) || data.displayCategories.length > 0) { ?>
-    <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 20px 0 20px 0;">
-    <div style="margin-bottom: 24px;">
-      <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 8px;">
-        &#x1F4C5; Votre planning du jour
+    <!-- 3. AU PLANNING DU JOUR (ON YOUR CALENDAR) -->
+    <div style="margin-bottom: 20px;">
+      <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 10px;">
+        &#x1F4C5; Au planning du jour
       </div>
-      <? if (data.todayEvents.length === 0) { ?>
-      <div style="font-size: 13px; color: #6B7280; margin-left: 10px;">
+      <? if (!data.todayEvents || data.todayEvents.length === 0) { ?>
+      <div style="font-size: 13.5px; color: #6B7280; margin-left: 10px;">
         Aucun rendez-vous programmé aujourd'hui.
       </div>
       <? } else { ?>
@@ -121,14 +112,13 @@
              var ev = data.todayEvents[t];
         ?>
         <li style="margin-bottom: 10px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
-          <strong><?= Utils.escapeHtml(ev.timeFormatted) ?> : <?= Utils.escapeHtml(ev.title) ?></strong>
-          <? if (ev.durationFormatted) { ?> <span style="color: #6B7280; font-size: 12.5px;">(<?= ev.durationFormatted ?>)</span><? } ?>
+          <strong><?= ev.timeFormatted ?> : <?= ev.title ?></strong><? if (ev.durationFormatted) { ?> <span style="color: #6B7280; font-size: 12.5px;">(<?= ev.durationFormatted ?>)</span><? } ?>
           <a href="<?= ev.calendarUrl ?>" target="_blank" style="color: #2563EB; text-decoration: underline; font-size: 12px; margin-left: 4px; white-space: nowrap; font-weight: 600;">&#x1F517; Agenda</a>
 
           <? if (ev.location || ev.conferenceLink) { ?>
           <ul style="margin: 4px 0 0 0; padding-left: 20px; list-style-type: circle;">
             <? if (ev.location) { ?>
-            <li style="font-size: 12.5px; color: #4B5563;">Lieu : <?= Utils.escapeHtml(ev.location) ?></li>
+            <li style="font-size: 12.5px; color: #4B5563;">Lieu : <?= ev.location ?></li>
             <? } ?>
             <? if (ev.conferenceLink) { ?>
             <li style="font-size: 12.5px; color: #047857;">
@@ -142,17 +132,16 @@
       </ul>
       <? } ?>
     </div>
-    <? } ?>
 
     <!-- PIED DE PAGE ÉPURÉ -->
-    <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 24px 0 16px 0;">
+    <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 24px 0 16px 0;">
 
-    <div style="font-size: 13.5px; color: #374151; margin-bottom: 10px;">
-      <?= Utils.escapeHtml(data.signoff) ?>
+    <div style="font-size: 13.5px; color: #374151; margin-bottom: 8px;">
+      <?= data.signoff ?>
     </div>
 
     <div style="font-size: 12px; color: #9CA3AF;">
-      Mon Briefing Quotidien &bull; <?= Utils.escapeHtml(data.recipientEmail) ?>
+      Mon Briefing Quotidien &bull; <?= data.recipientEmail ?>
     </div>
 
   </div>

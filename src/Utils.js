@@ -65,13 +65,12 @@ const Utils = (function () {
   }
 
   /**
-   * Assainit complètement une chaîne de texte :
+   * Assainit complètement une chaîne de texte pour le rendu pur.
    * - Décode toutes les entités HTML
    * - Supprime les balises HTML (<...>)
-   * - Élimine les symboles markdown parasites (*, _, `, ~, #)
    * - Supprime les délimiteurs mathématiques/LaTeX (ex: $(m/w/d)$ -> (m/w/d))
-   * - Convertit les apostrophes ASCII en apostrophes typographiques françaises (’) pour éviter tout réencodage en &#039;
-   * - Normalise les espaces multiples
+   * - Convertit les apostrophes ASCII en apostrophes typographiques françaises (’)
+   * - Élimine tout résidu &amp; ou entités brutes
    *
    * @param {string} str - Texte brut ou enrichi
    * @return {string} Texte fluide, naturel et nettoyé
@@ -89,10 +88,8 @@ const Utils = (function () {
     text = text.replace(/\\\[([^\]]+)\\\]/g, '$1');
     text = text.replace(/[\$\\]/g, '');
 
-    // Suppression du formatage Markdown gras/italique/code/liens
-    text = text.replace(/\*\*(.*?)\*\*/g, '$1');
+    // Nettoyage Markdown hors gras simple
     text = text.replace(/__(.*?)__/g, '$1');
-    text = text.replace(/\*(.*?)\*/g, '$1');
     text = text.replace(/_(.*?)_/g, '$1');
     text = text.replace(/`{1,3}(.*?)`{1,3}/g, '$1');
     text = text.replace(/\[(.*?)\](?:\(.*?\))?/g, '$1');
@@ -101,24 +98,43 @@ const Utils = (function () {
     // Remplacement des apostrophes ASCII par l'apostrophe typographique française
     text = text.replace(/['’]/g, '’');
 
-    // Normalisation des espaces et sauts de ligne
+    // Élimination de toute entité non décodée résiduelle
+    text = text.replace(/&[a-zA-Z0-9#]+;/g, '');
+
+    // Normalisation des espaces
     text = text.replace(/[ \t]+/g, ' ');
     text = text.replace(/\n\s*\n+/g, '\n');
-    text = text.replace(/&[a-zA-Z0-9#]+;/g, '');
     return text.trim();
   }
 
   /**
-   * Échappe le HTML puis transforme de façon sécurisée la syntaxe Markdown **texte** en <strong>texte</strong>.
+   * Formate de façon sécurisée un résumé pour l'e-mail HTML.
+   * Décode les entités HTML, élimine les tags parasites, sécurise le texte,
+   * puis convertit **texte** en <strong>texte</strong>.
    *
-   * @param {string} str - Texte avec syntaxe markdown
+   * @param {string} str - Texte contenant potentiellement du markdown **gras**
    * @return {string} HTML sécurisé avec balises <strong>
    */
   function formatSummaryHtml(str) {
     if (!str) return '';
-    let safeStr = escapeHtml(str);
-    safeStr = safeStr.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    return safeStr;
+    let text = decodeHtmlEntities(String(str));
+
+    // Supprimer balises HTML brutes injectées
+    text = text.replace(/<\/?[a-z0-9]+(?:\s+[^>]*?)?\/?>/gi, ' ');
+    text = text.replace(/[\$\\]/g, '');
+    text = text.replace(/['’]/g, '’');
+
+    // Échapper les caractères HTML pour la sécurité
+    text = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+    // Convertir **terme clé** en balise <strong>terme clé</strong>
+    text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+
+    return text.trim();
   }
 
   /**
@@ -138,8 +154,7 @@ const Utils = (function () {
     if (str === null || str === undefined) return '';
     const clean = decodeHtmlEntities(String(str))
       .replace(/<\/?[a-z0-9]+(?:\s+[^>]*?)?\/?>/gi, ' ')
-      .replace(/['’]/g, '’')
-      .replace(/&[a-zA-Z0-9#]+;/g, '');
+      .replace(/['’]/g, '’');
 
     return clean
       .replace(/&/g, '&amp;')
@@ -380,10 +395,10 @@ const Utils = (function () {
    * Calcule le délai d'attente exponentiel avec gigue aléatoire (jitter).
    */
   function calculateBackoffWithJitter(attempt, baseDelayMs) {
-    const base = baseDelayMs || 1500;
+    const base = baseDelayMs || 2000;
     const exponent = Math.max(0, attempt - 1);
     const exponentialDelay = base * Math.pow(2, exponent);
-    const jitter = Math.floor(Math.random() * 400) + 100;
+    const jitter = Math.floor(Math.random() * 500) + 200;
     return Math.min(exponentialDelay + jitter, 30000);
   }
 

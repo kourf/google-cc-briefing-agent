@@ -1,29 +1,14 @@
 /**
  * Google CC Briefing Agent
- * GeminiService.js — Analyse IA avec Gemini 2.0 Flash, taxonomie stricte à 9 catégories,
- * résumés actifs en français pur (zéro formulation robotique) et mise en valeur des points clés.
+ * GeminiService.js — Analyse IA avec Gemini 2.0 Flash en lot unique,
+ * élimination des erreurs HTTP 429, structuration en 3 niveaux et mise en valeur des points clés.
  */
 
 const GeminiService = (function () {
   /**
-   * Les 9 catégories mutuellement exclusives demandées
-   */
-  const CATEGORIES = {
-    ACTIONS_IMMEDIATES: 'actions_immediates',
-    SECURITE_ACCES: 'securite_acces',
-    EMPLOI_CARRIERE: 'emploi_carriere',
-    TECH_DEV: 'tech_dev',
-    VOYAGES_LOISIRS: 'voyages_loisirs',
-    ACHATS_PROMOS: 'achats_promos',
-    SANTE_DEMARCHES: 'sante_demarches',
-    RESEAUX_SOCIAUX: 'reseaux_sociaux',
-    VEILLE_CULTURE: 'veille_culture'
-  };
-
-  /**
-   * Analyse la liste des e-mails dédupliqués via l'API Gemini par lots optimisés.
+   * Analyse l'ensemble des e-mails dédupliqués en UN SEUL appel optimisé pour éliminer les erreurs de quota 429.
    *
-   * @param {Array<Object>} emailsList - E-mails dédupliqués
+   * @param {Array<Object>} emailsList - Liste des e-mails dédupliqués
    * @return {Array<Object>} E-mails enrichis de leur analyse IA
    */
   function analyzeEmails(emailsList) {
@@ -32,13 +17,14 @@ const GeminiService = (function () {
     }
 
     const apiKey = Config.getGeminiApiKey();
-    const batchSize = Config.DEFAULTS.BATCH_SIZE || 6;
-    const totalBatches = Math.ceil(emailsList.length / batchSize);
+    const batchSize = Config.DEFAULTS.BATCH_SIZE || 25;
     const enrichedResults = [];
 
+    // Si le nombre d'e-mails est inférieur ou égal au batchSize (cas standard de 10-20 e-mails), 1 seul appel est fait
     for (let i = 0; i < emailsList.length; i += batchSize) {
-      const batchIndex = Math.floor(i / batchSize) + 1;
       const batch = emailsList.slice(i, i + batchSize);
+      const batchIndex = Math.floor(i / batchSize) + 1;
+      const totalBatches = Math.ceil(emailsList.length / batchSize);
 
       console.log(
         'Analyse du lot Gemini ' +
@@ -47,7 +33,7 @@ const GeminiService = (function () {
           totalBatches +
           ' (' +
           batch.length +
-          ' e-mails)...'
+          ' e-mails traités simultanément)...'
       );
 
       const batchAnalysis = analyzeBatchWithRetry(batch, apiKey, batchIndex, totalBatches);
@@ -58,9 +44,9 @@ const GeminiService = (function () {
         enrichedResults.push(Object.assign({}, originalMsg, aiData));
       }
 
-      // Pause préventive légère pour lisser la consommation de quota
+      // Si plusieurs lots nécessaires (rare), pause préventive de 2s
       if (i + batchSize < emailsList.length) {
-        Utilities.sleep(500);
+        Utilities.sleep(2000);
       }
     }
 
@@ -73,7 +59,7 @@ const GeminiService = (function () {
   function analyzeBatchWithRetry(batch, apiKey, batchIndex, totalBatches) {
     let model = Config.getGeminiModel();
     const maxAttempts = Config.DEFAULTS.MAX_RETRIES || 4;
-    const baseDelayMs = Config.DEFAULTS.INITIAL_BACKOFF_MS || 1500;
+    const baseDelayMs = Config.DEFAULTS.INITIAL_BACKOFF_MS || 2000;
     const transientStatusCodes = [429, 500, 502, 503, 504];
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -83,7 +69,7 @@ const GeminiService = (function () {
         const statusCode = e.statusCode || 0;
         const sanitizedMsg = Utils.redactSensitive(e.message);
 
-        // Bascule automatique si le modèle est indisponible
+        // Bascule automatique si le modèle est introuvable (404)
         if (statusCode === 404 && model !== Config.DEFAULTS.GEMINI_FALLBACK_MODEL) {
           console.warn(
             'Modèle ' +
@@ -146,7 +132,7 @@ const GeminiService = (function () {
   }
 
   /**
-   * Effectue la requête HTTP vers Gemini avec la taxonomie à 9 catégories et les règles strictes anti-robotique.
+   * Effectue la requête HTTP vers Gemini avec sortie JSON native et règles strictes.
    */
   function callGeminiApi(batch, apiKey, model) {
     const endpoint =
@@ -170,61 +156,56 @@ const GeminiService = (function () {
     });
 
     const systemPrompt =
-      "Tu es l'analyste exécutif en chef de 'Mon Briefing Quotidien'. Ta mission est de produire un condensé limpide, élégant et directement actionnable en français pour chaque e-mail.\n\n" +
+      "Tu es l'assistant exécutif d'élite de 'Mon Briefing Quotidien'. Ta mission est de synthétiser les e-mails de la journée avec un niveau d'exigence maximal, lisible en un coup d'œil.\n\n" +
       "RÈGLES DE RÉDACTION STRICTES :\n" +
-      "1. Rédige TOUJOURS en français direct, élégant et naturel.\n" +
-      "2. TRADUCTION OBLIGATOIRE : Si le sujet ou le contenu est en anglais (ex: Lumosity, newsletters, GitHub), traduis-le et explique-le en français naturel (pas de titres laissés en anglais brut).\n" +
-      "3. Mets en gras avec la syntaxe Markdown (**texte**) les termes essentiels (noms clés, montants financiers, délais) pour une lecture rapide.\n" +
+      "1. Rédige TOUJOURS en français direct, limpide et naturel.\n" +
+      "2. TRADUCTION OBLIGATOIRE : Traduis impérativement les sujets et contenus en anglais (ex: Lumosity, GitHub, newsletters) en français élégant.\n" +
+      "3. METS EN GRAS (**) les éléments clés dans chaque résumé (noms propres, entreprises, montants en euros, remises ou délais).\n" +
       "4. INTERDICTION FORMELLE DE BOILERPLATE ROBOTIQUE :\n" +
       "   - Ne commence JAMAIS par '[Expéditeur] vous a envoyé un e-mail'.\n" +
       "   - N'écris JAMAIS 'Aucune action requise' dans le résumé.\n" +
       "   - N'utilise JAMAIS de symboles mathématiques ($) ou d'entités HTML brutes (&amp;, &#039;).\n" +
-      "5. Chaque résumé ('summary') doit faire STRICTEMENT 1 SEULE phrase concise et active expliquant clairement de quoi il s'agit.\n\n" +
-      "TAXONOMIE DES 9 CATÉGORIES MUTUELLEMENT EXCLUSIVES (choisis obligatoirement l'une de ces 9 clés) :\n" +
-      "- 'actions_immediates' : Incident bloquant, panne critique, facture à régler d'urgence aujourd'hui, validation bloquante.\n" +
-      "- 'securite_acces' : Connexions depuis un nouvel appareil, codes d'authentification 2FA / OTP, alertes de compte Google/Microsoft/Apple.\n" +
-      "- 'emploi_carriere' : Alertes d'emploi, prises de contact de recruteurs, suivi de candidatures (LinkedIn, HelloWork, France Travail, Apec).\n" +
-      "- 'tech_dev' : GitHub (PR, commits, issues, CI/CD), Firebase, Google Cloud, Sentry, Vercel, hébergement et serveurs.\n" +
-      "- 'voyages_loisirs' : Billets d'avion, réservations d'hôtel, guides et sorties de voyage (easyJet, GetYourGuide, Airbnb, Booking, SNCF).\n" +
-      "- 'achats_promos' : Offres promotionnelles e-commerce, réductions, codes promo, ventes privées (ASOS, Twistshake, Amazon, Aprizo).\n" +
-      "- 'sante_demarches' : Rendez-vous médicaux, ordonnances, téléconsultations, démarches administratives (Doctolib, Qare, Ameli, impôts).\n" +
-      "- 'reseaux_sociaux' : Invitations d'amis, interactions et nouveautés sur les plateformes sociales (TikTok, Facebook, Instagram, X/Twitter).\n" +
-      "- 'veille_culture' : Newsletters thématiques, apprentissage, jeux éducatifs et articles de fond (Lumosity, Medium, presse).";
+      "5. Chaque résumé ('summary') doit faire STRICTEMENT 1 SEULE phrase active expliquant l'information essentielle.\n" +
+      "   Exemples de qualité attendue :\n" +
+      "   - 'Twistshake propose jusqu'à **-50%** de réduction immédiate sur l'ensemble de la boutique avec un code promo.'\n" +
+      "   - 'easyJet annonce des billets d'avion vers le **Maroc** à partir de **29 €** pour les prochaines vacances.'\n" +
+      "   - 'GitHub confirme que la pull request **Refactor daily briefing format** a été fusionnée sur la branche principale.'\n" +
+      "   - 'Lumosity vous invite à découvrir une nouvelle série d'entraînements personnalisés pour la **mémoire** et la **concentration**.'\n" +
+      "6. Pour le champ 'category', choisis la sous-catégorie la plus pertinente parmi :\n" +
+      "   - 'Emploi & Carrière' (LinkedIn, HelloWork, France Travail, recruteurs)\n" +
+      "   - 'Tech & Projets' (GitHub, GCP, Firebase, Vercel, serveurs, code)\n" +
+      "   - 'Achats & Offres' (Promotions e-commerce, ASOS, Twistshake, commandes)\n" +
+      "   - 'Santé & Démarches' (Doctolib, Qare, CPAM, démarches administratives)\n" +
+      "   - 'Réseaux sociaux & Culture' (Facebook, TikTok, Instagram, Lumosity, médias)\n" +
+      "   - 'Voyages & Loisirs' (easyJet, GetYourGuide, SNCF, hôtels)\n" +
+      "   - 'Sécurité & Accès' (Alertes de compte Google, 2FA, codes OTP)\n" +
+      "   - 'Actualités & Veille' (Newsletters d'information générale, revues de presse)\n" +
+      "7. Pour 'actionRequired' : définis à true UNIQUEMENT si une intervention humaine urgente est indispensable aujourd'hui (ex: facture impayée, panne bloquante, réponse impérative avant une date butoir).";
 
     const responseSchema = {
       type: 'ARRAY',
-      description: 'Analyses structurées pour chaque e-mail',
+      description: 'Liste des analyses pour chaque e-mail',
       items: {
         type: 'OBJECT',
         properties: {
           emailId: { type: 'STRING' },
           category: {
             type: 'STRING',
-            enum: [
-              'actions_immediates',
-              'securite_acces',
-              'emploi_carriere',
-              'tech_dev',
-              'voyages_loisirs',
-              'achats_promos',
-              'sante_demarches',
-              'reseaux_sociaux',
-              'veille_culture'
-            ]
+            description: "Nom de la sous-catégorie (ex: 'Emploi & Carrière', 'Tech & Projets', 'Achats & Offres')"
           },
           summary: {
             type: 'STRING',
-            description: '1 phrase concise, active et naturelle en français avec mots-clés en gras (**)'
+            description: '1 phrase concise et active en français avec termes clés en gras (**)'
           },
           actionRequired: { type: 'BOOLEAN' },
           actionTitle: {
             type: 'STRING',
-            description: "Titre court de l'action en 3 à 5 mots (ex: 'Relancer le déploiement') ou 'Aucune action'."
+            description: "Action clé en 3 à 5 mots (ex: 'Payer la facture de 450 €') ou vide si aucune action"
           },
-          deadline: { type: 'STRING' },
-          estimatedMinutes: { type: 'INTEGER' }
+          deadline: { type: 'STRING', description: "Date/heure limite si applicable (ex: 'Aujourd'hui 18h') ou null" },
+          estimatedMinutes: { type: 'INTEGER', description: "Durée estimée de l'action en minutes (ex: 5, 10)" }
         },
-        required: ['emailId', 'category', 'summary', 'actionRequired', 'actionTitle']
+        required: ['emailId', 'category', 'summary', 'actionRequired']
       }
     };
 
@@ -307,7 +288,6 @@ const GeminiService = (function () {
     try {
       parsedArray = JSON.parse(cleanedJsonText);
     } catch (parseErr) {
-      // Correction des caractères de contrôle non échappés si besoin
       const sanitizedJson = cleanedJsonText.replace(/[\u0000-\u001F]+/g, ' ');
       parsedArray = JSON.parse(sanitizedJson);
     }
@@ -319,12 +299,12 @@ const GeminiService = (function () {
         const item = parsedArray[i];
         if (item && item.emailId) {
           resultMap[item.emailId] = {
-            category: item.category || 'veille_culture',
+            category: item.category ? Utils.cleanText(item.category) : 'Actualités & Veille',
             summary: item.summary ? String(item.summary).trim() : 'Nouvelles informations partagées.',
             actionRequired: Boolean(item.actionRequired),
-            actionTitle: Utils.cleanText(item.actionTitle || (item.actionRequired ? 'Action requise' : 'Aucune action')),
-            deadline: item.deadline && item.deadline !== 'Aucune' ? Utils.cleanText(item.deadline) : null,
-            estimatedMinutes: item.estimatedMinutes || 0
+            actionTitle: item.actionTitle ? Utils.cleanText(item.actionTitle) : (item.actionRequired ? 'Action requise' : ''),
+            deadline: item.deadline && item.deadline !== 'null' && item.deadline !== 'Aucune' ? Utils.cleanText(item.deadline) : null,
+            estimatedMinutes: item.estimatedMinutes || 5
           };
         }
       }
@@ -334,51 +314,49 @@ const GeminiService = (function () {
   }
 
   /**
-   * Mode dégradé robuste et non-robotique si un lot échoue.
+   * Mode dégradé élégant sans répétition de l'expéditeur si Gemini échoue.
    */
   function getFallbackAiData(msg) {
-    const sender = msg.senderDisplayName || msg.senderName || 'Expéditeur inconnu';
     const cleanSubj = Utils.cleanText(msg.subject) || 'Nouveau message';
     const lower = (msg.from + ' ' + msg.subject).toLowerCase();
 
-    let cat = 'veille_culture';
-    let fallbackSummary = sender + ' partage des informations : ' + cleanSubj + '.';
+    let cat = 'Actualités & Veille';
+    let summary = cleanSubj;
 
     if (lower.indexOf('github') !== -1 || lower.indexOf('firebase') !== -1 || lower.indexOf('cloud') !== -1) {
-      cat = 'tech_dev';
-      fallbackSummary = 'Mise à jour technique de ' + sender + ' concernant ' + cleanSubj + '.';
-    } else if (lower.indexOf('google.com') !== -1 || lower.indexOf('securite') !== -1 || lower.indexOf('connexion') !== -1) {
-      cat = 'securite_acces';
-      fallbackSummary = 'Notification de sécurité de ' + sender + ' au sujet de ' + cleanSubj + '.';
-    } else if (lower.indexOf('linkedin') !== -1 || lower.indexOf('recrutement') !== -1 || lower.indexOf('emploi') !== -1) {
-      cat = 'emploi_carriere';
-      fallbackSummary = 'Nouvelles opportunités professionnelles partagées par ' + sender + ' : ' + cleanSubj + '.';
+      cat = 'Tech & Projets';
+      summary = 'Mise à jour sur le projet : ' + cleanSubj;
+    } else if (lower.indexOf('linkedin') !== -1 || lower.indexOf('hellowork') !== -1 || lower.indexOf('emploi') !== -1 || lower.indexOf('candidat') !== -1) {
+      cat = 'Emploi & Carrière';
+      summary = 'Nouvelles opportunités professionnelles : ' + cleanSubj;
     } else if (lower.indexOf('easyjet') !== -1 || lower.indexOf('getyourguide') !== -1 || lower.indexOf('voyage') !== -1) {
-      cat = 'voyages_loisirs';
-      fallbackSummary = sender + ' propose des offres de voyages et loisirs : ' + cleanSubj + '.';
-    } else if (lower.indexOf('asos') !== -1 || lower.indexOf('twistshake') !== -1 || lower.indexOf('aprizo') !== -1 || lower.indexOf('promo') !== -1) {
-      cat = 'achats_promos';
-      fallbackSummary = sender + ' annonce des réductions et offres promotionnelles : ' + cleanSubj + '.';
+      cat = 'Voyages & Loisirs';
+      summary = 'Offre de séjour et voyage : ' + cleanSubj;
+    } else if (lower.indexOf('asos') !== -1 || lower.indexOf('twistshake') !== -1 || lower.indexOf('aprizo') !== -1 || lower.indexOf('promo') !== -1 || lower.indexOf('solde') !== -1) {
+      cat = 'Achats & Offres';
+      summary = 'Offre promotionnelle : ' + cleanSubj;
     } else if (lower.indexOf('doctolib') !== -1 || lower.indexOf('qare') !== -1 || lower.indexOf('sante') !== -1) {
-      cat = 'sante_demarches';
-      fallbackSummary = 'Notification médicale ou administrative de ' + sender + ' concernant ' + cleanSubj + '.';
+      cat = 'Santé & Démarches';
+      summary = 'Notification médicale ou administrative : ' + cleanSubj;
     } else if (lower.indexOf('tiktok') !== -1 || lower.indexOf('facebook') !== -1 || lower.indexOf('instagram') !== -1) {
-      cat = 'reseaux_sociaux';
-      fallbackSummary = 'Activité et notifications sur vos réseaux sociaux via ' + sender + '.';
+      cat = 'Réseaux sociaux & Culture';
+      summary = 'Activité récente sur votre réseau : ' + cleanSubj;
+    } else if (lower.indexOf('securite') !== -1 || lower.indexOf('connexion') !== -1 || lower.indexOf('google') !== -1) {
+      cat = 'Sécurité & Accès';
+      summary = 'Alerte de sécurité de compte : ' + cleanSubj;
     }
 
     return {
       category: cat,
-      summary: fallbackSummary,
+      summary: summary,
       actionRequired: false,
-      actionTitle: 'Aucune action',
+      actionTitle: '',
       deadline: null,
       estimatedMinutes: 0
     };
   }
 
   return {
-    CATEGORIES: CATEGORIES,
     analyzeEmails: analyzeEmails
   };
 })();
