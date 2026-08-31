@@ -20,9 +20,9 @@ const Config = (function () {
     WEEKEND_ENABLED: true,
     TEST_LOOKBACK_HOURS: 24,
     // Modèle principal optimisé pour la vitesse (< 2s par lot) et haute disponibilité
-    GEMINI_MODEL: 'gemini-flash-lite-latest',
+    GEMINI_MODEL: 'gemini-2.0-flash',
     // Modèle de secours officiel
-    GEMINI_FALLBACK_MODEL: 'gemini-flash-latest',
+    GEMINI_FALLBACK_MODEL: 'gemini-1.5-flash',
     GEMINI_API_BASE_URL: 'https://generativelanguage.googleapis.com/v1beta/models',
     BATCH_SIZE: 6,
     MAX_RETRIES: 4,
