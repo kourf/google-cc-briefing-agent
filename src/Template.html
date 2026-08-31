@@ -68,11 +68,11 @@
     <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
     <? } ?>
 
-    <!-- 2. POUR INFORMATION (FYI) AVEC SOUS-CATÉGORIES DYNAMIQUES -->
+    <!-- 2. POUR INFORMATION (RÉCAPITULATIF DES E-MAILS REÇUS NON LUS) -->
     <? if (data.sortedInfoGroups && data.sortedInfoGroups.length > 0) { ?>
     <div style="margin-bottom: 20px;">
       <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 12px;">
-        &#x1F514; Pour information
+        &#x1F514; Pour information (récapitulatif des e-mails reçus non lus)
       </div>
       <ul style="margin: 0; padding-left: 20px; list-style-type: disc;">
         <? for (var g = 0; g < data.sortedInfoGroups.length; g++) { 
@@ -112,8 +112,7 @@
              var ev = data.todayEvents[t];
         ?>
         <li style="margin-bottom: 10px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
-          <strong><?= ev.timeFormatted ?> : <?= ev.title ?></strong><? if (ev.durationFormatted) { ?> <span style="color: #6B7280; font-size: 12.5px;">(<?= ev.durationFormatted ?>)</span><? } ?>
-          <a href="<?= ev.calendarUrl ?>" target="_blank" style="color: #2563EB; text-decoration: underline; font-size: 12px; margin-left: 4px; white-space: nowrap; font-weight: 600;">&#x1F517; Agenda</a>
+          <strong><?= ev.timeFormatted ?> : <?= ev.title ?></strong><? if (ev.durationFormatted) { ?> <span style="color: #6B7280; font-size: 12.5px;">(<?= ev.durationFormatted ?>)</span><? } ?> <a href="<?= ev.calendarUrl ?>" target="_blank" style="color: #2563EB; text-decoration: underline; font-size: 12px; margin-left: 4px; white-space: nowrap; font-weight: 600;">&#x1F517; Agenda</a>
 
           <? if (ev.location || ev.conferenceLink) { ?>
           <ul style="margin: 4px 0 0 0; padding-left: 20px; list-style-type: circle;">

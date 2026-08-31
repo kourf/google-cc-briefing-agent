@@ -1,15 +1,12 @@
 /**
  * Google CC Briefing Agent
- * Utils.js — Utilitaires, assainissement de texte, gestion temporelle et sécurité
+ * Utils.js — Utilitaires, assainissement strict Unicode/HTML, gestion temporelle et sécurité
  */
 
 const Utils = (function () {
   /**
    * Décode exhaustivement toutes les entités HTML (nommées, décimales et hexadécimales).
-   * Transforme définitivement &amp; en &, &#039; et &#39; en apostrophe réelle, &quot; en ", etc.
-   *
-   * @param {string} str - Chaîne potentiellement encodée
-   * @return {string} Chaîne en texte brut naturel
+   * Transforme &amp; en &, &#039; et &#39; en apostrophe, &quot; en ", etc.
    */
   function decodeHtmlEntities(str) {
     if (!str) return '';
@@ -65,97 +62,93 @@ const Utils = (function () {
   }
 
   /**
-   * Assainit complètement une chaîne de texte pour le rendu pur.
-   * - Décode toutes les entités HTML
-   * - Supprime les balises HTML (<...>)
-   * - Supprime les délimiteurs mathématiques/LaTeX (ex: $(m/w/d)$ -> (m/w/d))
-   * - Convertit les apostrophes ASCII en apostrophes typographiques françaises (’)
-   * - Élimine tout résidu &amp; ou entités brutes
+   * Assainisseur universel de texte :
+   * - Élimine définitivement les caractères de remplacement Unicode (, \uFFFD)
+   * - Décode toutes les entités HTML (&amp;, &#039;, etc.)
+   * - Supprime les caractères de contrôle non imprimables
+   * - Supprime les balises HTML et symboles LaTeX
+   * - Normalise la typographie française (apostrophe ’)
    *
-   * @param {string} str - Texte brut ou enrichi
-   * @return {string} Texte fluide, naturel et nettoyé
+   * @param {string} str - Texte brut à assainir
+   * @return {string} Texte propre, fluide et lisible
    */
-  function cleanText(str) {
+  function sanitizeText(str) {
     if (!str) return '';
-    let text = decodeHtmlEntities(str);
+    let text = decodeHtmlEntities(String(str));
 
-    // Suppression de toutes les balises HTML (<...>)
-    text = text.replace(/<\/?[a-z0-9]+(?:\s+[^>]*?)?\/?>/gi, ' ');
+    // 1. Suppression des caractères de remplacement Unicode (\uFFFD)
+    text = text.replace(/[\uFFFD\uFFFE\uFFFF]/g, '');
 
-    // Suppression des symboles mathématiques/LaTeX (ex: $(m/w/d)$ -> (m/w/d))
+    // 2. Suppression des caractères de contrôle non imprimables
+    text = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, ' ');
+
+    // 3. Suppression des délimiteurs mathématiques LaTeX ($...$, \(...\))
     text = text.replace(/\$([^\$]+)\$/g, '$1');
     text = text.replace(/\\\(([^\)]+)\\\)/g, '$1');
     text = text.replace(/\\\[([^\]]+)\\\]/g, '$1');
     text = text.replace(/[\$\\]/g, '');
 
-    // Nettoyage Markdown hors gras simple
-    text = text.replace(/__(.*?)__/g, '$1');
-    text = text.replace(/_(.*?)_/g, '$1');
-    text = text.replace(/`{1,3}(.*?)`{1,3}/g, '$1');
-    text = text.replace(/\[(.*?)\](?:\(.*?\))?/g, '$1');
-    text = text.replace(/^#+\s+/gm, '');
+    // 4. Suppression des balises HTML (<...>)
+    text = text.replace(/<\/?[a-z0-9]+(?:\s+[^>]*?)?\/?>/gi, ' ');
 
-    // Remplacement des apostrophes ASCII par l'apostrophe typographique française
+    // 5. Typographie française (apostrophe réelle)
     text = text.replace(/['’]/g, '’');
 
-    // Élimination de toute entité non décodée résiduelle
+    // 6. Nettoyage des entités HTML résiduelles
+    text = text.replace(/&amp;/gi, '&');
     text = text.replace(/&[a-zA-Z0-9#]+;/g, '');
 
-    // Normalisation des espaces
+    // 7. Normalisation des espaces
     text = text.replace(/[ \t]+/g, ' ');
     text = text.replace(/\n\s*\n+/g, '\n');
+
     return text.trim();
   }
 
   /**
+   * Alias de rétrocompatibilité pour sanitizeText.
+   */
+  function cleanText(str) {
+    return sanitizeText(str);
+  }
+
+  /**
    * Formate de façon sécurisée un résumé pour l'e-mail HTML.
-   * Décode les entités HTML, élimine les tags parasites, sécurise le texte,
-   * puis convertit **texte** en <strong>texte</strong>.
+   * Assainit le texte, échappe les balises indésirables, puis transforme **mot** en <strong>mot</strong>.
    *
-   * @param {string} str - Texte contenant potentiellement du markdown **gras**
-   * @return {string} HTML sécurisé avec balises <strong>
+   * @param {string} str - Résumé textuel
+   * @return {string} HTML sécurisé avec mise en gras
    */
   function formatSummaryHtml(str) {
     if (!str) return '';
-    let text = decodeHtmlEntities(String(str));
+    let text = sanitizeText(str);
 
-    // Supprimer balises HTML brutes injectées
-    text = text.replace(/<\/?[a-z0-9]+(?:\s+[^>]*?)?\/?>/gi, ' ');
-    text = text.replace(/[\$\\]/g, '');
-    text = text.replace(/['’]/g, '’');
-
-    // Échapper les caractères HTML pour la sécurité
+    // Échappement des caractères HTML sensibles
     text = text
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
 
-    // Convertir **terme clé** en balise <strong>terme clé</strong>
+    // Conversion sécurisée de **texte clé** en <strong>texte clé</strong>
     text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
 
-    return text.trim();
+    return text;
   }
 
   /**
    * Alias de rétrocompatibilité pour cleanText.
    */
   function stripHtmlAndMarkdown(str) {
-    return cleanText(str);
+    return sanitizeText(str);
   }
 
   /**
-   * Échappe les caractères HTML dangereux (&, <, >, ") tout en préservant les apostrophes typographiques françaises.
-   *
-   * @param {string} str - Texte à sécuriser
-   * @return {string} Chaîne sécurisée pour inclusion dans le HTML
+   * Échappe les caractères HTML dangereux tout en préservant le texte assaini.
    */
   function escapeHtml(str) {
     if (str === null || str === undefined) return '';
-    const clean = decodeHtmlEntities(String(str))
-      .replace(/<\/?[a-z0-9]+(?:\s+[^>]*?)?\/?>/gi, ' ')
-      .replace(/['’]/g, '’');
-
+    const clean = sanitizeText(String(str));
     return clean
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
@@ -180,7 +173,7 @@ const Utils = (function () {
    */
   function normalizeSubject(subject) {
     if (!subject) return '';
-    let clean = decodeHtmlEntities(subject).toLowerCase();
+    let clean = sanitizeText(subject).toLowerCase();
     clean = clean.replace(/^(?:re|fwd|fw|tr|copie|rappel|urgent)\s*:\s*/gi, '');
     clean = clean.replace(/[^a-z0-9à-ÿ\s]/gi, ' ');
     return clean.replace(/\s+/g, ' ').trim();
@@ -191,7 +184,7 @@ const Utils = (function () {
    */
   function cleanSenderName(fromStr) {
     if (!fromStr) return 'Expéditeur';
-    const decoded = decodeHtmlEntities(fromStr).trim();
+    const decoded = sanitizeText(fromStr);
 
     const lower = decoded.toLowerCase();
     if (lower.indexOf('github.com') !== -1) return 'GitHub';
@@ -325,14 +318,7 @@ const Utils = (function () {
     }
     if (!text) return '';
 
-    text = decodeHtmlEntities(text);
-    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ');
-    text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ');
-    text = text.replace(/<!--[\s\S]*?-->/g, ' ');
-    text = text.replace(/<br\s*[\/]?>/gi, '\n');
-    text = text.replace(/<\/p>/gi, '\n\n');
-    text = text.replace(/<\/div>/gi, '\n');
-    text = text.replace(/<[^>]+>/g, ' ');
+    text = sanitizeText(text);
 
     text = text.replace(/(On\s.+?wrote:|Le\s.+?a écrit\s?:)[\s\S]*$/i, '');
     text = text.replace(/^\s*>+.*$/gm, '');
@@ -350,7 +336,7 @@ const Utils = (function () {
       text = text.replace(boilerplate[i], '');
     }
 
-    text = cleanText(text);
+    text = sanitizeText(text);
 
     if (text.length > Config.DEFAULTS.MAX_BODY_CHARS) {
       text = text.substring(0, Config.DEFAULTS.MAX_BODY_CHARS) + '...';
@@ -404,8 +390,9 @@ const Utils = (function () {
 
   return {
     decodeHtmlEntities: decodeHtmlEntities,
-    formatSummaryHtml: formatSummaryHtml,
+    sanitizeText: sanitizeText,
     cleanText: cleanText,
+    formatSummaryHtml: formatSummaryHtml,
     stripHtmlAndMarkdown: stripHtmlAndMarkdown,
     escapeHtml: escapeHtml,
     extractSenderDomain: extractSenderDomain,

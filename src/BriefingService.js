@@ -1,7 +1,7 @@
 /**
  * Google CC Briefing Agent
  * BriefingService.js — Orchestration du briefing selon la structure exacte de référence :
- * 🧠 Actions prioritaires | 🔔 Pour information | 📅 Au planning du jour
+ * 🧠 Actions prioritaires | 🔔 Pour information (récapitulatif des e-mails reçus non lus) | 📅 Au planning du jour
  */
 
 const BriefingService = (function () {
@@ -26,13 +26,14 @@ const BriefingService = (function () {
     const urgentItems = [];
     const groupedInfo = {};
 
-    // Ordre de tri élégant des catégories pour l'affichage
+    // Ordre thématique logique avec séparation Santé & Soins / Démarches & Administration
     const preferredCategoryOrder = [
       'Emploi & Carrière',
       'Tech & Projets',
       'Achats & Offres',
       'Voyages & Loisirs',
-      'Santé & Démarches',
+      'Santé & Soins',
+      'Démarches & Administration',
       'Réseaux sociaux & Culture',
       'Sécurité & Accès',
       'Actualités & Veille'
@@ -45,19 +46,19 @@ const BriefingService = (function () {
         urgentItems.push({
           id: email.id,
           timeEstimate: (email.estimatedMinutes || 5) + ' min',
-          actionTitle: email.actionTitle,
-          deadline: email.deadline || null,
+          actionTitle: Utils.sanitizeText(email.actionTitle),
+          deadline: email.deadline ? Utils.sanitizeText(email.deadline) : null,
           webUrl: email.webUrl
         });
       } else {
-        const catKey = email.category || 'Actualités & Veille';
+        const catKey = Utils.sanitizeText(email.category) || 'Actualités & Veille';
         if (!groupedInfo[catKey]) {
           groupedInfo[catKey] = [];
         }
         groupedInfo[catKey].push({
           id: email.id,
-          sender: email.senderDisplayName || email.senderName,
-          summary: email.summary,
+          sender: Utils.sanitizeText(email.senderDisplayName || email.senderName),
+          summary: Utils.sanitizeText(email.summary),
           webUrl: email.webUrl
         });
       }
@@ -75,7 +76,7 @@ const BriefingService = (function () {
       }
     });
 
-    // Ajout des catégories restantes non prévues
+    // Ajout des catégories restantes éventuelles
     Object.keys(groupedInfo).forEach(function (otherCat) {
       if (groupedInfo[otherCat].length > 0) {
         sortedInfoGroups.push({
@@ -182,7 +183,7 @@ const BriefingService = (function () {
     }
 
     if (data.sortedInfoGroups.length > 0) {
-      lines.push('=== POUR INFORMATION ===');
+      lines.push('=== POUR INFORMATION (RÉCAPITULATIF DES E-MAILS REÇUS NON LUS) ===');
       data.sortedInfoGroups.forEach(function (group) {
         lines.push('• ' + group.name + ' :');
         group.items.forEach(function (it) {

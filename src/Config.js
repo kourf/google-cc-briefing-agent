@@ -19,19 +19,19 @@ const Config = (function () {
     BRIEFING_RECIPIENT_EMAIL: 'kouroufia15@gmail.com',
     WEEKEND_ENABLED: true,
     TEST_LOOKBACK_HOURS: 24,
-    // Modèle officiel stable à haut débit sans rate-limit sévère
-    GEMINI_MODEL: 'gemini-2.0-flash',
-    // Modèle de secours officiel
-    GEMINI_FALLBACK_MODEL: 'gemini-1.5-flash',
+    // Modèle principal configuré (2.5-flash ou 2.0-flash)
+    GEMINI_MODEL: 'gemini-2.5-flash',
+    // Modèle de repli officiel ultra-rapide et haute disponibilité
+    GEMINI_FALLBACK_MODEL: 'gemini-flash-lite-latest',
     GEMINI_API_BASE_URL: 'https://generativelanguage.googleapis.com/v1beta/models',
-    // Tout traiter en un seul lot (jusqu'à 25 e-mails) pour éliminer les erreurs 429
+    // Traitement par lot unique jusqu'à 25 e-mails pour éliminer les erreurs de quota 429
     BATCH_SIZE: 25,
     MAX_RETRIES: 4,
     INITIAL_BACKOFF_MS: 2000,
     MAX_OUTPUT_TOKENS: 2048,
     TEMPERATURE: 0.2,
     LOCK_TIMEOUT_MS: 30000,
-    MAX_BODY_CHARS: 1200 // Optimisé pour réduire les tokens et accélérer l'analyse sous 60s
+    MAX_BODY_CHARS: 1200
   };
 
   // Comptes connus pour le routage et l'étiquetage des messages transférés
@@ -115,15 +115,10 @@ const Config = (function () {
 
   /**
    * Renvoie le modèle Gemini configuré.
-   * Nettoie automatiquement les anciens modèles non viables (ex: gemini-3.6-flash) qui causaient l'erreur 429.
    */
   function getGeminiModel() {
-    let model = getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, DEFAULTS.GEMINI_MODEL);
-    if (!model || model.indexOf('3.6') !== -1 || model.indexOf('lite') !== -1) {
-      model = DEFAULTS.GEMINI_MODEL;
-      setScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, model);
-    }
-    return model;
+    const model = getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, DEFAULTS.GEMINI_MODEL);
+    return model || DEFAULTS.GEMINI_MODEL;
   }
 
   function setGeminiModel(model) {
