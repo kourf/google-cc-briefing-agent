@@ -1,21 +1,21 @@
 /**
  * Google CC Briefing Agent
- * Utils.js — Fonctions utilitaires, assainissement de texte, sécurité et formatage
+ * Utils.js — Utilitaires, assainissement de texte, sécurité et formatage
  */
 
 const Utils = (function () {
   /**
    * Décode exhaustivement toutes les entités HTML (nommées, décimales et hexadécimales).
-   * Transforme définitivement &#039; et &#39; en apostrophe réelle, &amp; en &, etc.
+   * Transforme définitivement &amp; en &, &#039; et &#39; en apostrophe réelle, &quot; en ", etc.
    *
    * @param {string} str - Chaîne potentiellement encodée
-   * @return {string} Chaîne en texte brut naturel avec vrais caractères
+   * @return {string} Chaîne en texte brut naturel
    */
   function decodeHtmlEntities(str) {
     if (!str) return '';
     let text = String(str);
 
-    // 1. Décodage des entités hexadécimales (ex: &#x27; -> ')
+    // 1. Décodage hexadécimal (ex: &#x27; -> ')
     text = text.replace(/&#x([0-9a-f]{1,6});/gi, function (_, hex) {
       try {
         return String.fromCodePoint(parseInt(hex, 16));
@@ -24,17 +24,16 @@ const Utils = (function () {
       }
     });
 
-    // 2. Décodage des entités décimales (ex: &#39; -> ' et &#039; -> ')
+    // 2. Décodage décimal (ex: &#39; -> ' et &#039; -> ')
     text = text.replace(/&#([0-9]{1,7});/g, function (_, dec) {
       try {
-        const code = parseInt(dec, 10);
-        return String.fromCodePoint(code);
+        return String.fromCodePoint(parseInt(dec, 10));
       } catch (e) {
         return '';
       }
     });
 
-    // 3. Décodage des entités nommées courantes
+    // 3. Entités nommées courantes
     const entityMap = {
       '&quot;': '"',
       '&apos;': "'",
@@ -52,7 +51,6 @@ const Utils = (function () {
       '&mdash;': '—'
     };
 
-    // Remplacement itératif pour traiter les doubles encodages (ex: &amp;#039;)
     let previous;
     let iterations = 0;
     do {
@@ -67,48 +65,64 @@ const Utils = (function () {
   }
 
   /**
-   * Supprime toute balise HTML résiduelle, entités parasites et syntaxe Markdown.
-   * Remplace l'apostrophe droite standard par l'apostrophe typographique française (’)
-   * pour interdire à 100% l'apparition de l'artefact "&#039;".
+   * Assainit complètement une chaîne de texte :
+   * - Décode toutes les entités HTML
+   * - Supprime les balises HTML (<...>)
+   * - Élimine les symboles markdown parasites (*, _, `, ~, #)
+   * - Supprime les délimiteurs mathématiques/LaTeX (ex: $(m/w/d)$ -> (m/w/d))
+   * - Convertit les apostrophes ASCII en apostrophes typographiques françaises (’) pour éviter tout réencodage en &#039;
+   * - Normalise les espaces multiples
    *
-   * @param {string} str - Texte pouvant contenir des balises ou du markdown
+   * @param {string} str - Texte brut ou enrichi
    * @return {string} Texte fluide, naturel et nettoyé
    */
-  function stripHtmlAndMarkdown(str) {
+  function cleanText(str) {
     if (!str) return '';
     let text = decodeHtmlEntities(str);
 
     // Suppression de toutes les balises HTML (<...>)
     text = text.replace(/<\/?[a-z0-9]+(?:\s+[^>]*?)?\/?>/gi, ' ');
 
-    // Suppression du formatage Markdown gras/italique/code (**texte**, *texte*, `texte`, [texte])
+    // Suppression des symboles mathématiques/LaTeX (ex: $(m/w/d)$ -> (m/w/d))
+    text = text.replace(/\$([^\$]+)\$/g, '$1');
+    text = text.replace(/\\\(([^\)]+)\\\)/g, '$1');
+    text = text.replace(/\\\[([^\]]+)\\\]/g, '$1');
+    text = text.replace(/[\$\\]/g, '');
+
+    // Suppression du formatage Markdown gras/italique/code/liens
     text = text.replace(/\*\*(.*?)\*\*/g, '$1');
     text = text.replace(/__(.*?)__/g, '$1');
     text = text.replace(/\*(.*?)\*/g, '$1');
     text = text.replace(/_(.*?)_/g, '$1');
     text = text.replace(/`{1,3}(.*?)`{1,3}/g, '$1');
     text = text.replace(/\[(.*?)\](?:\(.*?\))?/g, '$1');
+    text = text.replace(/^#+\s+/gm, '');
 
-    // Remplacement de l'apostrophe ASCII par l'apostrophe typographique française
-    // Cela garantit une typographie élégante et empêche tout moteur HTML de produire &#039;
+    // Remplacement des apostrophes ASCII par l'apostrophe typographique française
     text = text.replace(/['’]/g, '’');
 
-    // Normalisation des espaces multiples
-    text = text.replace(/[ \t]+/g, ' ').trim();
-
-    return text;
+    // Normalisation des espaces et sauts de ligne
+    text = text.replace(/[ \t]+/g, ' ');
+    text = text.replace(/\n\s*\n+/g, '\n');
+    return text.trim();
   }
 
   /**
-   * Échappement HTML sécurisé pour injection dans le template.
-   * N'échappe que les caractères dangereux (&, <, >, ") sans altérer les apostrophes typographiques.
+   * Alias de rétrocompatibilité pour cleanText.
+   */
+  function stripHtmlAndMarkdown(str) {
+    return cleanText(str);
+  }
+
+  /**
+   * Échappe les caractères HTML dangereux (&, <, >, ") tout en préservant les apostrophes typographiques françaises.
    *
    * @param {string} str - Texte à sécuriser
    * @return {string} Chaîne sécurisée pour inclusion dans le HTML
    */
   function escapeHtml(str) {
     if (str === null || str === undefined) return '';
-    const clean = stripHtmlAndMarkdown(String(str));
+    const clean = cleanText(String(str));
     return clean
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
@@ -117,7 +131,7 @@ const Utils = (function () {
   }
 
   /**
-   * Extrait le domaine d'un expéditeur e-mail (ex: "aprizo.com", "linkedin.com").
+   * Extrait le domaine d'un expéditeur (ex: "aprizo.com", "linkedin.com").
    */
   function extractSenderDomain(fromStr) {
     if (!fromStr) return '';
@@ -126,8 +140,10 @@ const Utils = (function () {
   }
 
   /**
-   * Normalise l'objet d'un e-mail pour la détection et la fusion des doublons.
-   * Retire les préfixes "Re:", "Fwd:", "Tr:", la ponctuation et les dates.
+   * Nettoie et normalise l'objet d'un e-mail pour la déduplication :
+   * - Supprime les préfixes (Re:, Fwd:, Tr:, Urgent:, etc.)
+   * - Supprime les caractères non alphanumériques et ponctuation
+   * - Réduit les espaces
    */
   function normalizeSubject(subject) {
     if (!subject) return '';
@@ -138,71 +154,65 @@ const Utils = (function () {
   }
 
   /**
-   * Génère une clé de déduplication stricte basée sur l'expéditeur et le sujet racine.
-   * Permet de regrouper les e-mails promotionnels multiples du même expéditeur (ex: Aprizo).
-   */
-  function generateDeduplicationKey(from, subject) {
-    const domain = extractSenderDomain(from);
-    const sender = cleanSenderName(from).toLowerCase().replace(/[^a-z0-9]/g, '');
-    const normSubj = normalizeSubject(subject);
-
-    // Détection des campagnes promotionnelles répétitives (ex: Aprizo, Asos)
-    if (domain.indexOf('aprizo') !== -1 || sender.indexOf('aprizo') !== -1) {
-      return 'aprizo::marketing';
-    }
-    if (domain.indexOf('asos') !== -1 || sender.indexOf('asos') !== -1) {
-      return 'asos::marketing';
-    }
-    if (
-      domain.indexOf('google.com') !== -1 &&
-      (normSubj.indexOf('securite') !== -1 || normSubj.indexOf('connexion') !== -1 || normSubj.indexOf('alerte') !== -1)
-    ) {
-      return 'google::security_alert';
-    }
-    if (
-      domain.indexOf('linkedin.com') !== -1 &&
-      (normSubj.indexOf('emploi') !== -1 || normSubj.indexOf('poste') !== -1 || normSubj.indexOf('recrutement') !== -1)
-    ) {
-      return 'linkedin::job_alert';
-    }
-
-    // Règle générale : expéditeur + les 4 premiers mots clés du sujet
-    const subjStem = normSubj.split(' ').slice(0, 4).join(' ');
-    return (domain || sender) + '::' + subjStem;
-  }
-
-  /**
-   * Nettoie le nom de l'expéditeur pour obtenir un nom humain élégant.
-   * Exemple : "kourf <notifications@github.com>" -> "kourf (GitHub)" ou "kourf"
+   * Nettoie le nom de l'expéditeur pour obtenir un affichage élégant et humain.
+   * Ex: "kourf <notifications@github.com>" -> "GitHub"
+   * Ex: "Aprizo <contact@aprizo.com>" -> "Aprizo"
    */
   function cleanSenderName(fromStr) {
-    if (!fromStr) return '';
+    if (!fromStr) return 'Expéditeur';
     const decoded = decodeHtmlEntities(fromStr).trim();
 
     // Cas spécial GitHub
-    if (decoded.toLowerCase().indexOf('notifications@github.com') !== -1) {
-      const ghUser = decoded.replace(/<.*>/, '').replace(/"/g, '').trim();
-      return ghUser ? ghUser + ' (GitHub)' : 'GitHub';
+    if (decoded.toLowerCase().indexOf('github.com') !== -1) {
+      return 'GitHub';
+    }
+    // Cas spécial Google
+    if (decoded.toLowerCase().indexOf('google.com') !== -1) {
+      return 'Google';
+    }
+    // Cas spécial LinkedIn
+    if (decoded.toLowerCase().indexOf('linkedin.com') !== -1) {
+      return 'LinkedIn';
     }
 
-    // Extraction standard : "Prénom Nom <email@domain.com>" -> "Prénom Nom"
+    // Extraction standard du nom complet : "Prénom Nom <email@...>" -> "Prénom Nom"
     const match = decoded.match(/^"?([^"<]+)"?\s*(?:<.*>)?$/);
     if (match && match[1].trim()) {
-      return match[1].trim();
+      const name = match[1].trim();
+      if (name.indexOf('@') === -1) {
+        return name;
+      }
     }
 
-    // Si seulement une adresse e-mail : "contact@domaine.com" -> "domaine.com"
-    const emailMatch = decoded.match(/<?([a-zA-Z0-9._%+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}))>?/);
-    if (emailMatch && emailMatch[2]) {
-      return emailMatch[2];
+    // Extraction par nom de domaine : "contact@aprizo.com" -> "Aprizo"
+    const emailMatch = decoded.match(/@([a-zA-Z0-9-]+)\.[a-zA-Z]{2,}/);
+    if (emailMatch && emailMatch[1]) {
+      const brand = emailMatch[1];
+      return brand.charAt(0).toUpperCase() + brand.slice(1);
     }
 
     return decoded;
   }
 
   /**
-   * Formate une date en français selon le fuseau horaire de configuration.
-   * Exemple : "Lundi 31 août 2026"
+   * Construit le lien direct d'ouverture d'un fil Gmail universel (#all/<threadId>).
+   */
+  function buildGmailUrl(threadId) {
+    if (!threadId) return 'https://mail.google.com/mail/u/0/#inbox';
+    return 'https://mail.google.com/mail/u/0/#all/' + encodeURIComponent(threadId);
+  }
+
+  /**
+   * Construit l'URL web Google Calendar pour un événement.
+   */
+  function buildCalendarUrl(eventId) {
+    if (!eventId) return 'https://calendar.google.com/calendar';
+    return 'https://calendar.google.com/calendar/r/eventedit/' + encodeURIComponent(eventId);
+  }
+
+  /**
+   * Formate une date en français selon le fuseau horaire Europe/Paris.
+   * Ex: "Lundi 31 août 2026"
    */
   function formatDateFrench(date) {
     if (!date) return '';
@@ -221,8 +231,7 @@ const Utils = (function () {
   }
 
   /**
-   * Formate une heure en français.
-   * Exemple : "09:30"
+   * Formate une heure en français. Ex: "09:30"
    */
   function formatTime(date) {
     if (!date) return '';
@@ -230,7 +239,18 @@ const Utils = (function () {
   }
 
   /**
-   * Nettoie le corps d'un e-mail avant son analyse par Gemini.
+   * Formate une durée en minutes en chaîne lisible. Ex: 75 -> "1 h 15"
+   */
+  function formatDuration(minutes) {
+    if (!minutes || isNaN(minutes) || minutes <= 0) return '';
+    if (minutes < 60) return minutes + ' min';
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return mins > 0 ? hours + ' h ' + (mins < 10 ? '0' : '') + mins : hours + ' h';
+  }
+
+  /**
+   * Nettoie le corps d'un e-mail avant transmission à l'API Gemini.
    */
   function cleanEmailBody(rawBody, rawHtml) {
     let text = rawBody || '';
@@ -239,26 +259,19 @@ const Utils = (function () {
     }
     if (!text) return '';
 
-    // Décodage préalable des entités
     text = decodeHtmlEntities(text);
-
-    // 1. Suppression des balises lourdes
     text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ');
     text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ');
     text = text.replace(/<!--[\s\S]*?-->/g, ' ');
-
-    // 2. Remplacement des sauts de ligne HTML
     text = text.replace(/<br\s*[\/]?>/gi, '\n');
     text = text.replace(/<\/p>/gi, '\n\n');
     text = text.replace(/<\/div>/gi, '\n');
     text = text.replace(/<[^>]+>/g, ' ');
 
-    // 3. Suppression des citations et historiques
     text = text.replace(/(On\s.+?wrote:|Le\s.+?a écrit\s?:)[\s\S]*$/i, '');
     text = text.replace(/^\s*>+.*$/gm, '');
 
-    // 4. Suppression des pieds de page de désabonnement standards
-    const boilerplatePatterns = [
+    const boilerplate = [
       /Cet e-mail a été envoyé à[\s\S]*$/i,
       /This email was sent to[\s\S]*$/i,
       /Pour vous désinscrire[\s\S]*$/i,
@@ -267,25 +280,21 @@ const Utils = (function () {
       /View in browser|Afficher dans le navigateur[\s\S]*$/i,
       /--\s*\n[\s\S]*$/i
     ];
-    for (let i = 0; i < boilerplatePatterns.length; i++) {
-      text = text.replace(boilerplatePatterns[i], '');
+    for (let i = 0; i < boilerplate.length; i++) {
+      text = text.replace(boilerplate[i], '');
     }
 
-    // 5. Normalisation des espaces
-    text = text.replace(/[ \t]+/g, ' ');
-    text = text.replace(/\n\s*\n\s*\n+/g, '\n\n');
-    text = text.trim();
+    text = cleanText(text);
 
-    // 6. Tronquage sécurisé pour respecter les quotas de tokens
     if (text.length > Config.DEFAULTS.MAX_BODY_CHARS) {
-      text = text.substring(0, Config.DEFAULTS.MAX_BODY_CHARS) + '... [texte tronqué]';
+      text = text.substring(0, Config.DEFAULTS.MAX_BODY_CHARS) + '...';
     }
 
     return text;
   }
 
   /**
-   * Détecte le compte de destination initial (pour les e-mails transférés).
+   * Détecte le compte de destination initial.
    */
   function detectDestinationAccount(rawHeaders, toField, bodyText) {
     const searchString = [
@@ -301,47 +310,11 @@ const Utils = (function () {
       }
     }
 
-    // Par défaut : compte principal
     return Config.KNOWN_ACCOUNTS[1];
   }
 
   /**
-   * Construit l'URL web directe d'ouverture d'un fil de discussion Gmail.
-   * Utilise le format universel /#all/<threadId> pour ouvrir le message directement
-   * sur ordinateur comme sur l'application mobile Gmail.
-   *
-   * @param {string} threadId - Identifiant du fil Gmail
-   * @param {string} messageId - Identifiant de secours du message
-   * @return {string} URL directe vers le message
-   */
-  function buildGmailUrl(threadId, messageId) {
-    const targetId = threadId || messageId;
-    if (!targetId) return 'https://mail.google.com/mail/u/0/#inbox';
-    return 'https://mail.google.com/mail/u/0/#all/' + encodeURIComponent(targetId);
-  }
-
-  /**
-   * Construit l'URL web Google Calendar pour un événement.
-   */
-  function buildCalendarUrl(eventId) {
-    if (!eventId) return 'https://calendar.google.com/calendar';
-    return 'https://calendar.google.com/calendar/r/eventedit/' + encodeURIComponent(eventId);
-  }
-
-  /**
-   * Formate une durée en minutes en chaîne lisible.
-   * Ex: 15 -> "15 min", 75 -> "1 h 15"
-   */
-  function formatDuration(minutes) {
-    if (!minutes || isNaN(minutes) || minutes <= 0) return '';
-    if (minutes < 60) return minutes + ' min';
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return mins > 0 ? hours + ' h ' + (mins < 10 ? '0' : '') + mins : hours + ' h';
-  }
-
-  /**
-   * Masque les données sensibles (clés d'API, tokens) des logs et messages d'erreur.
+   * Masque les données sensibles dans les logs.
    */
   function redactSensitive(str) {
     if (!str) return '';
@@ -354,7 +327,6 @@ const Utils = (function () {
 
   /**
    * Calcule le délai d'attente exponentiel avec gigue aléatoire (jitter).
-   * Formule : baseDelayMs * 2^(attempt - 1) + jitter aléatoire (100 à 400 ms).
    */
   function calculateBackoffWithJitter(attempt, baseDelayMs) {
     const base = baseDelayMs || 1500;
@@ -366,19 +338,19 @@ const Utils = (function () {
 
   return {
     decodeHtmlEntities: decodeHtmlEntities,
+    cleanText: cleanText,
     stripHtmlAndMarkdown: stripHtmlAndMarkdown,
     escapeHtml: escapeHtml,
     extractSenderDomain: extractSenderDomain,
     normalizeSubject: normalizeSubject,
-    generateDeduplicationKey: generateDeduplicationKey,
     cleanSenderName: cleanSenderName,
-    formatDateFrench: formatDateFrench,
-    formatTime: formatTime,
-    cleanEmailBody: cleanEmailBody,
-    detectDestinationAccount: detectDestinationAccount,
     buildGmailUrl: buildGmailUrl,
     buildCalendarUrl: buildCalendarUrl,
+    formatDateFrench: formatDateFrench,
+    formatTime: formatTime,
     formatDuration: formatDuration,
+    cleanEmailBody: cleanEmailBody,
+    detectDestinationAccount: detectDestinationAccount,
     redactSensitive: redactSensitive,
     calculateBackoffWithJitter: calculateBackoffWithJitter
   };

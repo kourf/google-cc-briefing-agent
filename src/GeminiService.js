@@ -1,15 +1,26 @@
 /**
  * Google CC Briefing Agent
- * GeminiService.js — Synthèses détaillées et explicites en français pur,
- * interdiction stricte des balises/entités HTML et intégration de l'API Gemini.
+ * GeminiService.js — Analyse IA avec Gemini, prompt en français naturel,
+ * schéma de catégories strictes et assainissement intégral des sorties.
  */
 
 const GeminiService = (function () {
   /**
-   * Analyse une liste de messages e-mails via l'API Gemini par lots optimisés.
+   * Catégories fixes et explicites demandées pour le briefing
+   */
+  const CATEGORIES = {
+    ACTIONS_URGENTES: 'actions_urgentes',
+    SECURITE_ALERTES: 'securite_alertes',
+    OPPORTUNITES_PRO: 'opportunites_pro',
+    ACHATS_PROMOTIONS: 'achats_promotions',
+    AUTRES_INFORMATIONS: 'autres_informations'
+  };
+
+  /**
+   * Analyse la liste des e-mails dédupliqués via l'API Gemini par lots optimisés.
    *
-   * @param {Array<Object>} emailsList - Messages dédupliqués et nettoyés
-   * @return {Array<Object>} Messages enrichis avec résumés détaillés, priorités et catégories
+   * @param {Array<Object>} emailsList - E-mails dédupliqués
+   * @return {Array<Object>} E-mails enrichis de leur analyse IA
    */
   function analyzeEmails(emailsList) {
     if (!emailsList || emailsList.length === 0) {
@@ -17,7 +28,7 @@ const GeminiService = (function () {
     }
 
     const apiKey = Config.getGeminiApiKey();
-    const batchSize = Config.DEFAULTS.BATCH_SIZE;
+    const batchSize = Config.DEFAULTS.BATCH_SIZE || 6;
     const totalBatches = Math.ceil(emailsList.length / batchSize);
     const enrichedResults = [];
 
@@ -45,7 +56,7 @@ const GeminiService = (function () {
 
       // Pause préventive légère pour lisser la consommation de quota
       if (i + batchSize < emailsList.length) {
-        Utilities.sleep(600);
+        Utilities.sleep(500);
       }
     }
 
@@ -68,12 +79,12 @@ const GeminiService = (function () {
         const statusCode = e.statusCode || 0;
         const sanitizedMsg = Utils.redactSensitive(e.message);
 
-        // 1. Modèle indisponible (404) -> Bascule automatique sur le modèle de secours
+        // Bascule automatique si le modèle est indisponible
         if (statusCode === 404 && model !== Config.DEFAULTS.GEMINI_FALLBACK_MODEL) {
           console.warn(
             'Modèle ' +
               model +
-              ' non disponible (404). Bascule automatique sur ' +
+              ' non disponible (404). Bascule sur ' +
               Config.DEFAULTS.GEMINI_FALLBACK_MODEL
           );
           model = Config.DEFAULTS.GEMINI_FALLBACK_MODEL;
@@ -81,29 +92,29 @@ const GeminiService = (function () {
           continue;
         }
 
-        // 2. Erreurs non récupérables (400, 401...)
+        // Erreurs non récupérables
         if (statusCode > 0 && !transientStatusCodes.includes(statusCode) && statusCode !== 404) {
           console.error(
-            'Erreur non récupérable de l’API Gemini (' +
+            'Erreur API non récupérable (' +
               sanitizedMsg +
-              '). Utilisation du mode dégradé pour le lot ' +
+              '). Mode dégradé activé pour le lot ' +
               batchIndex +
               '.'
           );
           break;
         }
 
-        // 3. Erreurs temporaires (429, 503...)
+        // Erreurs temporaires (429, 503...)
         if (attempt < maxAttempts) {
           const delay = Utils.calculateBackoffWithJitter(attempt, baseDelayMs);
           console.warn(
-            'API Gemini temporairement saturée ou indisponible (' +
+            'API temporairement occupée (' +
               sanitizedMsg +
               '). Tentative ' +
               attempt +
               '/' +
               maxAttempts +
-              ' — Nouvelle tentative dans ' +
+              ' — Attente de ' +
               delay +
               ' ms...'
           );
@@ -116,13 +127,12 @@ const GeminiService = (function () {
               totalBatches +
               ' après ' +
               maxAttempts +
-              ' tentatives. Activation du mode dégradé.'
+              ' tentatives. Mode dégradé activé.'
           );
         }
       }
     }
 
-    // Fallback gracieux en cas d'échec total du lot
     const fallbackResult = {};
     for (let i = 0; i < batch.length; i++) {
       const msg = batch[i];
@@ -132,89 +142,79 @@ const GeminiService = (function () {
   }
 
   /**
-   * Effectue la requête HTTP vers la Gemini Developer API avec payload allégé et limitation de tokens.
+   * Effectue la requête HTTP vers Gemini avec un prompt repensé et un schéma strict.
    */
   function callGeminiApi(batch, apiKey, model) {
     const endpoint =
       Config.DEFAULTS.GEMINI_API_BASE_URL + '/' + encodeURIComponent(model) + ':generateContent?key=' + apiKey;
 
-    // Payload optimisé : extrait compacté à 1000 caractères max pour accélérer l'analyse
     const emailsPayload = batch.map(function (msg) {
-      let compactSnippet = msg.body || '';
-      if (compactSnippet.length > 1000) {
-        compactSnippet = compactSnippet.substring(0, 1000) + '...';
+      let snippet = msg.body || '';
+      if (snippet.length > 900) {
+        snippet = snippet.substring(0, 900) + '...';
       }
-      compactSnippet = compactSnippet.replace(/\s+/g, ' ').trim();
+      snippet = snippet.replace(/\s+/g, ' ').trim();
 
       return {
         emailId: msg.id,
-        expediteur: Utils.cleanSenderName(msg.from),
-        destinataireCompte: msg.targetAccount ? msg.targetAccount.label : '',
-        objet: Utils.stripHtmlAndMarkdown(msg.subject),
+        expediteur: msg.senderDisplayName || msg.senderName,
+        objet: msg.subject,
         date: msg.dateFormatted + ' ' + msg.timeFormatted,
-        doublonsIdentiques: msg.duplicateCount > 1 ? msg.duplicateCount : 1,
-        extrait: compactSnippet
+        nombreMessages: msg.duplicateCount || 1,
+        contenuAbrege: snippet
       };
     });
 
     const systemPrompt =
-      "Tu es l'analyste en chef du Google CC Briefing Agent. Ton rôle est de rédiger des résumés d'e-mails riches, précis et parfaitement compréhensibles en français direct.\n\n" +
-      "RÈGLES MAJEURES SUR LE CONTENU :\n" +
-      "Chaque valeur du champ 'summary' doit impérativement préciser :\n" +
-      "1. L'expéditeur ou la plateforme concernée (ex: 'GitHub', 'Google', 'Aprizo', 'LinkedIn', un client...).\n" +
-      "2. Le message central explicite : de quoi s'agit-il exactement ? (ex: 'Alerte de sécurité concernant une nouvelle connexion Windows', 'Offre promotionnelle 4 articles achetés + 1 offert', 'Échec du déploiement CI/CD sur GCP/Firebase').\n" +
-      "3. L'action concrète à faire ou l'échéance s'il y en a une.\n\n" +
-      "RÈGLES ABSOLUES SUR LA FORME ET LE TEXTE :\n" +
-      "- Rédige EXCLUSIVEMENT en français naturel, élégant et fluide.\n" +
-      "- INTERDICTION FORMELLE DES BALISES HTML ET DES ENTITÉS : N'inclus JAMAIS d'entités comme &amp;, &#039;, &quot;, &lt;, &gt;, ni de balises comme <strong> ou <br>. Utilise directement de vraies apostrophes (').\n" +
-      "- Conserve impérativement les montants financiers, dates, noms de projets et l'action principale.\n\n" +
-      "INSTRUCTIONS SUR LES CHAMPS PAR E-MAIL :\n" +
-      "- summary : Résumé explicite et contextuel en 1 ou 2 phrases complètes.\n" +
-      "- priority : 'CRITICAL' (incident technique, panne CI/CD, blocage majeur), 'HIGH' (action requise aujourd'hui, facture à régler, décision importante), 'MEDIUM' (e-mail informatif sans urgence), ou 'LOW' (offre commerciale, notification courante, alerte informative).\n" +
-      "- actionRequired : true si une action concrète ou réponse est attendue aujourd'hui, false sinon.\n" +
-      "- actionTitle : Titre court et percutant de l'action en quelques mots (ex: 'Examiner l'échec de déploiement GitHub', 'Régler la facture Stripe', 'Valider le devis'). Si aucune action : 'Aucune action'.\n" +
-      "- action : Description simple de l'action à mener en 1 phrase.\n" +
-      "- needsReply : 'oui', 'non', ou 'probablement'.\n" +
-      "- deadline : Échéance explicite ou déduite (ex: 'Aujourd'hui', 'Avant 17h', 'Demain') ou null si aucune échéance.\n" +
-      "- category : Choisis impérativement l'une de ces catégories françaises exactes :\n" +
-      "  '🛡️ Sécurité & Alertes comptes',\n" +
-      "  '💼 Opportunités & Emploi',\n" +
-      "  '🏷️ Achats & Bons plans',\n" +
-      "  '✈️ Voyages & Découvertes',\n" +
-      "  '📊 Projets & Code',\n" +
-      "  '💶 Finances & Factures',\n" +
-      "  'ℹ️ Informations générales'.\n" +
-      "- estimatedActionMinutes : Estimation réaliste du temps requis pour agir (5, 10, 15, 30...) ou 0 si aucune action.";
+      "Tu es le rédacteur exécutif du Google CC Briefing Agent. Ta mission est de produire un résumé matinal limpide, professionnel et agréable à lire.\n\n" +
+      "RÈGLES DE RÉDACTION STRICTES (NIVEAU CADRE SUPÉRIEUR) :\n" +
+      "1. Écris TOUJOURS en français direct, simple et naturel.\n" +
+      "2. Chaque résumé ('summary') doit faire STRICTEMENT 1 ou 2 phrases courtes répondant précisément à 3 questions :\n" +
+      "   - Qui écrit ? (Nom clair de l'expéditeur ou de l'entreprise)\n" +
+      "   - De quoi s'agit-il exactement ? (Explication concrète sans jargon)\n" +
+      "   - Quelle action concrète est attendue ? (Si aucune action : 'Aucune action requise')\n" +
+      "3. INTERDICTIONS FORMELLES :\n" +
+      "   - JAMAIS de symboles de mise en forme markdown (*, _, `, ~, #).\n" +
+      "   - JAMAIS de symboles mathématiques ou de délimiteurs de formules (interdiction absolue du signe dollar '$', pas de formule LaTeX comme $(m/w/d)$).\n" +
+      "   - JAMAIS d'entités HTML (&amp;, &#039;, &quot;, &lt;, &gt;) : utilise directement de vraies apostrophes (').\n" +
+      "   - JAMAIS de tournures robotiques comme 'Synthèse de X offres'. Explique directement le contenu.\n\n" +
+      "ATTRIBUTION DES CATÉGORIES EXACTES (choisis obligatoirement l'une de ces 5 clés) :\n" +
+      "- 'actions_urgentes' : Problème bloquant, échec de build/déploiement CI/CD, facture client à payer d'urgence, action requise aujourd'hui.\n" +
+      "- 'securite_alertes' : Alertes de sécurité (Google, GitHub, Microsoft), connexions depuis un nouvel appareil, codes d'authentification.\n" +
+      "- 'opportunites_pro' : Offres d'emploi (LinkedIn, recruteurs), prises de contact pro, propositions de missions ou postes.\n" +
+      "- 'achats_promotions' : Offres commerciales, bons de réduction, soldes, e-commerce (ex: Aprizo, Asos).\n" +
+      "- 'autres_informations' : Tout e-mail informatif ne rentrant pas dans les catégories précédentes.";
 
     const responseSchema = {
       type: 'ARRAY',
-      description: 'Liste des analyses pour chaque e-mail',
+      description: 'Analyses structurées pour chaque e-mail',
       items: {
         type: 'OBJECT',
         properties: {
           emailId: { type: 'STRING' },
-          summary: { type: 'STRING' },
-          priority: { type: 'STRING', enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] },
-          actionRequired: { type: 'BOOLEAN' },
-          actionTitle: { type: 'STRING' },
-          action: { type: 'STRING' },
-          needsReply: { type: 'STRING', enum: ['oui', 'non', 'probablement'] },
-          deadline: { type: 'STRING' },
           category: {
             type: 'STRING',
             enum: [
-              '🛡️ Sécurité & Alertes comptes',
-              '💼 Opportunités & Emploi',
-              '🏷️ Achats & Bons plans',
-              '✈️ Voyages & Découvertes',
-              '📊 Projets & Code',
-              '💶 Finances & Factures',
-              'ℹ️ Informations générales'
+              'actions_urgentes',
+              'securite_alertes',
+              'opportunites_pro',
+              'achats_promotions',
+              'autres_informations'
             ]
           },
-          estimatedActionMinutes: { type: 'INTEGER' }
+          summary: {
+            type: 'STRING',
+            description: '1 ou 2 phrases courtes et explicites en français naturel'
+          },
+          actionRequired: { type: 'BOOLEAN' },
+          actionTitle: {
+            type: 'STRING',
+            description: "Titre court de l'action en quelques mots (ex: 'Relancer le déploiement sur GitHub') ou 'Aucune action'."
+          },
+          deadline: { type: 'STRING' },
+          estimatedMinutes: { type: 'INTEGER' }
         },
-        required: ['emailId', 'summary', 'priority', 'actionRequired', 'actionTitle', 'action', 'needsReply', 'category']
+        required: ['emailId', 'category', 'summary', 'actionRequired', 'actionTitle']
       }
     };
 
@@ -226,15 +226,15 @@ const GeminiService = (function () {
             {
               text:
                 systemPrompt +
-                '\n\nVoici les e-mails à analyser :\n' +
+                '\n\nVoici les e-mails à résumer :\n' +
                 JSON.stringify(emailsPayload)
             }
           ]
         }
       ],
       generationConfig: {
-        temperature: Config.DEFAULTS.TEMPERATURE || 0.2,
-        maxOutputTokens: Config.DEFAULTS.MAX_OUTPUT_TOKENS || 2048,
+        temperature: 0.2,
+        maxOutputTokens: 2048,
         responseMimeType: 'application/json',
         responseSchema: responseSchema
       }
@@ -250,10 +250,10 @@ const GeminiService = (function () {
     let response;
     try {
       response = UrlFetchApp.fetch(endpoint, options);
-    } catch (networkErr) {
-      const netEx = new Error('Erreur réseau de communication avec l’API : ' + networkErr.message);
-      netEx.statusCode = 0;
-      throw netEx;
+    } catch (netErr) {
+      const err = new Error('Erreur réseau de communication avec l’API : ' + netErr.message);
+      err.statusCode = 0;
+      throw err;
     }
 
     const statusCode = response.getResponseCode();
@@ -284,7 +284,7 @@ const GeminiService = (function () {
       data.candidates[0].content.parts[0].text;
 
     if (!candidateText) {
-      const emptyErr = new Error('Réponse Gemini vide ou format inattendu.');
+      const emptyErr = new Error('Réponse Gemini vide.');
       emptyErr.statusCode = 502;
       throw emptyErr;
     }
@@ -297,15 +297,12 @@ const GeminiService = (function () {
         const item = parsedArray[i];
         if (item && item.emailId) {
           resultMap[item.emailId] = {
-            summary: Utils.stripHtmlAndMarkdown(item.summary || 'Résumé indisponible.'),
-            priority: item.priority || 'MEDIUM',
+            category: item.category || 'autres_informations',
+            summary: Utils.cleanText(item.summary || 'Message reçu sans description.'),
             actionRequired: Boolean(item.actionRequired),
-            actionTitle: Utils.stripHtmlAndMarkdown(item.actionTitle || (item.actionRequired ? 'Action requise' : 'Aucune action')),
-            action: Utils.stripHtmlAndMarkdown(item.action || 'Aucune action'),
-            needsReply: item.needsReply || 'non',
-            deadline: item.deadline && item.deadline !== 'Aucune' ? Utils.stripHtmlAndMarkdown(item.deadline) : null,
-            category: item.category || 'ℹ️ Informations générales',
-            estimatedActionMinutes: item.estimatedActionMinutes || 0
+            actionTitle: Utils.cleanText(item.actionTitle || (item.actionRequired ? 'Action requise' : 'Aucune action')),
+            deadline: item.deadline && item.deadline !== 'Aucune' ? Utils.cleanText(item.deadline) : null,
+            estimatedMinutes: item.estimatedMinutes || 0
           };
         }
       }
@@ -315,27 +312,34 @@ const GeminiService = (function () {
   }
 
   /**
-   * Données de secours fiables (Graceful Fallback) en cas d'erreur de lot.
+   * Mode dégradé robuste si un lot échoue.
    */
   function getFallbackAiData(msg) {
-    const sender = Utils.cleanSenderName(msg.from);
-    const subject = Utils.stripHtmlAndMarkdown(msg.subject) || 'Nouveau message reçu';
-    const duplicateNotice = msg.duplicateCount > 1 ? ' (' + msg.duplicateCount + ' messages)' : '';
+    const sender = msg.senderDisplayName || msg.senderName || 'Expéditeur inconnu';
+    const cleanSubj = Utils.cleanText(msg.subject) || 'Nouveau message';
+
+    let cat = 'autres_informations';
+    const lower = (msg.from + ' ' + msg.subject).toLowerCase();
+    if (lower.indexOf('google.com') !== -1 || lower.indexOf('securite') !== -1) {
+      cat = 'securite_alertes';
+    } else if (lower.indexOf('linkedin') !== -1 || lower.indexOf('recrutement') !== -1) {
+      cat = 'opportunites_pro';
+    } else if (lower.indexOf('aprizo') !== -1 || lower.indexOf('promo') !== -1) {
+      cat = 'achats_promotions';
+    }
 
     return {
-      summary: sender + duplicateNotice + ' : ' + subject,
-      priority: 'MEDIUM',
+      category: cat,
+      summary: sender + ' vous a envoyé un e-mail : ' + cleanSubj + '. Aucune action urgente requise.',
       actionRequired: false,
       actionTitle: 'Aucune action',
-      action: 'Vérifier l’e-mail directement si nécessaire.',
-      needsReply: 'non',
       deadline: null,
-      category: 'ℹ️ Informations générales',
-      estimatedActionMinutes: 2
+      estimatedMinutes: 2
     };
   }
 
   return {
+    CATEGORIES: CATEGORIES,
     analyzeEmails: analyzeEmails
   };
 })();
