@@ -6,66 +6,6 @@
 
 const BriefingService = (function () {
   /**
-   * Métadonnées d'affichage pour les 9 catégories
-   */
-  const CATEGORY_META = [
-    {
-      key: 'actions_immediates',
-      title: '⚡ Actions immédiates requises',
-      subtitle: 'Nécessitent une intervention ou réponse aujourd’hui',
-      accentColor: '#DC2626'
-    },
-    {
-      key: 'securite_acces',
-      title: '🛡️ Sécurité & Accès',
-      subtitle: 'Connexions, codes 2FA et vérifications de compte',
-      accentColor: '#1E40AF'
-    },
-    {
-      key: 'emploi_carriere',
-      title: '💼 Emploi & Carrière',
-      subtitle: 'Alertes de postes, recruteurs et opportunités pro',
-      accentColor: '#047857'
-    },
-    {
-      key: 'tech_dev',
-      title: '💻 Tech & Développement',
-      subtitle: 'GitHub, intégration continue, cloud et hébergement',
-      accentColor: '#4F46E5'
-    },
-    {
-      key: 'voyages_loisirs',
-      title: '✈️ Voyages & Loisirs',
-      subtitle: 'Billets d’avion, réservations et sorties',
-      accentColor: '#0891B2'
-    },
-    {
-      key: 'achats_promos',
-      title: '🏷️ Achats & Bons plans',
-      subtitle: 'Offres promotionnelles, soldes et commandes',
-      accentColor: '#B45309'
-    },
-    {
-      key: 'sante_demarches',
-      title: '🩺 Santé & Démarches',
-      subtitle: 'Rendez-vous médicaux et démarches administratives',
-      accentColor: '#059669'
-    },
-    {
-      key: 'reseaux_sociaux',
-      title: '📱 Réseaux sociaux',
-      subtitle: 'Mises à jour et interactions de votre réseau',
-      accentColor: '#7C3AED'
-    },
-    {
-      key: 'veille_culture',
-      title: '📚 Veille & Culture',
-      subtitle: 'Articles, apprentissage et actualités',
-      accentColor: '#4B5563'
-    }
-  ];
-
-  /**
    * Construit et expédie le briefing quotidien.
    *
    * @param {Object} params - { emails, agenda, isTestMode, recipientEmail }
@@ -83,27 +23,13 @@ const BriefingService = (function () {
     const temporalGreeting = Utils.getTemporalGreeting(now, recipientName);
     const temporalSignoff = Utils.getTemporalSignoff(now);
 
-    // 1. Initialisation des listes pour les 9 catégories
-    const categorizedMap = {};
-    for (let c = 0; c < CATEGORY_META.length; c++) {
-      categorizedMap[CATEGORY_META[c].key] = [];
-    }
+        const urgentItems = [];
+    const groupedInfo = {};
+    let urgentCount = 0;
 
-    // 2. Ventilation des e-mails
     for (let i = 0; i < emails.length; i++) {
       const email = emails[i];
-      let catKey = email.category || 'veille_culture';
-
-      // Forcer dans actions_immediates si action requise
-      if (email.actionRequired && catKey !== 'actions_immediates') {
-        catKey = 'actions_immediates';
-      }
-
-      if (!categorizedMap[catKey]) {
-        catKey = 'veille_culture';
-      }
-
-      categorizedMap[catKey].push({
+      const itemData = {
         id: email.id,
         threadId: email.threadId,
         sender: email.senderDisplayName || email.senderName,
@@ -116,32 +42,25 @@ const BriefingService = (function () {
         duplicateCount: email.duplicateCount || 1,
         targetAccount: email.targetAccount,
         webUrl: Utils.buildGmailUrl(email.threadId)
-      });
-    }
+      };
 
-    // 3. Construction de la liste ordonnée des catégories contenant des éléments
-    const displayCategories = [];
-    for (let m = 0; m < CATEGORY_META.length; m++) {
-      const meta = CATEGORY_META[m];
-      const items = categorizedMap[meta.key] || [];
-      if (items.length > 0) {
-        displayCategories.push({
-          key: meta.key,
-          title: meta.title,
-          subtitle: meta.subtitle,
-          accentColor: meta.accentColor,
-          items: items
-        });
+      if (email.actionRequired) {
+        urgentItems.push(itemData);
+        urgentCount++;
+      } else {
+        const catKey = email.category || 'Pour information';
+        if (!groupedInfo[catKey]) {
+          groupedInfo[catKey] = [];
+        }
+        groupedInfo[catKey].push(itemData);
       }
     }
-
-    const urgentCount = categorizedMap['actions_immediates'].length;
 
     // 4. Préparation des variables du template
     const templateData = {
       isTestMode: isTestMode,
-      dateTitle: formattedDate,
-      greeting: temporalGreeting,
+      dateTitle: "Votre journée à venir",
+      greeting: "Bonjour Kouroufia. Voici votre programme pour la journée !",
       signoff: temporalSignoff,
       recipientName: recipientName,
       recipientEmail: recipientEmail,
@@ -150,7 +69,8 @@ const BriefingService = (function () {
         urgentCount: urgentCount,
         todayEventsCount: agenda.todayEvents.length
       },
-      displayCategories: displayCategories,
+      urgentItems: urgentItems,
+      groupedInfo: groupedInfo,
       todayEvents: agenda.todayEvents,
       tomorrowEvents: agenda.tomorrowEvents,
       isCalm: emails.length === 0 && agenda.todayEvents.length === 0
@@ -219,16 +139,23 @@ const BriefingService = (function () {
     lines.push(data.greeting);
     lines.push('');
 
-    data.displayCategories.forEach(function (cat) {
-      lines.push('=== ' + cat.title.toUpperCase() + ' ===');
-      cat.items.forEach(function (it) {
+    if (data.urgentItems && data.urgentItems.length > 0) {
+      lines.push('=== ACTIONS PRIORITAIRES ===');
+      data.urgentItems.forEach(function (it) {
         let line = '• ' + it.sender + ' : ' + it.summary;
-        if (it.actionRequired && it.actionTitle) {
-          line += ' [Action : ' + it.actionTitle + ']';
-        }
-        if (it.deadline) {
-          line += ' (Échéance : ' + it.deadline + ')';
-        }
+        if (it.actionTitle) line += ' [Action : ' + it.actionTitle + ']';
+        if (it.deadline) line += ' (Échéance : ' + it.deadline + ')';
+        line += ' — ' + it.webUrl;
+        lines.push(line);
+      });
+      lines.push('');
+    }
+
+    const categories = Object.keys(data.groupedInfo || {});
+    categories.forEach(function (cat) {
+      lines.push('=== ' + cat.toUpperCase() + ' ===');
+      data.groupedInfo[cat].forEach(function (it) {
+        let line = '• ' + it.sender + ' : ' + it.summary;
         line += ' — ' + it.webUrl;
         lines.push(line);
       });

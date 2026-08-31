@@ -170,30 +170,16 @@ const GeminiService = (function () {
     });
 
     const systemPrompt =
-      "Tu es l'analyste exécutif en chef de 'Mon Briefing Quotidien'. Ta mission est de produire un condensé limpide, vivant et direct en français pour chaque e-mail.\n\n" +
+      "Tu es un Assistant Exécutif IA d'élite spécialisé dans la curation, la synthèse d'e-mails et la gestion d'agenda personnel. Ta tâche est de transformer une liste brute d'e-mails en un briefing quotidien haut de gamme, épuré, directement actionnable et lisible en un coup d'œil.\n\n" +
       "RÈGLES DE RÉDACTION STRICTES :\n" +
       "1. Rédige TOUJOURS en français direct, élégant et naturel.\n" +
-      "2. TRADUCTION OBLIGATOIRE : Si le sujet ou le contenu est en anglais (ex: Lumosity, newsletters, GitHub), traduis-le et explique-le en français naturel (pas de titres laissés en anglais brut).\n" +
+      "2. Mets OBLIGATOIREMENT en gras (**) les éléments clés (noms, montants, délais) pour une lecture rapide.\n" +
       "3. INTERDICTION FORMELLE DE BOILERPLATE ROBOTIQUE :\n" +
       "   - Ne commence JAMAIS par '[Expéditeur] vous a envoyé un e-mail'.\n" +
       "   - N'écris JAMAIS 'Aucune action requise' dans le résumé.\n" +
-      "   - N'utilise JAMAIS de symboles markdown (*, _, `, ~, #), mathématiques ($) ou d'entités HTML (&amp;, &#039;).\n" +
+      "   - N'utilise JAMAIS d'entités HTML (ex: &amp;).\n" +
       "4. Chaque résumé ('summary') doit faire STRICTEMENT 1 SEULE phrase concise et active expliquant clairement de quoi il s'agit.\n" +
-      "   Exemples de style attendu :\n" +
-      "   - Pour GitHub : 'Le pipeline d'intégration continue de Lumina Analytics a rencontré une erreur lors du déploiement vers Google Cloud.'\n" +
-      "   - Pour Lumosity : 'Lumosity propose une nouvelle série d'exercices cérébraux personnalisés axés sur la concentration et la mémoire.'\n" +
-      "   - Pour easyJet : 'easyJet annonce des réductions exclusives sur les vols européens avec des billets démarrant à 29 €.'\n" +
-      "   - Pour LinkedIn : 'Trois recruteurs ont consulté votre profil et vous proposent des opportunités en développement logiciel.'\n\n" +
-      "TAXONOMIE DES 9 CATÉGORIES MUTUELLEMENT EXCLUSIVES (choisis obligatoirement l'une de ces 9 clés) :\n" +
-      "- 'actions_immediates' : Incident bloquant, panne critique, facture à régler d'urgence aujourd'hui, validation bloquante.\n" +
-      "- 'securite_acces' : Connexions depuis un nouvel appareil, codes d'authentification 2FA / OTP, alertes de compte Google/Microsoft/Apple.\n" +
-      "- 'emploi_carriere' : Alertes d'emploi, prises de contact de recruteurs, suivi de candidatures (LinkedIn, HelloWork, France Travail, Apec).\n" +
-      "- 'tech_dev' : GitHub (PR, commits, issues, CI/CD), Firebase, Google Cloud, Sentry, Vercel, hébergement et serveurs.\n" +
-      "- 'voyages_loisirs' : Billets d'avion, réservations d'hôtel, guides et sorties de voyage (easyJet, GetYourGuide, Airbnb, Booking, SNCF).\n" +
-      "- 'achats_promos' : Offres promotionnelles e-commerce, réductions, codes promo, ventes privées (ASOS, Twistshake, Amazon, Aprizo).\n" +
-      "- 'sante_demarches' : Rendez-vous médicaux, ordonnances, téléconsultations, démarches administratives (Doctolib, Qare, Ameli, impôts).\n" +
-      "- 'reseaux_sociaux' : Invitations d'amis, interactions et nouveautés sur les plateformes sociales (TikTok, Facebook, Instagram, X/Twitter).\n" +
-      "- 'veille_culture' : Newsletters thématiques, apprentissage, jeux éducatifs et articles de fond (Lumosity, Medium, presse).";
+      "5. Pour le champ 'category', crée une sous-catégorie intelligente et adaptative selon le contexte (ex. 'Emploi & Carrière', 'Tech & Projets', 'Shopping & Bons plans', 'Santé', 'Réseaux sociaux & Culture'). Ne te limite pas à une liste stricte.";
 
     const responseSchema = {
       type: 'ARRAY',
@@ -202,20 +188,7 @@ const GeminiService = (function () {
         type: 'OBJECT',
         properties: {
           emailId: { type: 'STRING' },
-          category: {
-            type: 'STRING',
-            enum: [
-              'actions_immediates',
-              'securite_acces',
-              'emploi_carriere',
-              'tech_dev',
-              'voyages_loisirs',
-              'achats_promos',
-              'sante_demarches',
-              'reseaux_sociaux',
-              'veille_culture'
-            ]
-          },
+          category: { type: 'STRING', description: "Sous-catégorie intelligente adaptative (ex: 'Tech & Projets', 'Santé')" },
           summary: {
             type: 'STRING',
             description: '1 phrase concise, active et naturelle en français (sans formule robotique)'
@@ -311,7 +284,7 @@ const GeminiService = (function () {
         const item = parsedArray[i];
         if (item && item.emailId) {
           resultMap[item.emailId] = {
-            category: item.category || 'veille_culture',
+            category: item.category || 'Veille & Culture',
             summary: Utils.cleanText(item.summary || 'Nouvelles informations partagées.'),
             actionRequired: Boolean(item.actionRequired),
             actionTitle: Utils.cleanText(item.actionTitle || (item.actionRequired ? 'Action requise' : 'Aucune action')),
@@ -333,29 +306,29 @@ const GeminiService = (function () {
     const cleanSubj = Utils.cleanText(msg.subject) || 'Nouveau message';
     const lower = (msg.from + ' ' + msg.subject).toLowerCase();
 
-    let cat = 'veille_culture';
+    let cat = 'Veille & Culture';
     let fallbackSummary = sender + ' partage des informations : ' + cleanSubj + '.';
 
     if (lower.indexOf('github') !== -1 || lower.indexOf('firebase') !== -1 || lower.indexOf('cloud') !== -1) {
-      cat = 'tech_dev';
+      cat = 'Tech & Projets';
       fallbackSummary = 'Mise à jour technique de ' + sender + ' concernant ' + cleanSubj + '.';
     } else if (lower.indexOf('google.com') !== -1 || lower.indexOf('securite') !== -1 || lower.indexOf('connexion') !== -1) {
-      cat = 'securite_acces';
+      cat = 'Sécurité & Accès';
       fallbackSummary = 'Notification de sécurité de ' + sender + ' au sujet de ' + cleanSubj + '.';
     } else if (lower.indexOf('linkedin') !== -1 || lower.indexOf('recrutement') !== -1 || lower.indexOf('emploi') !== -1) {
-      cat = 'emploi_carriere';
+      cat = 'Emploi & Carrière';
       fallbackSummary = 'Nouvelles opportunités professionnelles partagées par ' + sender + ' : ' + cleanSubj + '.';
     } else if (lower.indexOf('easyjet') !== -1 || lower.indexOf('getyourguide') !== -1 || lower.indexOf('voyage') !== -1) {
-      cat = 'voyages_loisirs';
+      cat = 'Voyages & Loisirs';
       fallbackSummary = sender + ' propose des offres de voyages et loisirs : ' + cleanSubj + '.';
     } else if (lower.indexOf('asos') !== -1 || lower.indexOf('twistshake') !== -1 || lower.indexOf('aprizo') !== -1 || lower.indexOf('promo') !== -1) {
-      cat = 'achats_promos';
+      cat = 'Shopping & Bons plans';
       fallbackSummary = sender + ' annonce des réductions et offres promotionnelles : ' + cleanSubj + '.';
     } else if (lower.indexOf('doctolib') !== -1 || lower.indexOf('qare') !== -1 || lower.indexOf('sante') !== -1) {
-      cat = 'sante_demarches';
+      cat = 'Santé & Démarches';
       fallbackSummary = 'Notification médicale ou administrative de ' + sender + ' concernant ' + cleanSubj + '.';
     } else if (lower.indexOf('tiktok') !== -1 || lower.indexOf('facebook') !== -1 || lower.indexOf('instagram') !== -1) {
-      cat = 'reseaux_sociaux';
+      cat = 'Réseaux sociaux & Culture';
       fallbackSummary = 'Activité et notifications sur vos réseaux sociaux via ' + sender + '.';
     }
 

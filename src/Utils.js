@@ -104,7 +104,19 @@ const Utils = (function () {
     // Normalisation des espaces et sauts de ligne
     text = text.replace(/[ \t]+/g, ' ');
     text = text.replace(/\n\s*\n+/g, '\n');
+    text = text.replace(/&[a-zA-Z0-9#]+;/g, '');
     return text.trim();
+  }
+
+
+  /**
+   * Échappe le HTML puis transforme le markdown gras (**texte**) en balise <strong>.
+   */
+  function formatSummaryHtml(str) {
+    if (!str) return '';
+    let safeStr = escapeHtml(str);
+    safeStr = safeStr.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    return safeStr;
   }
 
   /**
@@ -218,18 +230,7 @@ const Utils = (function () {
    */
   function formatDateFrench(date) {
     if (!date) return '';
-    try {
-      const formatted = date.toLocaleDateString('fr-FR', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-        timeZone: Config.DEFAULTS.TIMEZONE
-      });
-      return formatted.charAt(0).toUpperCase() + formatted.slice(1);
-    } catch (e) {
-      return Utilities.formatDate(date, Config.DEFAULTS.TIMEZONE, 'dd/MM/yyyy');
-    }
+    return Utilities.formatDate(date, Config.DEFAULTS.TIMEZONE, 'dd/MM/yyyy');
   }
 
   /**
@@ -371,6 +372,7 @@ const Utils = (function () {
 
   return {
     decodeHtmlEntities: decodeHtmlEntities,
+    formatSummaryHtml: formatSummaryHtml,
     cleanText: cleanText,
     stripHtmlAndMarkdown: stripHtmlAndMarkdown,
     escapeHtml: escapeHtml,
