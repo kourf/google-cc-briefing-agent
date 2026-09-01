@@ -31,10 +31,10 @@
       <?= data.greeting ?>
     </div>
 
-    <!-- BADGE MÉTRIQUE DU BRIEFING -->
+    <!-- BADGE MÉTRIQUE DU BRIEFING (CALCUL NUMÉRIQUE STRICT) -->
     <div style="margin-bottom: 18px;">
       <span style="display: inline-block; background-color: #F3F4F6; color: #374151; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 6px; border: 1px solid #E5E7EB;">
-        &#x1F4CA; <?= data.stats.totalEmails ?> e-mails analysés &bull; <?= data.stats.urgentCount ?> action<?= data.stats.urgentCount > 1 ? 's' : '' ?> requise<?= data.stats.urgentCount > 1 ? 's' : '' ?>
+        &#x1F4CA; <?= Number(data.stats.totalEmails) ?> e-mails analysés &bull; <?= Number(data.stats.urgentCount) ?> action<?= Number(data.stats.urgentCount) > 1 ? 's' : '' ?> requise<?= Number(data.stats.urgentCount) > 1 ? 's' : '' ?>
       </span>
     </div>
 
@@ -47,7 +47,7 @@
     </div>
     <? } ?>
 
-    <!-- 1. ACTIONS PRIORITAIRES (TOP OF MIND) -->
+    <!-- 1. ACTIONS PRIORITAIRES (TOP OF MIND) CONTEXTUALISÉES -->
     <? if (data.urgentItems && data.urgentItems.length > 0) { ?>
     <div style="margin-bottom: 20px;">
       <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 10px;">
@@ -59,7 +59,7 @@
         ?>
         <li style="margin-bottom: 8px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
           <span style="color: #6B7280; font-size: 12px;">&#x23F1;&#xFE0F; <?= item.timeEstimate ?> &bull; </span>
-          <strong><?= item.actionTitle ?></strong><? if (item.deadline) { ?> <span style="color: #6B7280;">(<?= item.deadline ?>)</span><? } ?>.
+          <strong><?= item.actionTitle ?></strong><? if (item.deadline) { ?> <span style="color: #4B5563;">(<?= item.deadline ?>)</span><? } ?><? if (item.summary) { ?> : <?!= Utils.formatSummaryHtml(item.summary) ?><? } ?>.
           <a href="<?= item.webUrl ?>" target="_blank" style="color: #2563EB; text-decoration: underline; font-size: 12px; margin-left: 4px; font-weight: 600; white-space: nowrap;">&#x1F517; Détails</a>
         </li>
         <? } ?>

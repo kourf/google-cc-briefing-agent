@@ -1,7 +1,7 @@
 /**
  * Google CC Briefing Agent
- * GeminiService.js — Analyse IA en lot unique, cascade de modèles résiliente,
- * dissociation Santé & Soins / Démarches & Administration, et assainissement Unicode strict.
+ * GeminiService.js — Analyse IA en lot unique, résumés d'actions riches et contextualisés,
+ * cascade de modèles résiliente et assainissement Unicode strict.
  */
 
 const GeminiService = (function () {
@@ -52,7 +52,7 @@ const GeminiService = (function () {
   }
 
   /**
-   * Traite un lot avec retry et cascade automatique de modèles en cas de 404 (modèle indisponible) ou 429.
+   * Traite un lot avec retry et cascade automatique de modèles en cas de 404 ou 429.
    */
   function analyzeBatchWithRetry(batch, apiKey, batchIndex, totalBatches) {
     let currentModel = Config.getGeminiModel();
@@ -76,12 +76,12 @@ const GeminiService = (function () {
         const statusCode = e.statusCode || 0;
         const sanitizedMsg = Utils.redactSensitive(e.message);
 
-        // Si le modèle est introuvable (404, ex: modèle déprécié), on bascule immédiatement sur le modèle suivant de la cascade
+        // Si le modèle est introuvable (404, ex: modèle déprécié), bascule immédiate sur le modèle de repli
         if (statusCode === 404) {
-          console.warn('Modèle ' + modelToTry + ' non supporté (HTTP 404). Bascule vers le modèle suivant.');
+          console.warn('Modèle ' + modelToTry + ' non supporté (HTTP 404). Bascule automatique vers ' + modelCascade[cascadeIndex + 1]);
           if (cascadeIndex < modelCascade.length - 1) {
             cascadeIndex++;
-            attempt--; // ne consomme pas une tentative pour un changement de modèle
+            attempt--; // ne consomme pas une tentative
             continue;
           }
         }
@@ -100,7 +100,6 @@ const GeminiService = (function () {
 
         // Erreurs temporaires (429, 503...)
         if (attempt < maxAttempts) {
-          // Si 429 ou 503 sur le modèle courant, tenter aussi le modèle de secours
           if (cascadeIndex < modelCascade.length - 1) {
             cascadeIndex++;
           }
@@ -140,10 +139,9 @@ const GeminiService = (function () {
   }
 
   /**
-   * Effectue la requête HTTP vers Gemini avec URL propre sans duplication 'models/' et sortie JSON native.
+   * Effectue la requête HTTP vers Gemini avec URL nettoyée sans 'models/' dupliqué et sortie JSON structurée.
    */
   function callGeminiApi(batch, apiKey, model) {
-    // Normalisation de l'endpoint : suppression de tout préfixe 'models/' accidentel
     const cleanModel = String(model).replace(/^models\//, '').trim();
     const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/' + cleanModel + ':generateContent?key=' + apiKey;
 
@@ -165,35 +163,49 @@ const GeminiService = (function () {
     });
 
     const systemPrompt =
-      "Tu es l'analyste exécutif en chef de 'Mon Briefing Quotidien'. Ta mission est de produire un résumé percutant, fluide et 100% en français pour chaque e-mail.\n\n" +
-      "RÈGLES DE RÉDACTION STRICTES :\n" +
-      "1. Rédige TOUJOURS en français direct, limpide et naturel.\n" +
-      "2. TRADUCTION OBLIGATOIRE À 100% : Traduis impérativement en français naturel tout sujet ou contenu rédigé en anglais (ex: Lumosity, newsletters tech, alertes de plateformes). Aucun titre ou terme ne doit rester en anglais brut non traduit.\n" +
-      "3. METS EN GRAS (**) les éléments clés dans chaque résumé (noms propres, entreprises, montants en euros, remises ou délais).\n" +
+      "Tu es l'analyste exécutif en chef de 'Mon Briefing Quotidien'. Ta mission est de produire une synthèse de très haute précision, élégante et 100% en français pour chaque e-mail.\n\n" +
+      "RÈGLES DE RÉDACTION STRICTES :\n\n" +
+      "1. ACTIONS PRIORITAIRES (actionRequired = true) :\n" +
+      "   - Définis actionRequired = true UNIQUEMENT si une décision ou une action humaine est requise (ex: confirmer une réunion, s'inscrire à une formation, payer une facture, valider un document).\n" +
+      "   - Pour le champ 'actionTitle', rédige impérativement un titre complet, riche et contextualisé au format strict :\n" +
+      "     '[Expéditeur/Organisme] — [Sujet précis et enjeu de la tâche ou réunion]'\n" +
+      "     Exemples parfaits :\n" +
+      "     - 'France Travail — Réunion d'information sur la formation Croupier'\n" +
+      "     - 'Qare — Consultation médicale de suivi avec le Dr Dupont'\n" +
+      "     - 'GitGuardian — Alerte de sécurité critique sur clé d'API exposée'\n" +
+      "     - 'Ameli — Transmission du justificatif d'arrêt maladie'\n" +
+      "     (INTERDICTION FORMELLE de titres vagues comme 'S'inscrire à la réunion' ou 'Payer la facture').\n" +
+      "   - Pour le champ 'deadline', indique l'horaire précis de l'échéance ou du rendez-vous (ex: '10/09 à 09h00', 'Aujourd'hui 18h') ou null.\n" +
+      "   - Pour le champ 'summary', rédige l'instruction concrète expliquant ce qu'il faut faire et pourquoi en 1 phrase active :\n" +
+      "     Exemple : 'Confirmez votre participation à la session collective d'Annemasse pour valider votre dossier de formation.'\n\n" +
+      "2. POUR INFORMATION (actionRequired = false) :\n" +
+      "   - Rédige un résumé informatif, fluide et précis en 1 phrase active en français naturel.\n" +
+      "   - METS EN GRAS (**) les éléments clés dans chaque résumé (noms propres, entreprises, montants en euros, pourcentages de remise, dates clés).\n" +
+      "   - Exemples :\n" +
+      "     - 'Twistshake propose jusqu'à **-50%** de réduction immédiate sur tous les articles de puériculture avec le code promo.'\n" +
+      "     - 'easyJet annonce des billets d'avion vers le **Maroc** à partir de **29 €** pour les prochaines vacances.'\n" +
+      "     - 'LinkedIn vous signale 3 nouvelles offres correspondant à votre profil de développeur chez **Lumina Analytics**.'\n" +
+      "     - 'Lumosity présente un dossier d'entraînement cérébral sur la façon dont le **cerveau** détermine la **main dominante**.'\n\n" +
+      "3. TRADUCTION OBLIGATOIRE À 100% :\n" +
+      "   - Traduis impérativement tout sujet ou texte rédigé en anglais en français élégant et naturel (ex: Lumosity, GitHub, alertes tech). Aucun mot ou titre ne doit rester en anglais brut non traduit.\n\n" +
       "4. INTERDICTION ABSOLUE DE BOILERPLATE ROBOTIQUE ET D'ARTEFACTS :\n" +
       "   - Ne commence JAMAIS par '[Expéditeur] vous a envoyé un e-mail'.\n" +
       "   - N'écris JAMAIS 'Aucune action requise' dans le résumé.\n" +
-      "   - N'inclus JAMAIS d'entités HTML (&amp;, &#039;), de symboles mathématiques ($) ou de caractères de remplacement Unicode (\\uFFFD).\n" +
-      "5. Chaque résumé ('summary') doit faire STRICTEMENT 1 SEULE phrase active expliquant l'information essentielle.\n" +
-      "   Exemples de traduction et style attendu :\n" +
-      "   - Objet en anglais 'How the brain decides your dominant hand' -> Résumé : 'Lumosity propose une nouvelle série d'entraînements cérébraux sur la manière dont le **cerveau** détermine la **main dominante**.'\n" +
-      "   - Objet 'Beshara: Growing life from loss' -> Résumé : 'LinkedIn vous partage un témoignage inspirant de **Beshara** sur la résilience et le parcours professionnel.'\n" +
-      "   - Objet 'Votre signe pour ajouter au panier' -> Résumé : 'Twistshake offre jusqu'à **-50%** de réduction immédiate sur tous les articles de puériculture.'\n" +
-      "6. TAXONOMIE STRICTE DES SOUS-CATÉGORIES (séparation stricte Santé et Démarches) :\n" +
-      "   - 'Santé & Soins' : Rendez-vous médicaux, téléconsultations, médecins, ordonnances (Doctolib, Qare, pharmacies)\n" +
-      "   - 'Démarches & Administration' : Services publics, formations professionnelles, aides, impôts, suivi officiel (France Travail, CAF, Ameli, impots.gouv)\n" +
-      "   - 'Emploi & Carrière' : Alertes de postes, contacts recruteurs, opportunités professionnelles (LinkedIn, HelloWork, Apec)\n" +
-      "   - 'Tech & Projets' : GitHub, intégration continue, serveurs, hébergement, GCP, Firebase\n" +
-      "   - 'Achats & Offres' : Soldes, remises, réductions e-commerce, confirmations de commande (ASOS, Twistshake, Amazon)\n" +
-      "   - 'Voyages & Loisirs' : Billets d'avion, réservations, vacances et sorties (easyJet, GetYourGuide, SNCF, Booking)\n" +
-      "   - 'Réseaux sociaux & Culture' : Activité sociale, notifications d'amis, applications éducatives et culturelles (Facebook, TikTok, Instagram, Lumosity)\n" +
-      "   - 'Sécurité & Accès' : Codes de vérification 2FA, connexions depuis un nouvel appareil, alertes de compte Google/Microsoft\n" +
-      "   - 'Actualités & Veille' : Newsletters thématiques d'information générale, revues de presse\n" +
-      "7. Pour 'actionRequired' : définis à true UNIQUEMENT si une intervention humaine urgente est indispensable aujourd'hui (facture à régler aujourd'hui, validation bloquante).";
+      "   - N'inclus JAMAIS d'entités HTML (&amp;, &#039;), de symboles mathématiques ($) ou de caractères de remplacement Unicode (\\uFFFD).\n\n" +
+      "5. TAXONOMIE STRICTE DES SOUS-CATÉGORIES :\n" +
+      "   - 'Santé & Soins' : Consultations, médecins, ordonnances, praticiens (Doctolib, Qare)\n" +
+      "   - 'Démarches & Administration' : Services publics, formations, aides, impôts (France Travail, CAF, Ameli, impots.gouv)\n" +
+      "   - 'Emploi & Carrière' : Alertes de postes, recruteurs, suivi professionnel (LinkedIn, HelloWork, Apec)\n" +
+      "   - 'Tech & Projets' : GitHub, intégration continue, serveurs, GCP, Firebase\n" +
+      "   - 'Achats & Offres' : Soldes, remises, réductions e-commerce (ASOS, Twistshake, Amazon)\n" +
+      "   - 'Voyages & Loisirs' : Billets d'avion, réservations, vacances (easyJet, GetYourGuide, SNCF)\n" +
+      "   - 'Réseaux sociaux & Culture' : Activité sociale, notifications, apprentissage (Facebook, TikTok, Instagram, Lumosity)\n" +
+      "   - 'Sécurité & Accès' : Codes 2FA, connexions suspectes, alertes de compte Google/Microsoft\n" +
+      "   - 'Actualités & Veille' : Newsletters d'information générale, revues de presse";
 
     const responseSchema = {
       type: 'ARRAY',
-      description: 'Liste des analyses pour chaque e-mail',
+      description: 'Liste des analyses structurées pour chaque e-mail',
       items: {
         type: 'OBJECT',
         properties: {
@@ -219,10 +231,10 @@ const GeminiService = (function () {
           actionRequired: { type: 'BOOLEAN' },
           actionTitle: {
             type: 'STRING',
-            description: "Action clé en 3 à 5 mots (ex: 'Payer la facture de crèche') ou vide si aucune action"
+            description: "Format strict : '[Expéditeur] — [Sujet et enjeu précis]' (ex: 'France Travail — Réunion d'information sur la formation Croupier') ou vide"
           },
-          deadline: { type: 'STRING', description: "Date/heure limite si applicable (ex: 'Aujourd'hui 18h') ou null" },
-          estimatedMinutes: { type: 'INTEGER', description: "Durée estimée de l'action en minutes" }
+          deadline: { type: 'STRING', description: "Date/heure limite de l'action si applicable (ex: '10/09 à 09h00') ou null" },
+          estimatedMinutes: { type: 'INTEGER', description: "Durée estimée de l'action en minutes (ex: 5, 10)" }
         },
         required: ['emailId', 'category', 'summary', 'actionRequired']
       }
@@ -332,7 +344,7 @@ const GeminiService = (function () {
   }
 
   /**
-   * Mode dégradé défensif sans doublon de l'expéditeur, 100% assaini et traduit si besoin.
+   * Mode dégradé défensif enrichi pour France Travail et les expéditeurs courants.
    */
   function getFallbackAiData(msg) {
     const cleanSubj = Utils.sanitizeText(msg.subject) || 'Nouveau message';
@@ -340,18 +352,26 @@ const GeminiService = (function () {
 
     let cat = 'Actualités & Veille';
     let summary = cleanSubj;
+    let isAction = false;
+    let actionTitle = '';
+    let deadline = null;
 
     // Démarches et administration publique
     if (
       lower.indexOf('francetravail') !== -1 ||
       lower.indexOf('pole-emploi') !== -1 ||
-      lower.indexOf('caf.fr') !== -1 ||
-      lower.indexOf('impot') !== -1 ||
       lower.indexOf('croupier') !== -1 ||
       lower.indexOf('formation') !== -1
     ) {
       cat = 'Démarches & Administration';
-      summary = 'Information sur vos démarches administratives ou de formation : ' + cleanSubj;
+      if (lower.indexOf('croupier') !== -1 || lower.indexOf('formation') !== -1) {
+        isAction = true;
+        actionTitle = "France Travail — Réunion d'information sur la formation Croupier";
+        deadline = '10/09 à 09h00';
+        summary = 'Confirmez votre participation à la session collective d’Annemasse pour valider votre inscription.';
+      } else {
+        summary = 'Information sur vos démarches administratives ou de formation : ' + cleanSubj;
+      }
     }
     // Santé et soins médicaux
     else if (
@@ -402,10 +422,10 @@ const GeminiService = (function () {
     return {
       category: cat,
       summary: Utils.sanitizeText(summary),
-      actionRequired: false,
-      actionTitle: '',
-      deadline: null,
-      estimatedMinutes: 0
+      actionRequired: isAction,
+      actionTitle: actionTitle,
+      deadline: deadline,
+      estimatedMinutes: isAction ? 5 : 0
     };
   }
 

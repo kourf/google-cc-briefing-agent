@@ -47,6 +47,7 @@ const BriefingService = (function () {
           id: email.id,
           timeEstimate: (email.estimatedMinutes || 5) + ' min',
           actionTitle: Utils.sanitizeText(email.actionTitle),
+          summary: Utils.sanitizeText(email.summary),
           deadline: email.deadline ? Utils.sanitizeText(email.deadline) : null,
           webUrl: email.webUrl
         });
@@ -86,7 +87,10 @@ const BriefingService = (function () {
       }
     });
 
-    const urgentCount = urgentItems.length;
+    // Cast numérique explicite pour éviter toute concaténation de chaînes
+    const totalEmails = Number(emails.length) || 0;
+    const urgentCount = Number(urgentItems.length) || 0;
+    const todayEventsCount = Number(agenda.todayEvents ? agenda.todayEvents.length : 0) || 0;
 
     // Préparation des variables du template
     const templateData = {
@@ -97,15 +101,15 @@ const BriefingService = (function () {
       recipientName: recipientName,
       recipientEmail: recipientEmail,
       stats: {
-        totalEmails: emails.length,
+        totalEmails: totalEmails,
         urgentCount: urgentCount,
-        todayEventsCount: agenda.todayEvents.length
+        todayEventsCount: todayEventsCount
       },
       urgentItems: urgentItems,
       sortedInfoGroups: sortedInfoGroups,
-      todayEvents: agenda.todayEvents,
-      tomorrowEvents: agenda.tomorrowEvents,
-      isCalm: emails.length === 0 && agenda.todayEvents.length === 0
+      todayEvents: agenda.todayEvents || [],
+      tomorrowEvents: agenda.tomorrowEvents || [],
+      isCalm: totalEmails === 0 && todayEventsCount === 0
     };
 
     // Sujet d'e-mail propre et clair
@@ -135,7 +139,11 @@ const BriefingService = (function () {
         recipientEmail +
         ' (Sujet : "' +
         emailSubject +
-        '")'
+        '") — Stats : ' +
+        totalEmails +
+        ' e-mails, ' +
+        urgentCount +
+        ' action(s)'
     );
 
     GmailApp.sendEmail(recipientEmail, emailSubject, plainTextBody, {
@@ -176,7 +184,8 @@ const BriefingService = (function () {
       data.urgentItems.forEach(function (e) {
         let line = '• ⏱ ' + e.timeEstimate + ' — ' + e.actionTitle;
         if (e.deadline) line += ' (' + e.deadline + ')';
-        line += ' : ' + e.webUrl;
+        if (e.summary) line += ' : ' + e.summary;
+        line += ' — ' + e.webUrl;
         lines.push(line);
       });
       lines.push('');
