@@ -1,10 +1,59 @@
 /**
  * Google CC Briefing Agent
  * BriefingService.js — Orchestration du briefing selon la structure exacte de référence :
- * 🧠 Actions prioritaires | 🔔 Pour information (récapitulatif des e-mails reçus non lus) | 📅 Au planning du jour
+ * 🧠 Actions prioritaires (dédupliquées strictement) | 🔔 Pour information | 📅 Au planning du jour
  */
 
 const BriefingService = (function () {
+  /**
+   * Corrige le routage par mots-clés de sécurité pour garantir qu'aucune offre d'emploi n'échappe à Emploi & Carrière.
+   */
+  function routeCategorySafely(rawCategory, sender, subject) {
+    const text = ((sender || '') + ' ' + (subject || '')).toLowerCase();
+
+    // 1. Emploi & Carrière (Michael Page, Meteojob, LinkedIn, HelloWork, France Travail, etc.)
+    if (
+      text.indexOf('michaelpage') !== -1 ||
+      text.indexOf('michael page') !== -1 ||
+      text.indexOf('meteojob') !== -1 ||
+      text.indexOf('linkedin') !== -1 ||
+      text.indexOf('hellowork') !== -1 ||
+      text.indexOf('apec') !== -1 ||
+      text.indexOf('indeed') !== -1 ||
+      text.indexOf('job') !== -1 ||
+      text.indexOf('offres finance') !== -1 ||
+      text.indexOf('finance & accounting') !== -1 ||
+      text.indexOf('treuhand') !== -1 ||
+      text.indexOf('candidat') !== -1 ||
+      text.indexOf('recrutement') !== -1
+    ) {
+      return 'Emploi & Carrière';
+    }
+
+    // 2. Démarches & Administration publique
+    if (
+      text.indexOf('caf.fr') !== -1 ||
+      text.indexOf('impots.gouv') !== -1 ||
+      text.indexOf('ameli.fr') !== -1 ||
+      text.indexOf('croupier') !== -1 ||
+      text.indexOf('formation') !== -1
+    ) {
+      return 'Démarches & Administration';
+    }
+
+    // 3. Santé & Soins
+    if (
+      text.indexOf('doctolib') !== -1 ||
+      text.indexOf('qare') !== -1 ||
+      text.indexOf('ordonnance') !== -1 ||
+      text.indexOf('medecin') !== -1
+    ) {
+      return 'Santé & Soins';
+    }
+
+    return rawCategory || 'Actualités & Veille';
+  }
+
   /**
    * Construit et expédie le briefing quotidien.
    *
@@ -24,7 +73,9 @@ const BriefingService = (function () {
     const temporalSignoff = Utils.getTemporalSignoff(now);
 
     const urgentItems = [];
+    const seenUrgentKeys = {};
     const groupedInfo = {};
+    const seenGroupedKeys = {};
 
     // Ordre thématique logique avec séparation Santé & Soins / Démarches & Administration
     const preferredCategoryOrder = [
@@ -41,10 +92,20 @@ const BriefingService = (function () {
 
     for (let i = 0; i < emails.length; i++) {
       const email = emails[i];
+      const senderClean = Utils.sanitizeText(email.senderDisplayName || email.senderName);
+      const subjectClean = Utils.sanitizeText(email.subject);
 
       if (email.actionRequired && email.actionTitle) {
+        // DÉDUPLICATION STRICTE des actions prioritaires par titre ou sujet normalisé
+        const actionNorm = Utils.normalizeSubject(email.actionTitle) || Utils.normalizeSubject(subjectClean);
+        if (seenUrgentKeys[actionNorm]) {
+          continue; // Déjà présent dans les actions prioritaires, élimine les doublons France Travail
+        }
+        seenUrgentKeys[actionNorm] = true;
+
         urgentItems.push({
           id: email.id,
+          threadId: email.threadId,
           timeEstimate: (email.estimatedMinutes || 5) + ' min',
           actionTitle: Utils.sanitizeText(email.actionTitle),
           summary: Utils.sanitizeText(email.summary),
@@ -52,16 +113,25 @@ const BriefingService = (function () {
           webUrl: email.webUrl
         });
       } else {
-        const catKey = Utils.sanitizeText(email.category) || 'Actualités & Veille';
+        // Routage sécurisé par mots-clés garantissant qu'aucune offre d'emploi n'atterrisse dans Actualités & Veille
+        const rawCat = Utils.sanitizeText(email.category) || 'Actualités & Veille';
+        const catKey = routeCategorySafely(rawCat, senderClean, subjectClean);
+
         if (!groupedInfo[catKey]) {
           groupedInfo[catKey] = [];
         }
-        groupedInfo[catKey].push({
-          id: email.id,
-          sender: Utils.sanitizeText(email.senderDisplayName || email.senderName),
-          summary: Utils.sanitizeText(email.summary),
-          webUrl: email.webUrl
-        });
+
+        // Déduplication stricte par expéditeur et sujet normalisé
+        const itemKey = senderClean.toLowerCase() + '::' + Utils.normalizeSubject(subjectClean);
+        if (!seenGroupedKeys[itemKey]) {
+          seenGroupedKeys[itemKey] = true;
+          groupedInfo[catKey].push({
+            id: email.id,
+            sender: senderClean,
+            summary: Utils.sanitizeText(email.summary),
+            webUrl: email.webUrl
+          });
+        }
       }
     }
 
@@ -87,7 +157,7 @@ const BriefingService = (function () {
       }
     });
 
-    // Cast numérique explicite pour éviter toute concaténation de chaînes
+    // Cast numérique strict pour éliminer tout bug de concaténation de chaînes
     const totalEmails = Number(emails.length) || 0;
     const urgentCount = Number(urgentItems.length) || 0;
     const todayEventsCount = Number(agenda.todayEvents ? agenda.todayEvents.length : 0) || 0;

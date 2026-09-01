@@ -19,8 +19,8 @@ const Config = (function () {
     BRIEFING_RECIPIENT_EMAIL: 'kouroufia15@gmail.com',
     WEEKEND_ENABLED: true,
     TEST_LOOKBACK_HOURS: 24,
-    // Modèle principal configuré sur gemini-2.5-flash
-    GEMINI_MODEL: 'gemini-2.5-flash',
+    // Modèle officiel standardisé selon la consigne
+    GEMINI_MODEL: 'gemini-2.0-flash',
     // Modèle de repli haute disponibilité
     GEMINI_FALLBACK_MODEL: 'gemini-flash-lite-latest',
     GEMINI_API_BASE_URL: 'https://generativelanguage.googleapis.com/v1beta/models',
@@ -115,11 +115,10 @@ const Config = (function () {
 
   /**
    * Renvoie le modèle Gemini configuré.
-   * Nettoie automatiquement les anciennes valeurs dépréciées (ex: gemini-2.0-flash) pour éviter les erreurs 404.
    */
   function getGeminiModel() {
     let model = getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, DEFAULTS.GEMINI_MODEL);
-    if (!model || model === 'gemini-2.0-flash' || model.indexOf('3.6') !== -1) {
+    if (!model || model === 'gemini-2.5-flash' || model.indexOf('3.6') !== -1) {
       model = DEFAULTS.GEMINI_MODEL;
       setScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, model);
     }

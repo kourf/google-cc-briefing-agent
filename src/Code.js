@@ -11,8 +11,8 @@ function setupProjectAndRunTest() {
   
   // 1. Initialisation de la clé API Gemini et du modèle
   const apiKey = Config.getGeminiApiKey();
-  Config.setGeminiModel('gemini-2.5-flash');
-  console.log('✓ Modèle Gemini 2.5 Flash configuré.');
+  Config.setGeminiModel('gemini-2.0-flash');
+  console.log('✓ Modèle Gemini 2.0 Flash configuré.');
 
   // 2. Initialisation du checkpoint de production
   setupInitialCheckpoint();

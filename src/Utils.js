@@ -1,6 +1,6 @@
 /**
  * Google CC Briefing Agent
- * Utils.js — Utilitaires, assainissement strict Unicode/HTML, gestion temporelle et sécurité
+ * Utils.js — Utilitaires, assainissement strict Unicode/HTML/LaTeX, gestion temporelle et sécurité
  */
 
 const Utils = (function () {
@@ -63,11 +63,10 @@ const Utils = (function () {
 
   /**
    * Assainisseur universel de texte :
-   * - Élimine définitivement les caractères de remplacement Unicode (, \uFFFD)
+   * - Élimine définitivement les caractères de remplacement Unicode (\uFFFD, ) et caractères de contrôle
+   * - Neutralise les délimiteurs mathématiques LaTeX ($...$) et remplace (m/w/d) par (H/F)
    * - Décode toutes les entités HTML (&amp;, &#039;, etc.)
-   * - Supprime les caractères de contrôle non imprimables
-   * - Supprime les balises HTML et symboles LaTeX
-   * - Normalise la typographie française (apostrophe ’)
+   * - Supprime les balises HTML et normalise la typographie française (apostrophe ’)
    *
    * @param {string} str - Texte brut à assainir
    * @return {string} Texte propre, fluide et lisible
@@ -76,11 +75,13 @@ const Utils = (function () {
     if (!str) return '';
     let text = decodeHtmlEntities(String(str));
 
-    // 1. Suppression des caractères de remplacement Unicode (\uFFFD)
-    text = text.replace(/[\uFFFD\uFFFE\uFFFF]/g, '');
-
-    // 2. Suppression des caractères de contrôle non imprimables
+    // 1. Suppression des caractères de remplacement Unicode (\uFFFD, \uFFFE, \uFFFF, surrogates)
+    text = text.replace(/[\uFFFD\uFFFE\uFFFF\uDB80-\uDBFF\uDC00-\uDFFF]/g, '');
     text = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, ' ');
+
+    // 2. Remplacement systématique des notations allemandes de genre et maths LaTeX : (m/w/d) -> (H/F)
+    text = text.replace(/\(?\$?\(?\s*m\s*\/\s*w\s*\/\s*d\s*\)?\$?\)?/gi, '(H/F)');
+    text = text.replace(/\(?\$?\(?\s*h\s*\/\s*f\s*\)?\$?\)?/gi, '(H/F)');
 
     // 3. Suppression des délimiteurs mathématiques LaTeX ($...$, \(...\))
     text = text.replace(/\$([^\$]+)\$/g, '$1');
@@ -189,19 +190,24 @@ const Utils = (function () {
     const lower = decoded.toLowerCase();
     if (lower.indexOf('github.com') !== -1) return 'GitHub';
     if (lower.indexOf('google.com') !== -1) return 'Google';
-    if (lower.indexOf('linkedin.com') !== -1) return 'LinkedIn';
-    if (lower.indexOf('hellowork.com') !== -1) return 'HelloWork';
-    if (lower.indexOf('francetravail.fr') !== -1 || lower.indexOf('pole-emploi.fr') !== -1) return 'France Travail';
-    if (lower.indexOf('easyjet.com') !== -1) return 'easyJet';
-    if (lower.indexOf('getyourguide.com') !== -1) return 'GetYourGuide';
-    if (lower.indexOf('doctolib.fr') !== -1) return 'Doctolib';
-    if (lower.indexOf('qare.fr') !== -1) return 'Qare';
-    if (lower.indexOf('lumosity.com') !== -1) return 'Lumosity';
-    if (lower.indexOf('twistshake.com') !== -1) return 'Twistshake';
-    if (lower.indexOf('asos.com') !== -1) return 'ASOS';
-    if (lower.indexOf('tiktok.com') !== -1) return 'TikTok';
-    if (lower.indexOf('facebookmail.com') !== -1) return 'Facebook';
-    if (lower.indexOf('instagram.com') !== -1) return 'Instagram';
+    if (lower.indexOf('linkedin.com') !== -1 || lower.indexOf('linkedin') !== -1) return 'LinkedIn';
+    if (lower.indexOf('michaelpage') !== -1 || lower.indexOf('michael page') !== -1) return 'Michael Page';
+    if (lower.indexOf('meteojob') !== -1) return 'Meteojob';
+    if (lower.indexOf('hellowork') !== -1) return 'HelloWork';
+    if (lower.indexOf('francetravail') !== -1 || lower.indexOf('pole-emploi') !== -1) return 'France Travail';
+    if (lower.indexOf('easyjet') !== -1) return 'easyJet';
+    if (lower.indexOf('getyourguide') !== -1) return 'GetYourGuide';
+    if (lower.indexOf('doctolib') !== -1) return 'Doctolib';
+    if (lower.indexOf('qare') !== -1) return 'Qare';
+    if (lower.indexOf('lumosity') !== -1) return 'Lumosity';
+    if (lower.indexOf('twistshake') !== -1) return 'Twistshake';
+    if (lower.indexOf('asos') !== -1) return 'ASOS';
+    if (lower.indexOf('tiktok') !== -1) return 'TikTok';
+    if (lower.indexOf('facebook') !== -1) return 'Facebook';
+    if (lower.indexOf('instagram') !== -1) return 'Instagram';
+    if (lower.indexOf('qonto') !== -1) return 'Qonto';
+    if (lower.indexOf('ugc') !== -1) return 'UGC';
+    if (lower.indexOf('american express') !== -1 || lower.indexOf('amex') !== -1) return 'American Express';
 
     // Extraction standard du nom complet : "Prénom Nom <email@...>" -> "Prénom Nom"
     const match = decoded.match(/^"?([^"<]+)"?\s*(?:<.*>)?$/);
@@ -240,7 +246,7 @@ const Utils = (function () {
 
   /**
    * Formate une date en français selon le fuseau horaire Europe/Paris.
-   * Ex: "Lundi 31 août 2026"
+   * Ex: "Mardi 1 septembre 2026"
    */
   function formatDateFrench(date) {
     if (!date) return '';
