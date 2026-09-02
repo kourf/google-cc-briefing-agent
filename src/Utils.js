@@ -262,25 +262,36 @@ const Utils = (() => {
 
   /**
    * Builds direct universal Gmail web URL for an email thread.
-   * Standardized to support both desktop browser tabs and mobile Gmail app intent handlers.
+   * Standard direct thread URL opening the conversation directly on desktop and mobile.
    *
    * @param {string} threadId - Gmail thread identifier.
-   * @returns {string} Direct deep-link web URL.
+   * @returns {string} Direct thread web URL.
    */
   const buildGmailUrl = (threadId) => {
     if (!threadId) return 'https://mail.google.com/mail/u/0/#inbox';
     const cleanId = encodeURIComponent(String(threadId).trim());
-    return `https://mail.google.com/mail/u/0/#search/id%3A${cleanId}`;
+    return `https://mail.google.com/mail/u/0/#all/${cleanId}`;
   };
 
   /**
-   * Builds web URL for a Google Calendar event.
-   * @param {string} eventId - Calendar event identifier.
-   * @returns {string} Web edit/view link.
+   * Builds a reliable day-view web URL for a Google Calendar event or date.
+   * Completely eliminates HTTP 500 errors caused by raw event IDs ending with @google.com.
+   *
+   * @param {Date|Object} dateOrEvent - Date instance or event object.
+   * @returns {string} Direct Google Calendar day-view URL.
    */
-  const buildCalendarUrl = (eventId) => {
-    if (!eventId) return 'https://calendar.google.com/calendar';
-    return `https://calendar.google.com/calendar/r/eventedit/${encodeURIComponent(eventId)}`;
+  const buildCalendarUrl = (dateOrEvent) => {
+    const tz = Config.DEFAULTS.TIMEZONE || 'Europe/Paris';
+    let date = dateOrEvent;
+    if (dateOrEvent && typeof dateOrEvent.getStartTime === 'function') {
+      date = dateOrEvent.getStartTime();
+    } else if (!(date instanceof Date)) {
+      date = new Date();
+    }
+    const year = Utilities.formatDate(date, tz, 'yyyy');
+    const month = Utilities.formatDate(date, tz, 'MM');
+    const day = Utilities.formatDate(date, tz, 'dd');
+    return `https://calendar.google.com/calendar/u/0/r/day/${year}/${month}/${day}`;
   };
 
   /**

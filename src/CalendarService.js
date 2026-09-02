@@ -63,7 +63,7 @@ const CalendarService = (() => {
       location,
       isPhysical: Boolean(location && !confLink && !location.match(/http/i)),
       conferenceLink: confLink,
-      calendarUrl: Utils.buildCalendarUrl(event.getId())
+      calendarUrl: Utils.buildCalendarUrl(startTime)
     };
   };
 
