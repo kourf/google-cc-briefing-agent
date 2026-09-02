@@ -19,7 +19,7 @@ const Config = (function () {
     BRIEFING_RECIPIENT_EMAIL: 'kouroufia15@gmail.com',
     WEEKEND_ENABLED: true,
     TEST_LOOKBACK_HOURS: 24,
-    // Modèle officiel standardisé selon la consigne
+    // Modèle officiel standardisé pour la production
     GEMINI_MODEL: 'gemini-2.0-flash',
     // Modèle de repli haute disponibilité
     GEMINI_FALLBACK_MODEL: 'gemini-flash-lite-latest',
@@ -64,6 +64,15 @@ const Config = (function () {
       icon: '✉️'
     }
   ];
+
+  function getProps() {
+    try {
+      return PropertiesService.getScriptProperties();
+    } catch (e) {
+      console.warn('PropertiesService indisponible : ' + e.message);
+      return null;
+    }
+  }
 
   function getScriptProperty(key, defaultValue) {
     try {
@@ -150,6 +159,10 @@ const Config = (function () {
   return {
     DEFAULTS: DEFAULTS,
     KNOWN_ACCOUNTS: KNOWN_ACCOUNTS,
+    KEYS: SCRIPT_PROP_KEYS,
+    getProps: getProps,
+    getScriptProperty: getScriptProperty,
+    setScriptProperty: setScriptProperty,
     getGeminiApiKey: getGeminiApiKey,
     getRecipientEmail: getRecipientEmail,
     isWeekendEnabled: isWeekendEnabled,

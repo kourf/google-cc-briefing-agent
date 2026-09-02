@@ -43,10 +43,15 @@ const StateService = (function () {
    * Récupère le timestamp du dernier checkpoint réussi (en secondes).
    */
   function getLastCheckpointTime() {
-    const val = Config.getProps().getProperty(Config.KEYS.LAST_CHECKPOINT_TIME);
-    if (!val) return null;
-    const parsed = parseInt(val, 10);
-    return isNaN(parsed) ? null : parsed;
+    try {
+      const val = PropertiesService.getScriptProperties().getProperty(Config.KEYS.LAST_CHECKPOINT_TIME);
+      if (!val) return null;
+      const parsed = parseInt(val, 10);
+      return isNaN(parsed) ? null : parsed;
+    } catch (e) {
+      console.warn('Impossible de lire LAST_CHECKPOINT_TIME : ' + e.message);
+      return null;
+    }
   }
 
   /**
@@ -57,7 +62,9 @@ const StateService = (function () {
     const current = getLastCheckpointTime();
     if (!current) {
       const nowSec = Math.floor(Date.now() / 1000);
-      Config.getProps().setProperty(Config.KEYS.LAST_CHECKPOINT_TIME, String(nowSec));
+      try {
+        PropertiesService.getScriptProperties().setProperty(Config.KEYS.LAST_CHECKPOINT_TIME, String(nowSec));
+      } catch (e) {}
       console.log('Checkpoint initial créé : ' + new Date(nowSec * 1000).toISOString());
       return nowSec;
     }
@@ -69,7 +76,11 @@ const StateService = (function () {
    */
   function resetCheckpointToNow() {
     const nowSec = Math.floor(Date.now() / 1000);
-    Config.getProps().setProperty(Config.KEYS.LAST_CHECKPOINT_TIME, String(nowSec));
+    try {
+      PropertiesService.getScriptProperties().setProperty(Config.KEYS.LAST_CHECKPOINT_TIME, String(nowSec));
+    } catch (e) {
+      console.warn('Erreur resetCheckpointToNow : ' + e.message);
+    }
     console.log('Checkpoint réinitialisé à maintenant : ' + new Date(nowSec * 1000).toISOString());
     return nowSec;
   }
@@ -78,16 +89,20 @@ const StateService = (function () {
    * Vérifie si un briefing de production a déjà été envoyé aujourd'hui.
    */
   function hasRunToday() {
-    const lastRunVal = Config.getProps().getProperty(Config.KEYS.LAST_BRIEFING_RUN_TIME);
-    if (!lastRunVal) return false;
+    try {
+      const lastRunVal = PropertiesService.getScriptProperties().getProperty(Config.KEYS.LAST_BRIEFING_RUN_TIME);
+      if (!lastRunVal) return false;
 
-    const lastRunSec = parseInt(lastRunVal, 10);
-    if (isNaN(lastRunSec)) return false;
+      const lastRunSec = parseInt(lastRunVal, 10);
+      if (isNaN(lastRunSec)) return false;
 
-    const todayStr = Utilities.formatDate(new Date(), Config.DEFAULTS.TIMEZONE, 'yyyy-MM-dd');
-    const lastRunDateStr = Utilities.formatDate(new Date(lastRunSec * 1000), Config.DEFAULTS.TIMEZONE, 'yyyy-MM-dd');
+      const todayStr = Utilities.formatDate(new Date(), Config.DEFAULTS.TIMEZONE, 'yyyy-MM-dd');
+      const lastRunDateStr = Utilities.formatDate(new Date(lastRunSec * 1000), Config.DEFAULTS.TIMEZONE, 'yyyy-MM-dd');
 
-    return todayStr === lastRunDateStr;
+      return todayStr === lastRunDateStr;
+    } catch (e) {
+      return false;
+    }
   }
 
   /**
@@ -97,10 +112,14 @@ const StateService = (function () {
     const nowSec = Math.floor(Date.now() / 1000);
     const targetCheckpoint = newCheckpointSec || nowSec;
 
-    Config.getProps().setProperties({
-      [Config.KEYS.LAST_CHECKPOINT_TIME]: String(targetCheckpoint),
-      [Config.KEYS.LAST_BRIEFING_RUN_TIME]: String(nowSec)
-    });
+    try {
+      PropertiesService.getScriptProperties().setProperties({
+        [Config.KEYS.LAST_CHECKPOINT_TIME]: String(targetCheckpoint),
+        [Config.KEYS.LAST_BRIEFING_RUN_TIME]: String(nowSec)
+      });
+    } catch (e) {
+      console.warn('Erreur recordSuccessfulRun : ' + e.message);
+    }
 
     console.log(
       'Succès enregistré. Nouveau checkpoint : ' +
