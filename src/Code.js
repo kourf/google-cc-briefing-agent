@@ -7,58 +7,9 @@
  */
 
 /**
- * 1. CONFIGURATION DU DÉCLENCHEUR QUOTIDIEN (06:00 PILE)
- * Installe le déclencheur temporel exact à 06:00:00 (Europe/Paris) et initialise le checkpoint.
- * À exécuter une seule fois pour activer l'envoi automatique chaque matin.
- */
-function setupDailyTrigger() {
-  console.log('=== ACTIVATION DU DÉCLENCHEUR QUOTIDIEN (06:00 PILE) ===');
-
-  // 1. Vérification de la clé API Gemini
-  Config.getGeminiApiKey();
-
-  // 2. Initialisation du point de contrôle à l'instant présent
-  StateService.resetCheckpointToNow();
-  console.log('✓ Checkpoint de production calé à cet instant.');
-
-  // 3. Configuration du déclencheur exact à 06:00:00
-  const targetDate = TriggerService.setupDailyTrigger();
-  const formatted = Utilities.formatDate(targetDate, Config.DEFAULTS.TIMEZONE, 'dd/MM/yyyy à HH:mm:ss');
-  console.log(`✓ Prochaine exécution programmée pour le ${formatted} (${Config.DEFAULTS.TIMEZONE}).`);
-}
-
-/**
- * 2. ENVOI IMMÉDIAT DU BRIEFING (SUR DEMANDE)
- * Analyse les e-mails non lus des dernières 24h et envoie immédiatement votre briefing officiel.
- * Utile pour tester ou forcer un envoi en journée sans attendre 06:00.
- */
-function runBriefingNow() {
-  console.log('=== Envoi immédiat du Briefing Quotidien ===');
-
-  const lookbackHours = Config.getTestLookbackHours();
-  const lookbackSec = Math.floor(Date.now() / 1000) - lookbackHours * 3600;
-
-  try {
-    const rawEmails = GmailService.fetchUnreadEmails(lookbackSec);
-    const agenda = CalendarService.getAgenda();
-    const enrichedEmails = GeminiService.analyzeEmails(rawEmails);
-
-    const result = BriefingService.buildAndSendBriefing({
-      emails: enrichedEmails,
-      agenda,
-      recipientEmail: Config.getRecipientEmail()
-    });
-
-    console.log(`=== Briefing envoyé avec succès à ${result.recipient} ===`, result.stats);
-  } catch (error) {
-    console.error(`Erreur lors de l’envoi immédiat : ${error.stack || error.message}`);
-    throw error;
-  }
-}
-
-/**
- * 3. EXÉCUTION AUTOMATIQUE DE PRODUCTION (06:00:00 PILE)
- * Fonction appelée automatiquement par le déclencheur chaque matin à 06:00:00.
+ * 1. EXÉCUTION AUTOMATIQUE DE PRODUCTION (06:00:00 PILE)
+ * Fonction appelée automatiquement par Google chaque matin à 06:00:00.
+ * Analyse les nouveaux e-mails, l'agenda, génère le résumé IA et l'envoie par e-mail.
  * S'auto-reprogramme automatiquement pour le lendemain matin à la fin de son exécution.
  */
 function runDailyBriefing() {
@@ -119,5 +70,34 @@ function runDailyBriefing() {
     } catch (triggerError) {
       console.error(`Erreur d’auto-reprogrammation : ${triggerError.message}`);
     }
+  }
+}
+
+/**
+ * 2. ENVOI IMMÉDIAT DU BRIEFING (SUR DEMANDE)
+ * Analyse les e-mails non lus des dernières 24h et envoie immédiatement votre briefing officiel.
+ * Utile pour forcer un envoi en journée sans attendre 06:00.
+ */
+function runBriefingNow() {
+  console.log('=== Envoi immédiat du Briefing Quotidien ===');
+
+  const lookbackHours = Config.getTestLookbackHours();
+  const lookbackSec = Math.floor(Date.now() / 1000) - lookbackHours * 3600;
+
+  try {
+    const rawEmails = GmailService.fetchUnreadEmails(lookbackSec);
+    const agenda = CalendarService.getAgenda();
+    const enrichedEmails = GeminiService.analyzeEmails(rawEmails);
+
+    const result = BriefingService.buildAndSendBriefing({
+      emails: enrichedEmails,
+      agenda,
+      recipientEmail: Config.getRecipientEmail()
+    });
+
+    console.log(`=== Briefing envoyé avec succès à ${result.recipient} ===`, result.stats);
+  } catch (error) {
+    console.error(`Erreur lors de l’envoi immédiat : ${error.stack || error.message}`);
+    throw error;
   }
 }
