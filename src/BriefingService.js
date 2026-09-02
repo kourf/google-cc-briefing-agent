@@ -1,94 +1,103 @@
 /**
  * Google CC Briefing Agent
- * BriefingService.js — Orchestration du briefing selon la structure exacte de référence :
- * 🧠 Actions prioritaires (dédupliquées strictement) | 🔔 Pour information | 📅 Au planning du jour
+ * BriefingService.js — Orchestration of email categorization, agenda assembly, HTML rendering, and delivery.
+ *
+ * @author Kouroufia
+ * @version 2.0.0
  */
 
-const BriefingService = (function () {
+const BriefingService = (() => {
   /**
-   * Corrige le routage par mots-clés de sécurité pour garantir la bonne catégorisation des e-mails.
-   * Inclut la désambiguïsation stricte des e-mails LinkedIn (invitations vs offres vs articles).
+   * Safety keyword router guaranteeing proper domain categorization.
+   * Disambiguates LinkedIn invitations from job postings and news feeds.
+   *
+   * @param {string} rawCategory - Category suggested by AI.
+   * @param {string} sender - Clean sender name.
+   * @param {string} subject - Clean email subject.
+   * @returns {string} Definitive category label.
    */
-  function routeCategorySafely(rawCategory, sender, subject) {
-    const text = ((sender || '') + ' ' + (subject || '')).toLowerCase();
+  const routeCategorySafely = (rawCategory, sender, subject) => {
+    const text = `${sender || ''} ${subject || ''}`.toLowerCase();
 
-    // 1. Désambiguïsation spécifique LinkedIn
-    if (text.indexOf('linkedin') !== -1) {
-      // A. Invitations & Demandes de connexion réseau
+    // 1. LinkedIn Contextual Disambiguation
+    if (text.includes('linkedin')) {
+      // Invitations & Connection Requests
       if (
-        text.indexOf('attends votre réponse') !== -1 ||
-        text.indexOf('rejoindre votre réseau') !== -1 ||
-        text.indexOf('invitation') !== -1 ||
-        text.indexOf('connecter') !== -1 ||
-        text.indexOf('invites you to connect') !== -1
+        text.includes('attends votre réponse') ||
+        text.includes('rejoindre votre réseau') ||
+        text.includes('invitation') ||
+        text.includes('connecter') ||
+        text.includes('invites you to connect')
       ) {
         return 'Réseaux sociaux & Culture';
       }
-      // B. Articles de presse et actualités partagées sur LinkedIn
+      // Newsletters & Analysis Articles
       if (
-        text.indexOf('trump') !== -1 ||
-        text.indexOf('data centre') !== -1 ||
-        text.indexOf('build-out') !== -1 ||
-        text.indexOf('newsletter') !== -1
+        text.includes('trump') ||
+        text.includes('data centre') ||
+        text.includes('build-out') ||
+        text.includes('newsletter')
       ) {
         return 'Actualités & Veille';
       }
-      // C. Vraies offres d'emploi LinkedIn
+      // Job opportunities
       return 'Emploi & Carrière';
     }
 
-    // 2. Emploi & Carrière (Michael Page, Meteojob, HelloWork, Apec, etc.)
+    // 2. Job & Recruitment Platforms
     if (
-      text.indexOf('michaelpage') !== -1 ||
-      text.indexOf('michael page') !== -1 ||
-      text.indexOf('meteojob') !== -1 ||
-      text.indexOf('hellowork') !== -1 ||
-      text.indexOf('apec') !== -1 ||
-      text.indexOf('indeed') !== -1 ||
-      text.indexOf('job') !== -1 ||
-      text.indexOf('offres finance') !== -1 ||
-      text.indexOf('finance & accounting') !== -1 ||
-      text.indexOf('treuhand') !== -1 ||
-      text.indexOf('candidat') !== -1 ||
-      text.indexOf('recrutement') !== -1
+      text.includes('michaelpage') ||
+      text.includes('michael page') ||
+      text.includes('meteojob') ||
+      text.includes('hellowork') ||
+      text.includes('apec') ||
+      text.includes('indeed') ||
+      text.includes('job') ||
+      text.includes('offres finance') ||
+      text.includes('finance & accounting') ||
+      text.includes('treuhand') ||
+      text.includes('candidat') ||
+      text.includes('recrutement')
     ) {
       return 'Emploi & Carrière';
     }
 
-    // 3. Démarches & Administration publique
+    // 3. Public Administration & Training
     if (
-      text.indexOf('caf.fr') !== -1 ||
-      text.indexOf('impots.gouv') !== -1 ||
-      text.indexOf('ameli.fr') !== -1 ||
-      text.indexOf('croupier') !== -1 ||
-      text.indexOf('formation') !== -1
+      text.includes('caf.fr') ||
+      text.includes('impots.gouv') ||
+      text.includes('ameli.fr') ||
+      text.includes('croupier') ||
+      text.includes('formation')
     ) {
       return 'Démarches & Administration';
     }
 
-    // 4. Santé & Soins
+    // 4. Healthcare
     if (
-      text.indexOf('doctolib') !== -1 ||
-      text.indexOf('qare') !== -1 ||
-      text.indexOf('ordonnance') !== -1 ||
-      text.indexOf('medecin') !== -1
+      text.includes('doctolib') ||
+      text.includes('qare') ||
+      text.includes('ordonnance') ||
+      text.includes('medecin')
     ) {
       return 'Santé & Soins';
     }
 
     return rawCategory || 'Actualités & Veille';
-  }
+  };
 
   /**
-   * Construit et expédie le briefing quotidien.
+   * Constructs, renders, and dispatches the daily briefing email.
    *
-   * @param {Object} params - { emails, agenda, isTestMode, recipientEmail }
-   * @return {Object} Résumé de l'opération
+   * @param {Object} params - Execution parameters.
+   * @param {Array<Object>} params.emails - Enriched email items.
+   * @param {Object} params.agenda - Today and tomorrow calendar events.
+   * @param {string} [params.recipientEmail] - Target recipient address.
+   * @returns {Object} Execution summary and metrics.
    */
-  function buildAndSendBriefing(params) {
+  const buildAndSendBriefing = (params) => {
     const emails = params.emails || [];
     const agenda = params.agenda || { todayEvents: [], tomorrowEvents: [] };
-    const isTestMode = Boolean(params.isTestMode);
     const recipientEmail = params.recipientEmail || Config.getRecipientEmail();
     const recipientName = 'Kouroufia';
 
@@ -98,11 +107,11 @@ const BriefingService = (function () {
     const temporalSignoff = Utils.getTemporalSignoff(now);
 
     const urgentItems = [];
-    const seenUrgentKeys = {};
+    const seenUrgentKeys = new Set();
     const groupedInfo = {};
-    const seenGroupedKeys = {};
+    const seenGroupedKeys = new Set();
 
-    // Ordre thématique logique avec séparation Santé & Soins / Démarches & Administration
+    // Logical category presentation order
     const preferredCategoryOrder = [
       'Emploi & Carrière',
       'Tech & Projets',
@@ -115,30 +124,28 @@ const BriefingService = (function () {
       'Actualités & Veille'
     ];
 
-    for (let i = 0; i < emails.length; i++) {
-      const email = emails[i];
+    for (const email of emails) {
       const senderClean = Utils.sanitizeText(email.senderDisplayName || email.senderName);
       const subjectClean = Utils.sanitizeText(email.subject);
 
       if (email.actionRequired && email.actionTitle) {
-        // DÉDUPLICATION STRICTE des actions prioritaires par titre ou sujet normalisé
+        // Strict deduplication of priority actions by normalized title/subject
         const actionNorm = Utils.normalizeSubject(email.actionTitle) || Utils.normalizeSubject(subjectClean);
-        if (seenUrgentKeys[actionNorm]) {
-          continue; // Élimine les doublons
+        if (seenUrgentKeys.has(actionNorm)) {
+          continue;
         }
-        seenUrgentKeys[actionNorm] = true;
+        seenUrgentKeys.add(actionNorm);
 
         urgentItems.push({
           id: email.id,
           threadId: email.threadId,
-          timeEstimate: (email.estimatedMinutes || 5) + ' min',
+          timeEstimate: `${email.estimatedMinutes || 5} min`,
           actionTitle: Utils.sanitizeText(email.actionTitle),
           summary: Utils.sanitizeText(email.summary),
           deadline: email.deadline ? Utils.sanitizeText(email.deadline) : null,
           webUrl: email.webUrl
         });
       } else {
-        // Routage sécurisé par mots-clés avec désambiguïsation LinkedIn
         const rawCat = Utils.sanitizeText(email.category) || 'Actualités & Veille';
         const catKey = routeCategorySafely(rawCat, senderClean, subjectClean);
 
@@ -146,10 +153,10 @@ const BriefingService = (function () {
           groupedInfo[catKey] = [];
         }
 
-        // Déduplication stricte par expéditeur et sujet normalisé
-        const itemKey = senderClean.toLowerCase() + '::' + Utils.normalizeSubject(subjectClean);
-        if (!seenGroupedKeys[itemKey]) {
-          seenGroupedKeys[itemKey] = true;
+        // Strict campaign deduplication per sender and normalized subject
+        const itemKey = `${senderClean.toLowerCase()}::${Utils.normalizeSubject(subjectClean)}`;
+        if (!seenGroupedKeys.has(itemKey)) {
+          seenGroupedKeys.add(itemKey);
           groupedInfo[catKey].push({
             id: email.id,
             sender: senderClean,
@@ -160,88 +167,66 @@ const BriefingService = (function () {
       }
     }
 
-    // Construction d'une liste ordonnée de groupes d'information
+    // Sort categories into standardized visual order
     const sortedInfoGroups = [];
-    preferredCategoryOrder.forEach(function (catName) {
-      if (groupedInfo[catName] && groupedInfo[catName].length > 0) {
+    for (const catName of preferredCategoryOrder) {
+      if (groupedInfo[catName]?.length > 0) {
         sortedInfoGroups.push({
           name: catName,
           items: groupedInfo[catName]
         });
         delete groupedInfo[catName];
       }
-    });
+    }
 
-    // Ajout des catégories restantes éventuelles
-    Object.keys(groupedInfo).forEach(function (otherCat) {
-      if (groupedInfo[otherCat].length > 0) {
+    // Append remaining categories if any
+    for (const [otherCat, items] of Object.entries(groupedInfo)) {
+      if (items?.length > 0) {
         sortedInfoGroups.push({
           name: otherCat,
-          items: groupedInfo[otherCat]
+          items
         });
       }
-    });
+    }
 
-    // Cast numérique strict pour éliminer tout bug de concaténation de chaînes
+    // Explicit numerical casting for statistics badge
     const totalEmails = Number(emails.length) || 0;
     const urgentCount = Number(urgentItems.length) || 0;
-    const todayEventsCount = Number(agenda.todayEvents ? agenda.todayEvents.length : 0) || 0;
+    const todayEventsCount = Number(agenda.todayEvents?.length) || 0;
 
-    // Préparation des variables du template
     const templateData = {
-      isTestMode: isTestMode,
       dateTitle: formattedDate,
       greeting: temporalGreeting,
       signoff: temporalSignoff,
-      recipientName: recipientName,
-      recipientEmail: recipientEmail,
+      recipientName,
+      recipientEmail,
       stats: {
-        totalEmails: totalEmails,
-        urgentCount: urgentCount,
-        todayEventsCount: todayEventsCount
+        totalEmails,
+        urgentCount,
+        todayEventsCount
       },
-      urgentItems: urgentItems,
-      sortedInfoGroups: sortedInfoGroups,
+      urgentItems,
+      sortedInfoGroups,
       todayEvents: agenda.todayEvents || [],
       tomorrowEvents: agenda.tomorrowEvents || [],
       hasZeroEmails: totalEmails === 0,
       isCalm: totalEmails === 0 && todayEventsCount === 0
     };
 
-    // Sujet d'e-mail propre et exécutif (Version Définitive sans [TEST])
-    let emailSubject = '';
-    if (urgentCount > 0) {
-      emailSubject =
-        '(' +
-        urgentCount +
-        ' action' +
-        (urgentCount > 1 ? 's' : '') +
-        ' requise' +
-        (urgentCount > 1 ? 's' : '') +
-        ') Mon Briefing Quotidien • ' +
-        formattedDate;
-    } else {
-      emailSubject = 'Mon Briefing Quotidien • ' + formattedDate;
-    }
+    // Executive email subject
+    const emailSubject = urgentCount > 0
+      ? `(${urgentCount} action${urgentCount > 1 ? 's' : ''} requise${urgentCount > 1 ? 's' : ''}) Mon Briefing Quotidien • ${formattedDate}`
+      : `Mon Briefing Quotidien • ${formattedDate}`;
 
-    // Rendu HTML et Texte brut
     const htmlBody = renderTemplate(templateData);
     const plainTextBody = renderPlainText(templateData);
 
     console.log(
-      'Envoi du briefing à : ' +
-        recipientEmail +
-        ' (Sujet : "' +
-        emailSubject +
-        '") — Stats : ' +
-        totalEmails +
-        ' e-mails, ' +
-        urgentCount +
-        ' action(s)'
+      `Delivering daily briefing to: ${recipientEmail} ("${emailSubject}") — Stats: ${totalEmails} email(s), ${urgentCount} action(s).`
     );
 
     GmailApp.sendEmail(recipientEmail, emailSubject, plainTextBody, {
-      htmlBody: htmlBody,
+      htmlBody,
       name: 'Mon Briefing Quotidien'
     });
 
@@ -251,77 +236,79 @@ const BriefingService = (function () {
       subject: emailSubject,
       stats: templateData.stats
     };
-  }
+  };
 
   /**
-   * Évalue le template HTML avec les données fournies.
+   * Evaluates the HTML template with template parameters.
+   * @param {Object} data - Template variables.
+   * @returns {string} Rendered HTML.
    */
-  function renderTemplate(data) {
+  const renderTemplate = (data) => {
     const template = HtmlService.createTemplateFromFile('Template');
     template.data = data;
     template.Utils = Utils;
     return template.evaluate().getContent();
-  }
+  };
 
   /**
-   * Version texte brut de secours (plain text).
+   * Produces fallback plain-text version of the briefing email.
+   * @param {Object} data - Template variables.
+   * @returns {string} Plain-text representation.
    */
-  function renderPlainText(data) {
-    const lines = [];
-    lines.push('MON BRIEFING QUOTIDIEN');
-    lines.push(data.dateTitle);
-    lines.push(data.greeting);
-    lines.push('');
+  const renderPlainText = (data) => {
+    const lines = [
+      'MON BRIEFING QUOTIDIEN',
+      data.dateTitle,
+      data.greeting,
+      ''
+    ];
 
     if (data.hasZeroEmails) {
-      lines.push('✨ Aucun nouvel e-mail non lu dans votre boîte de réception.');
-      lines.push('');
+      lines.push('✨ Aucun nouvel e-mail non lu dans votre boîte de réception.', '');
     }
 
     if (data.urgentItems.length > 0) {
       lines.push('=== ACTIONS PRIORITAIRES ===');
-      data.urgentItems.forEach(function (e) {
-        let line = '• ⏱ ' + e.timeEstimate + ' — ' + e.actionTitle;
-        if (e.deadline) line += ' (' + e.deadline + ')';
-        if (e.summary) line += ' : ' + e.summary;
-        line += ' — ' + e.webUrl;
+      for (const item of data.urgentItems) {
+        let line = `• ⏱ ${item.timeEstimate} — ${item.actionTitle}`;
+        if (item.deadline) line += ` (${item.deadline})`;
+        if (item.summary) line += ` : ${item.summary}`;
+        line += ` — ${item.webUrl}`;
         lines.push(line);
-      });
+      }
       lines.push('');
     }
 
     if (data.sortedInfoGroups.length > 0) {
       lines.push('=== POUR INFORMATION (RÉCAPITULATIF DES E-MAILS REÇUS NON LUS) ===');
-      data.sortedInfoGroups.forEach(function (group) {
-        lines.push('• ' + group.name + ' :');
-        group.items.forEach(function (it) {
-          lines.push('  - ' + it.sender + ' : ' + it.summary + ' — ' + it.webUrl);
-        });
-      });
+      for (const group of data.sortedInfoGroups) {
+        lines.push(`• ${group.name} :`);
+        for (const it of group.items) {
+          lines.push(`  - ${it.sender} : ${it.summary} — ${it.webUrl}`);
+        }
+      }
       lines.push('');
     }
 
     if (data.todayEvents.length > 0) {
       lines.push('=== AU PLANNING DU JOUR ===');
-      data.todayEvents.forEach(function (ev) {
-        lines.push('• ' + ev.timeFormatted + ' : ' + ev.title + (ev.location ? ' (' + ev.location + ')' : ''));
-        if (ev.conferenceLink) lines.push('  Visio : ' + ev.conferenceLink);
-      });
+      for (const ev of data.todayEvents) {
+        lines.push(`• ${ev.timeFormatted} : ${ev.title}${ev.location ? ` (${ev.location})` : ''}`);
+        if (ev.conferenceLink) lines.push(`  Visio : ${ev.conferenceLink}`);
+      }
       lines.push('');
     }
 
     if (data.isCalm) {
-      lines.push('Tout est calme aujourd’hui. Aucun e-mail prioritaire ni rendez-vous à signaler.');
-      lines.push('');
+      lines.push('Tout est calme aujourd’hui. Aucun e-mail prioritaire ni rendez-vous à signaler.', '');
     }
 
-    lines.push(data.signoff);
-    lines.push('Mon Briefing Quotidien • ' + data.recipientEmail);
+    lines.push(data.signoff, `Mon Briefing Quotidien • ${data.recipientEmail}`);
 
     return lines.join('\n');
-  }
+  };
 
   return {
-    buildAndSendBriefing: buildAndSendBriefing
+    buildAndSendBriefing
   };
 })();

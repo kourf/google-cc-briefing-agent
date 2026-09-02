@@ -1,9 +1,16 @@
 /**
  * Google CC Briefing Agent
- * Config.js — Configuration centralisée, modèles Gemini fiables et gestion des Script Properties
+ * Config.js — Centralized application configuration and Script Properties manager.
+ *
+ * @author Kouroufia
+ * @version 2.0.0
  */
 
-const Config = (function () {
+const Config = (() => {
+  /**
+   * Persistent Script Property keys stored in PropertiesService.
+   * @enum {string}
+   */
   const SCRIPT_PROP_KEYS = {
     GEMINI_API_KEY: 'GEMINI_API_KEY',
     BRIEFING_RECIPIENT_EMAIL: 'BRIEFING_RECIPIENT_EMAIL',
@@ -14,20 +21,20 @@ const Config = (function () {
     LAST_BRIEFING_RUN_TIME: 'LAST_BRIEFING_RUN_TIME'
   };
 
-  const DEFAULTS = {
+  /**
+   * Default operational parameters.
+   * @type {Readonly<Object>}
+   */
+  const DEFAULTS = Object.freeze({
     TIMEZONE: 'Europe/Paris',
     BRIEFING_RECIPIENT_EMAIL: 'kouroufia15@gmail.com',
     WEEKEND_ENABLED: true,
     TEST_LOOKBACK_HOURS: 24,
-    // Horaires stricts de déclenchement (06:00 Europe/Paris)
     TRIGGER_HOUR: 6,
     TRIGGER_MINUTE: 0,
-    // Modèle officiel standardisé pour la production
     GEMINI_MODEL: 'gemini-2.0-flash',
-    // Modèle de repli haute disponibilité
     GEMINI_FALLBACK_MODEL: 'gemini-flash-lite-latest',
     GEMINI_API_BASE_URL: 'https://generativelanguage.googleapis.com/v1beta/models',
-    // Traitement par lot unique jusqu'à 25 e-mails pour éliminer les erreurs de quota 429
     BATCH_SIZE: 25,
     MAX_RETRIES: 4,
     INITIAL_BACKOFF_MS: 2000,
@@ -35,10 +42,13 @@ const Config = (function () {
     TEMPERATURE: 0.2,
     LOCK_TIMEOUT_MS: 30000,
     MAX_BODY_CHARS: 1200
-  };
+  });
 
-  // Comptes connus pour le routage et l'étiquetage des messages transférés
-  const KNOWN_ACCOUNTS = [
+  /**
+   * Recognised destination accounts for multi-account email tracking.
+   * @type {ReadonlyArray<Object>}
+   */
+  const KNOWN_ACCOUNTS = Object.freeze([
     {
       email: 'dramekouroufia.pro@gmail.com',
       label: 'Compte Pro',
@@ -66,115 +76,168 @@ const Config = (function () {
       badgeBorder: '#DDD6FE',
       icon: '✉️'
     }
-  ];
+  ]);
 
-  function getProps() {
+  /**
+   * Safely accesses PropertiesService.getScriptProperties().
+   * @returns {GoogleAppsScript.Properties.Properties|null} The ScriptProperties instance or null.
+   */
+  const getProps = () => {
     try {
       return PropertiesService.getScriptProperties();
-    } catch (e) {
-      console.warn('PropertiesService indisponible : ' + e.message);
+    } catch (error) {
+      console.warn(`PropertiesService unavailable: ${error.message}`);
       return null;
     }
-  }
+  };
 
-  function getScriptProperty(key, defaultValue) {
-    try {
-      const val = PropertiesService.getScriptProperties().getProperty(key);
+  /**
+   * Retrieves a property from Script Properties with fallback to a default value.
+   * @param {string} key - Property key.
+   * @param {*} defaultValue - Fallback value if property is unset.
+   * @returns {*} Stored string value or defaultValue.
+   */
+  const getScriptProperty = (key, defaultValue) => {
+    const props = getProps();
+    if (props) {
+      const val = props.getProperty(key);
       if (val !== null && val !== undefined && val !== '') {
         return val;
       }
-    } catch (e) {
-      console.warn('Impossible de lire la Script Property ' + key + ' : ' + e.message);
     }
     return defaultValue;
-  }
-
-  function setScriptProperty(key, value) {
-    try {
-      PropertiesService.getScriptProperties().setProperty(key, String(value));
-    } catch (e) {
-      console.error('Impossible d’écrire la Script Property ' + key + ' : ' + e.message);
-    }
-  }
+  };
 
   /**
-   * Récupère la clé API Gemini depuis les Script Properties sécurisées.
+   * Sets a property in Script Properties.
+   * @param {string} key - Property key.
+   * @param {*} value - Value to persist.
    */
-  function getGeminiApiKey() {
+  const setScriptProperty = (key, value) => {
+    const props = getProps();
+    if (props) {
+      try {
+        props.setProperty(key, String(value));
+      } catch (error) {
+        console.error(`Unable to persist Script Property ${key}: ${error.message}`);
+      }
+    }
+  };
+
+  /**
+   * Retrieves the Gemini API key from Script Properties.
+   * @throws {Error} If GEMINI_API_KEY is not configured.
+   * @returns {string} The valid API key.
+   */
+  const getGeminiApiKey = () => {
     const key = getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_API_KEY, null);
     if (!key) {
       throw new Error(
-        'La clé GEMINI_API_KEY est manquante dans les Paramètres du projet > Propriétés du script.'
+        'Missing GEMINI_API_KEY. Please define it in Project Settings > Script Properties.'
       );
     }
     return key;
-  }
+  };
 
-  function getRecipientEmail() {
+  /**
+   * Retrieves the recipient email address for daily briefings.
+   * @returns {string} Recipient email address.
+   */
+  const getRecipientEmail = () => {
     return getScriptProperty(SCRIPT_PROP_KEYS.BRIEFING_RECIPIENT_EMAIL, DEFAULTS.BRIEFING_RECIPIENT_EMAIL);
-  }
+  };
 
-  function isWeekendEnabled() {
+  /**
+   * Indicates whether briefings should run on weekends.
+   * @returns {boolean} True if weekend execution is enabled.
+   */
+  const isWeekendEnabled = () => {
     const val = getScriptProperty(SCRIPT_PROP_KEYS.WEEKEND_ENABLED, String(DEFAULTS.WEEKEND_ENABLED));
     return val === 'true';
-  }
+  };
 
-  function getTestLookbackHours() {
+  /**
+   * Retrieves the lookback window in hours for manual/test runs.
+   * @returns {number} Lookback hours (default: 24).
+   */
+  const getTestLookbackHours = () => {
     const val = getScriptProperty(SCRIPT_PROP_KEYS.TEST_LOOKBACK_HOURS, String(DEFAULTS.TEST_LOOKBACK_HOURS));
     const num = parseInt(val, 10);
     return isNaN(num) ? DEFAULTS.TEST_LOOKBACK_HOURS : num;
-  }
+  };
 
   /**
-   * Renvoie le modèle Gemini configuré.
+   * Retrieves the configured Gemini model identifier.
+   * Automatically migrates deprecated models to the current standard.
+   * @returns {string} Active model name.
    */
-  function getGeminiModel() {
+  const getGeminiModel = () => {
     let model = getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, DEFAULTS.GEMINI_MODEL);
-    if (!model || model === 'gemini-2.5-flash' || model.indexOf('3.6') !== -1) {
+    if (!model || model === 'gemini-2.5-flash' || model.includes('3.6')) {
       model = DEFAULTS.GEMINI_MODEL;
       setScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, model);
     }
     return model;
-  }
+  };
 
-  function setGeminiModel(model) {
+  /**
+   * Updates the configured Gemini model identifier.
+   * @param {string} model - New model name.
+   */
+  const setGeminiModel = (model) => {
     setScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, model);
-  }
+  };
 
-  function getLastCheckpointTime() {
+  /**
+   * Retrieves the UNIX timestamp (in seconds) of the last successful briefing checkpoint.
+   * @returns {number|null} Timestamp in seconds, or null if uninitialized.
+   */
+  const getLastCheckpointTime = () => {
     const val = getScriptProperty(SCRIPT_PROP_KEYS.LAST_CHECKPOINT_TIME, null);
     return val ? parseInt(val, 10) : null;
-  }
+  };
 
-  function setLastCheckpointTime(timestampMs) {
-    setScriptProperty(SCRIPT_PROP_KEYS.LAST_CHECKPOINT_TIME, timestampMs);
-  }
+  /**
+   * Sets the UNIX timestamp (in seconds) of the briefing checkpoint.
+   * @param {number} timestampSec - Timestamp in seconds.
+   */
+  const setLastCheckpointTime = (timestampSec) => {
+    setScriptProperty(SCRIPT_PROP_KEYS.LAST_CHECKPOINT_TIME, timestampSec);
+  };
 
-  function getLastBriefingRunTime() {
+  /**
+   * Retrieves the UNIX timestamp (in seconds) of the last briefing execution.
+   * @returns {number|null} Timestamp in seconds, or null.
+   */
+  const getLastBriefingRunTime = () => {
     const val = getScriptProperty(SCRIPT_PROP_KEYS.LAST_BRIEFING_RUN_TIME, null);
     return val ? parseInt(val, 10) : null;
-  }
+  };
 
-  function setLastBriefingRunTime(timestampMs) {
-    setScriptProperty(SCRIPT_PROP_KEYS.LAST_BRIEFING_RUN_TIME, timestampMs);
-  }
+  /**
+   * Sets the UNIX timestamp (in seconds) of the last briefing execution.
+   * @param {number} timestampSec - Timestamp in seconds.
+   */
+  const setLastBriefingRunTime = (timestampSec) => {
+    setScriptProperty(SCRIPT_PROP_KEYS.LAST_BRIEFING_RUN_TIME, timestampSec);
+  };
 
   return {
-    DEFAULTS: DEFAULTS,
-    KNOWN_ACCOUNTS: KNOWN_ACCOUNTS,
+    DEFAULTS,
+    KNOWN_ACCOUNTS,
     KEYS: SCRIPT_PROP_KEYS,
-    getProps: getProps,
-    getScriptProperty: getScriptProperty,
-    setScriptProperty: setScriptProperty,
-    getGeminiApiKey: getGeminiApiKey,
-    getRecipientEmail: getRecipientEmail,
-    isWeekendEnabled: isWeekendEnabled,
-    getTestLookbackHours: getTestLookbackHours,
-    getGeminiModel: getGeminiModel,
-    setGeminiModel: setGeminiModel,
-    getLastCheckpointTime: getLastCheckpointTime,
-    setLastCheckpointTime: setLastCheckpointTime,
-    getLastBriefingRunTime: getLastBriefingRunTime,
-    setLastBriefingRunTime: setLastBriefingRunTime
+    getProps,
+    getScriptProperty,
+    setScriptProperty,
+    getGeminiApiKey,
+    getRecipientEmail,
+    isWeekendEnabled,
+    getTestLookbackHours,
+    getGeminiModel,
+    setGeminiModel,
+    getLastCheckpointTime,
+    setLastCheckpointTime,
+    getLastBriefingRunTime,
+    setLastBriefingRunTime
   };
 })();

@@ -1,94 +1,101 @@
 /**
  * Google CC Briefing Agent
- * StateService.js — Gestion des checkpoints, verrous concurrentiels et idempotence
+ * StateService.js — Concurrency locking, timestamp checkpointing, and execution idempotence.
+ *
+ * @author Kouroufia
+ * @version 2.0.0
  */
 
-const StateService = (function () {
+const StateService = (() => {
   let activeLock = null;
 
   /**
-   * Acquiert un verrou exclusif pour empêcher toute double exécution simultanée.
+   * Acquires an exclusive script lock to prevent concurrent executions.
+   * @returns {boolean} True if lock was acquired, false otherwise.
    */
-  function acquireLock() {
+  const acquireLock = () => {
     const lock = LockService.getScriptLock();
     try {
       const success = lock.tryLock(Config.DEFAULTS.LOCK_TIMEOUT_MS);
       if (!success) {
-        console.warn('Verrou ScriptLock non disponible : une autre exécution est déjà en cours.');
+        console.warn('ScriptLock unavailable: another execution is already active.');
         return false;
       }
       activeLock = lock;
       return true;
-    } catch (e) {
-      console.error('Erreur lors de l’acquisition du verrou :', e.message);
+    } catch (error) {
+      console.error(`Lock acquisition failure: ${error.message}`);
       return false;
     }
-  }
+  };
 
   /**
-   * Libère le verrou de script.
+   * Releases the active script lock safely.
    */
-  function releaseLock() {
+  const releaseLock = () => {
     if (activeLock) {
       try {
         activeLock.releaseLock();
-      } catch (e) {
-        console.warn('Erreur lors de la libération du verrou :', e.message);
+      } catch (error) {
+        console.warn(`Lock release warning: ${error.message}`);
       }
       activeLock = null;
     }
-  }
+  };
 
   /**
-   * Récupère le timestamp du dernier checkpoint réussi (en secondes).
+   * Retrieves the UNIX timestamp (in seconds) of the last successful briefing checkpoint.
+   * @returns {number|null} Timestamp in seconds, or null if uninitialized.
    */
-  function getLastCheckpointTime() {
+  const getLastCheckpointTime = () => {
     try {
       const val = PropertiesService.getScriptProperties().getProperty(Config.KEYS.LAST_CHECKPOINT_TIME);
       if (!val) return null;
       const parsed = parseInt(val, 10);
       return isNaN(parsed) ? null : parsed;
-    } catch (e) {
-      console.warn('Impossible de lire LAST_CHECKPOINT_TIME : ' + e.message);
+    } catch (error) {
+      console.warn(`Unable to read LAST_CHECKPOINT_TIME: ${error.message}`);
       return null;
     }
-  }
+  };
 
   /**
-   * Initialise le checkpoint officiel si inexistant.
-   * Empêche l'analyse historique de centaines d'anciens e-mails non lus lors de la mise en service.
+   * Initializes the checkpoint if missing, preventing historical backlog processing on first launch.
+   * @returns {number} Active checkpoint timestamp in seconds.
    */
-  function initCheckpointIfMissing() {
+  const initCheckpointIfMissing = () => {
     const current = getLastCheckpointTime();
     if (!current) {
       const nowSec = Math.floor(Date.now() / 1000);
       try {
         PropertiesService.getScriptProperties().setProperty(Config.KEYS.LAST_CHECKPOINT_TIME, String(nowSec));
-      } catch (e) {}
-      console.log('Checkpoint initial créé : ' + new Date(nowSec * 1000).toISOString());
+      } catch {}
+      console.log(`Initial checkpoint created at ${new Date(nowSec * 1000).toISOString()}`);
       return nowSec;
     }
     return current;
-  }
+  };
 
   /**
-   * Réinitialise explicitement le checkpoint à l'instant présent.
+   * Explicitly resets the checkpoint timestamp to the current instant.
+   * @returns {number} Reset timestamp in seconds.
    */
-  function resetCheckpointToNow() {
+  const resetCheckpointToNow = () => {
     const nowSec = Math.floor(Date.now() / 1000);
     try {
       PropertiesService.getScriptProperties().setProperty(Config.KEYS.LAST_CHECKPOINT_TIME, String(nowSec));
-    } catch (e) {
-      console.warn('Erreur resetCheckpointToNow : ' + e.message);
+    } catch (error) {
+      console.warn(`resetCheckpointToNow error: ${error.message}`);
     }
-    console.log('Checkpoint réinitialisé à maintenant : ' + new Date(nowSec * 1000).toISOString());
+    console.log(`Checkpoint reset to now: ${new Date(nowSec * 1000).toISOString()}`);
     return nowSec;
-  }
+  };
 
   /**
-   * Vérifie si un briefing de production a déjà été envoyé aujourd'hui.
+   * Verifies whether a production briefing has already run today (idempotence protection).
+   * @returns {boolean} True if briefing already ran today.
    */
-  function hasRunToday() {
+  const hasRunToday = () => {
     try {
       const lastRunVal = PropertiesService.getScriptProperties().getProperty(Config.KEYS.LAST_BRIEFING_RUN_TIME);
       if (!lastRunVal) return false;
@@ -100,15 +107,16 @@ const StateService = (function () {
       const lastRunDateStr = Utilities.formatDate(new Date(lastRunSec * 1000), Config.DEFAULTS.TIMEZONE, 'yyyy-MM-dd');
 
       return todayStr === lastRunDateStr;
-    } catch (e) {
+    } catch {
       return false;
     }
-  }
+  };
 
   /**
-   * Enregistre le succès complet d'un briefing en production.
+   * Records a successful briefing execution and advances the checkpoint.
+   * @param {number} [newCheckpointSec] - Checkpoint timestamp to store.
    */
-  function recordSuccessfulRun(newCheckpointSec) {
+  const recordSuccessfulRun = (newCheckpointSec) => {
     const nowSec = Math.floor(Date.now() / 1000);
     const targetCheckpoint = newCheckpointSec || nowSec;
 
@@ -117,23 +125,20 @@ const StateService = (function () {
         [Config.KEYS.LAST_CHECKPOINT_TIME]: String(targetCheckpoint),
         [Config.KEYS.LAST_BRIEFING_RUN_TIME]: String(nowSec)
       });
-    } catch (e) {
-      console.warn('Erreur recordSuccessfulRun : ' + e.message);
+    } catch (error) {
+      console.warn(`recordSuccessfulRun error: ${error.message}`);
     }
 
-    console.log(
-      'Succès enregistré. Nouveau checkpoint : ' +
-        new Date(targetCheckpoint * 1000).toISOString()
-    );
-  }
+    console.log(`Run recorded. Advanced checkpoint to ${new Date(targetCheckpoint * 1000).toISOString()}`);
+  };
 
   return {
-    acquireLock: acquireLock,
-    releaseLock: releaseLock,
-    getLastCheckpointTime: getLastCheckpointTime,
-    initCheckpointIfMissing: initCheckpointIfMissing,
-    resetCheckpointToNow: resetCheckpointToNow,
-    hasRunToday: hasRunToday,
-    recordSuccessfulRun: recordSuccessfulRun
+    acquireLock,
+    releaseLock,
+    getLastCheckpointTime,
+    initCheckpointIfMissing,
+    resetCheckpointToNow,
+    hasRunToday,
+    recordSuccessfulRun
   };
 })();

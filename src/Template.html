@@ -8,7 +8,7 @@
 <body style="margin: 0; padding: 24px 16px; background-color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1F2937; line-height: 1.55;">
   <div style="max-width: 600px; margin: 0 auto;">
 
-    <!-- EN-TÊTE MON BRIEFING QUOTIDIEN (VERSION DÉFINITIVE) -->
+    <!-- EN-TÊTE PRINCIPAL -->
     <div style="margin-bottom: 6px;">
       <span style="font-size: 19px; font-weight: 800; color: #111827; letter-spacing: -0.4px;">Mon Briefing Quotidien</span>
     </div>
@@ -22,7 +22,7 @@
       <?= data.greeting ?>
     </div>
 
-    <!-- BADGE MÉTRIQUE DU BRIEFING (CALCUL NUMÉRIQUE STRICT) -->
+    <!-- BADGE MÉTRIQUE DU BRIEFING -->
     <div style="margin-bottom: 18px;">
       <span style="display: inline-block; background-color: #F3F4F6; color: #374151; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 6px; border: 1px solid #E5E7EB;">
         &#x1F4CA; <?= Number(data.stats.totalEmails) ?> e-mail<?= Number(data.stats.totalEmails) > 1 ? 's' : '' ?> analysé<?= Number(data.stats.totalEmails) > 1 ? 's' : '' ?> &bull; <?= Number(data.stats.urgentCount) ?> action<?= Number(data.stats.urgentCount) > 1 ? 's' : '' ?> requise<?= Number(data.stats.urgentCount) > 1 ? 's' : '' ?>
@@ -31,7 +31,7 @@
 
     <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
 
-    <!-- ÉTAT ZÉRO E-MAIL NON LU DANS LA BOÎTE DE RÉCEPTION -->
+    <!-- ÉTAT ZÉRO E-MAIL NON LU -->
     <? if (data.hasZeroEmails) { ?>
     <div style="margin-bottom: 20px; padding: 14px 18px; background-color: #F8FAFC; border-radius: 8px; border: 1px solid #E2E8F0; color: #334155; font-size: 14px; font-weight: 500; line-height: 1.5;">
       &#x2728; Aucun nouvel e-mail non lu dans votre boîte de réception.
@@ -39,7 +39,7 @@
     <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
     <? } ?>
 
-    <!-- 1. ACTIONS PRIORITAIRES (TOP OF MIND) CONTEXTUALISÉES ET DÉDUPLIQUÉES -->
+    <!-- 1. ACTIONS PRIORITAIRES (TOP OF MIND) -->
     <? if (data.urgentItems && data.urgentItems.length > 0) { ?>
     <div style="margin-bottom: 20px;">
       <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 10px;">
@@ -89,7 +89,7 @@
     <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
     <? } ?>
 
-    <!-- 3. AU PLANNING DU JOUR (CALENDRIER ET ÉVÉNEMENTS) -->
+    <!-- 3. AU PLANNING DU JOUR (CALENDRIER ET RENDEZ-VOUS) -->
     <div style="margin-bottom: 20px;">
       <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 10px;">
         &#x1F4C5; Au planning du jour

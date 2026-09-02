@@ -1,61 +1,52 @@
 /**
  * Google CC Briefing Agent
- * GmailService.js — Récupération ciblée, exclusion de l'agenda et déduplication pré-LLM
+ * GmailService.js — Unread email extraction, boilerplate cleaning, and pre-LLM deduplication.
+ *
+ * @author Kouroufia
+ * @version 2.0.0
  */
 
-const GmailService = (function () {
+const GmailService = (() => {
   /**
-   * Récupère et déduplique tous les messages non lus de la boîte de réception principale.
-   * Exclut explicitement les notifications d'agenda Google Calendar pour éviter les doublons avec la section agenda.
+   * Retrieves and deduplicates all unread emails from the primary inbox since a given timestamp.
+   * Excludes calendar notification emails to prevent redundancy with the daily agenda section.
    *
-   * @param {number} afterTimestampSec - Timestamp UNIX en secondes
-   * @return {Array<Object>} Liste des e-mails dédupliqués avec URLs directes vers les fils Gmail
+   * @param {number} afterTimestampSec - UNIX timestamp in seconds defining the start checkpoint.
+   * @returns {Array<Object>} List of structured, deduplicated email objects.
    */
-  function fetchUnreadEmails(afterTimestampSec) {
-    // Requête durcie : non lus, boîte principale, hors spam/corbeille et sans notifications d'agenda
-    const query =
-      'is:unread in:inbox -in:spam -in:trash -from:calendar-notification@google.com -subject:"agenda quotidien" after:' +
-      Math.floor(afterTimestampSec);
-    console.log('Exécution de la requête Gmail : ' + query);
+  const fetchUnreadEmails = (afterTimestampSec) => {
+    const query = `is:unread in:inbox -in:spam -in:trash -from:calendar-notification@google.com -subject:"agenda quotidien" after:${Math.floor(afterTimestampSec)}`;
+    console.log(`Executing Gmail search query: ${query}`);
 
     const threads = [];
     const PAGE_SIZE = 50;
+    const MAX_THREADS = 300;
     let startIndex = 0;
 
-    // 1. Pagination sécurisée
+    // 1. Paginated thread retrieval
     while (true) {
       const batch = GmailApp.search(query, startIndex, PAGE_SIZE);
-      if (!batch || batch.length === 0) {
-        break;
-      }
-      threads.push.apply(threads, batch);
-      if (batch.length < PAGE_SIZE) {
-        break;
-      }
-      startIndex += PAGE_SIZE;
+      if (!batch || batch.length === 0) break;
 
-      if (startIndex >= 300) {
-        console.warn('Volume élevé détecté (> 300 threads). Traitement des 300 premiers.');
-        break;
-      }
+      threads.push(...batch);
+      if (batch.length < PAGE_SIZE || threads.length >= MAX_THREADS) break;
+
+      startIndex += PAGE_SIZE;
     }
 
-    console.log(threads.length + ' fil(s) de discussion trouvé(s). Extraction des messages...');
+    console.log(`Found ${threads.length} thread(s). Extracting unread messages...`);
 
     const rawMessages = [];
-    const seenMessageIds = {};
+    const seenMessageIds = new Set();
 
-    // 2. Extraction des messages individuels non lus
-    for (let t = 0; t < threads.length; t++) {
-      const thread = threads[t];
+    // 2. Individual unread message extraction
+    for (const thread of threads) {
       const threadId = thread.getId();
       const messages = thread.getMessages();
 
-      for (let m = 0; m < messages.length; m++) {
-        const msg = messages[m];
+      for (const msg of messages) {
         const msgId = msg.getId();
-
-        if (seenMessageIds[msgId]) continue;
+        if (seenMessageIds.has(msgId)) continue;
 
         const msgDate = msg.getDate();
         const msgTimestampSec = Math.floor(msgDate.getTime() / 1000);
@@ -64,41 +55,32 @@ const GmailService = (function () {
           const fromRaw = msg.getFrom() || '';
           const subjectRaw = msg.getSubject() || '(Sans objet)';
 
-          // Filtre de sécurité additionnel contre les notifications Calendar
+          // Safety check against residual calendar notifications
           if (
-            fromRaw.indexOf('calendar-notification@google.com') !== -1 ||
-            subjectRaw.toLowerCase().indexOf('agenda quotidien') !== -1
+            fromRaw.includes('calendar-notification@google.com') ||
+            subjectRaw.toLowerCase().includes('agenda quotidien')
           ) {
             continue;
           }
 
-          seenMessageIds[msgId] = true;
+          seenMessageIds.add(msgId);
 
           const plainBody = msg.getPlainBody() || '';
           let rawHtml = '';
           try {
             rawHtml = msg.getBody() || '';
-          } catch (e) {}
+          } catch {}
 
           const cleanedBody = Utils.cleanEmailBody(plainBody, rawHtml);
           const attachments = msg.getAttachments() || [];
-
-          let rawContent = '';
-          try {
-            rawContent = msg.getRawContent() ? msg.getRawContent().substring(0, 2000) : '';
-          } catch (e) {}
-
-          const toField = msg.getTo() || '';
-          const targetAccount = Utils.detectDestinationAccount(rawContent, toField, plainBody);
-          const cleanSubject = Utils.cleanText(subjectRaw);
+          const cleanSubject = Utils.sanitizeText(subjectRaw);
           const senderName = Utils.cleanSenderName(fromRaw);
 
           rawMessages.push({
             id: msgId,
-            threadId: threadId,
+            threadId,
             from: fromRaw,
-            senderName: senderName,
-            to: toField,
+            senderName,
             subject: cleanSubject,
             date: msgDate,
             timestampSec: msgTimestampSec,
@@ -107,47 +89,41 @@ const GmailService = (function () {
             body: cleanedBody,
             hasAttachments: attachments.length > 0,
             attachmentsCount: attachments.length,
-            targetAccount: targetAccount,
-            // Deep-link exact vers le fil universel
             webUrl: Utils.buildGmailUrl(threadId)
           });
         }
       }
     }
 
-    // 3. Tri chronologique décroissant (les plus récents en premier)
-    rawMessages.sort(function (a, b) {
-      return b.timestampSec - a.timestampSec;
-    });
+    // 3. Chronological sorting (most recent first)
+    rawMessages.sort((a, b) => b.timestampSec - a.timestampSec);
 
-    // 4. Déduplication stricte pré-LLM
+    // 4. Strict pre-LLM campaign/promotional deduplication
     const deduplicated = [];
-    const seenIndexByKey = {};
+    const seenIndexByKey = new Map();
 
-    for (let i = 0; i < rawMessages.length; i++) {
-      const item = rawMessages[i];
+    for (const item of rawMessages) {
       const senderKey = item.senderName.toLowerCase().replace(/[^a-z0-9]/g, '');
       const normSubj = Utils.normalizeSubject(item.subject);
       const domain = Utils.extractSenderDomain(item.from);
 
-      // Calcul de la clé de regroupement
-      let dedupKey = '';
-      if (domain.indexOf('aprizo') !== -1 || senderKey.indexOf('aprizo') !== -1) {
+      // Grouping key calculation
+      let dedupKey;
+      if (domain.includes('aprizo') || senderKey.includes('aprizo')) {
         dedupKey = 'promo::aprizo';
-      } else if (domain.indexOf('asos') !== -1 || senderKey.indexOf('asos') !== -1) {
+      } else if (domain.includes('asos') || senderKey.includes('asos')) {
         dedupKey = 'promo::asos';
-      } else if (domain.indexOf('twistshake') !== -1 || senderKey.indexOf('twistshake') !== -1) {
+      } else if (domain.includes('twistshake') || senderKey.includes('twistshake')) {
         dedupKey = 'promo::twistshake';
       } else {
         const stem = normSubj.split(' ').slice(0, 5).join(' ');
-        dedupKey = senderKey + '::' + stem;
+        dedupKey = `${senderKey}::${stem}`;
       }
 
-      if (seenIndexByKey[dedupKey] !== undefined) {
-        // Doublon détecté : on incrémente le compteur sur l'e-mail le plus récent
-        const existing = deduplicated[seenIndexByKey[dedupKey]];
+      if (seenIndexByKey.has(dedupKey)) {
+        const existing = deduplicated[seenIndexByKey.get(dedupKey)];
         existing.duplicateCount = (existing.duplicateCount || 1) + 1;
-        existing.senderDisplayName = existing.senderName + ' (' + existing.duplicateCount + ' messages)';
+        existing.senderDisplayName = `${existing.senderName} (${existing.duplicateCount} messages)`;
         if (!existing.allThreadIds) {
           existing.allThreadIds = [existing.threadId];
         }
@@ -156,22 +132,19 @@ const GmailService = (function () {
         item.duplicateCount = 1;
         item.senderDisplayName = item.senderName;
         item.allThreadIds = [item.threadId];
-        seenIndexByKey[dedupKey] = deduplicated.length;
+        seenIndexByKey.set(dedupKey, deduplicated.length);
         deduplicated.push(item);
       }
     }
 
     console.log(
-      rawMessages.length +
-        ' message(s) non lu(s) ➔ ' +
-        deduplicated.length +
-        ' message(s) après déduplication stricte pré-LLM.'
+      `${rawMessages.length} unread message(s) ➔ ${deduplicated.length} message(s) after pre-LLM deduplication.`
     );
 
     return deduplicated;
-  }
+  };
 
   return {
-    fetchUnreadEmails: fetchUnreadEmails
+    fetchUnreadEmails
   };
 })();

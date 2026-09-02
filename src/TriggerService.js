@@ -1,86 +1,85 @@
 /**
  * Google CC Briefing Agent
- * TriggerService.js — Gestion des déclencheurs exacts auto-reprogrammés (06:00:00 Europe/Paris)
- * Élimine la fenêtre aléatoire de 60 minutes de Google Apps Script pour garantir une exécution à 06h00 pile.
+ * TriggerService.js — Exact-time daily 6:00 AM scheduler with orphan trigger cleanup and self-rescheduling.
+ *
+ * @author Kouroufia
+ * @version 2.0.0
  */
 
-const TriggerService = (function () {
+const TriggerService = (() => {
   const TRIGGER_FUNCTION_NAME = 'runDailyBriefing';
   const LEGACY_FUNCTION_NAMES = ['runBriefing', 'runBriefingPrecise'];
 
   /**
-   * Supprime de façon sécurisée tous les déclencheurs de projet orphelins ou existants.
+   * Safely purges all existing project triggers targeting the daily briefing.
    */
-  function clearAllTriggers() {
+  const clearAllTriggers = () => {
     const allTriggers = ScriptApp.getProjectTriggers();
     let count = 0;
-    const targets = [TRIGGER_FUNCTION_NAME].concat(LEGACY_FUNCTION_NAMES);
+    const targetNames = [TRIGGER_FUNCTION_NAME, ...LEGACY_FUNCTION_NAMES];
 
-    for (let i = 0; i < allTriggers.length; i++) {
-      const trigger = allTriggers[i];
+    for (const trigger of allTriggers) {
       const handler = trigger.getHandlerFunction();
-      if (targets.indexOf(handler) !== -1) {
+      if (targetNames.includes(handler)) {
         try {
           ScriptApp.deleteTrigger(trigger);
           count++;
-        } catch (e) {
-          console.warn('Impossible de supprimer le déclencheur ' + handler + ' : ' + e.message);
+        } catch (error) {
+          console.warn(`Unable to remove trigger ${handler}: ${error.message}`);
         }
       }
     }
 
     if (count > 0) {
-      console.log(count + ' ancien(s) déclencheur(s) supprimé(s) pour éviter les doublons.');
+      console.log(`Purged ${count} existing trigger(s) to avoid duplicates.`);
     }
-  }
+  };
 
   /**
-   * Calcule le prochain horodatage exact à 06:00:00 dans le fuseau horaire Europe/Paris.
-   * Si l'heure actuelle est avant 06:00, planifie pour aujourd'hui à 06:00.
-   * Si l'heure actuelle est après 06:00, planifie pour demain à 06:00.
+   * Calculates the exact Date instance for the next occurrence of 06:00:00 in Europe/Paris.
+   * If current time is before 06:00 today, targets today. Otherwise, targets tomorrow.
    *
-   * @return {Date} Date exacte de la prochaine exécution
+   * @returns {Date} Target execution Date instance.
    */
-  function calculateNextTargetDate() {
+  const calculateNextTargetDate = () => {
     const tz = Config.DEFAULTS.TIMEZONE || 'Europe/Paris';
-    const targetHour = Config.DEFAULTS.TRIGGER_HOUR !== undefined ? Config.DEFAULTS.TRIGGER_HOUR : 6;
-    const targetMinute = Config.DEFAULTS.TRIGGER_MINUTE !== undefined ? Config.DEFAULTS.TRIGGER_MINUTE : 0;
+    const targetHour = Config.DEFAULTS.TRIGGER_HOUR ?? 6;
+    const targetMinute = Config.DEFAULTS.TRIGGER_MINUTE ?? 0;
 
     const now = new Date();
     const todayStr = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
     const currentHour = parseInt(Utilities.formatDate(now, tz, 'HH'), 10);
     const currentMinute = parseInt(Utilities.formatDate(now, tz, 'mm'), 10);
 
-    const parts = todayStr.split('-');
-    const year = parseInt(parts[0], 10);
-    const month = parseInt(parts[1], 10) - 1;
-    let day = parseInt(parts[2], 10);
+    const [yearStr, monthStr, dayStr] = todayStr.split('-');
+    const year = parseInt(yearStr, 10);
+    const month = parseInt(monthStr, 10) - 1;
+    let day = parseInt(dayStr, 10);
 
-    // Si 06:00 est déjà passé aujourd'hui (ou en cours d'exécution), on planifie pour demain
+    // If 06:00 has already elapsed today, advance to tomorrow
     if (currentHour > targetHour || (currentHour === targetHour && currentMinute >= targetMinute)) {
       day += 1;
     }
 
-    // Le constructeur Date gère nativement le passage au mois ou à l'année suivante
-    const targetDate = new Date(year, month, day, targetHour, targetMinute, 0, 0);
-    return targetDate;
-  }
+    // JavaScript Date constructor natively resolves day/month/year overflows
+    return new Date(year, month, day, targetHour, targetMinute, 0, 0);
+  };
 
   /**
-   * Installe le déclencheur exact auto-reprogrammé à 06:00:00 pile.
-   * Utilise .timeBased().at(targetDate) pour une précision horaire absolue.
+   * Installs the exact time-based trigger targeting 06:00:00 sharp.
+   * Uses .timeBased().at(targetDate) instead of the loose 1-hour window atHour(6).
    *
-   * @return {Date} La date et l'heure exacte programmée
+   * @returns {Date} Exact scheduled execution time.
    */
-  function setupDailyTrigger() {
-    // 1. Purge préalable des déclencheurs existants
+  const setupDailyTrigger = () => {
+    // 1. Purge legacy and duplicate triggers
     clearAllTriggers();
 
-    // 2. Calcul du prochain passage à 06:00:00
+    // 2. Calculate next 06:00:00 timestamp
     const targetDate = calculateNextTargetDate();
     const tz = Config.DEFAULTS.TIMEZONE || 'Europe/Paris';
 
-    // 3. Création du déclencheur ponctuel exact à l'horodatage cible
+    // 3. Create single exact-time trigger
     ScriptApp.newTrigger(TRIGGER_FUNCTION_NAME)
       .timeBased()
       .at(targetDate)
@@ -88,47 +87,26 @@ const TriggerService = (function () {
       .create();
 
     const formattedTarget = Utilities.formatDate(targetDate, tz, 'dd/MM/yyyy à HH:mm:ss');
-    console.log(
-      '✓ Déclencheur précis configuré avec succès : prochaine exécution programmée pour le ' +
-        formattedTarget +
-        ' (' +
-        tz +
-        ').'
-    );
+    console.log(`✓ Daily briefing scheduled precisely for: ${formattedTarget} (${tz}).`);
 
     return targetDate;
-  }
+  };
 
   /**
-   * Alias de compatibilité.
+   * Checks whether the current moment is a weekend day (Saturday or Sunday) in Paris.
+   * @returns {boolean} True if Saturday or Sunday.
    */
-  function installDailyTrigger() {
-    return setupDailyTrigger();
-  }
-
-  /**
-   * Alias de compatibilité pour la suppression.
-   */
-  function removeDailyTriggers() {
-    clearAllTriggers();
-  }
-
-  /**
-   * Vérifie si le jour actuel est un jour de week-end (Samedi ou Dimanche) à Paris.
-   */
-  function isWeekendNow() {
+  const isWeekendNow = () => {
     const now = new Date();
-    const dayStr = Utilities.formatDate(now, Config.DEFAULTS.TIMEZONE, 'u'); // 1 = Lundi, 7 = Dimanche
+    const dayStr = Utilities.formatDate(now, Config.DEFAULTS.TIMEZONE, 'u'); // 1 = Monday, 7 = Sunday
     const dayNum = parseInt(dayStr, 10);
     return dayNum === 6 || dayNum === 7;
-  }
+  };
 
   return {
-    setupDailyTrigger: setupDailyTrigger,
-    clearAllTriggers: clearAllTriggers,
-    installDailyTrigger: installDailyTrigger,
-    removeDailyTriggers: removeDailyTriggers,
-    calculateNextTargetDate: calculateNextTargetDate,
-    isWeekendNow: isWeekendNow
+    setupDailyTrigger,
+    clearAllTriggers,
+    calculateNextTargetDate,
+    isWeekendNow
   };
 })();

@@ -1,17 +1,21 @@
 /**
  * Google CC Briefing Agent
- * GeminiService.js — Analyse IA en lot unique, désambiguïsation stricte des e-mails LinkedIn,
- * routage fiable des offres d'emploi, et cascade de modèles résiliente face aux erreurs 503/404.
+ * GeminiService.js — High-performance AI analysis via Gemini 2.0 Flash API with structured JSON output,
+ * strict LinkedIn disambiguation, professional French localization, and resilient retry cascade.
+ *
+ * @author Kouroufia
+ * @version 2.0.0
  */
 
-const GeminiService = (function () {
+const GeminiService = (() => {
   /**
-   * Analyse l'ensemble des e-mails dédupliqués en UN SEUL appel optimisé pour éliminer les erreurs de quota 429.
+   * Analyzes an array of deduplicated email objects using Gemini API.
+   * Processes emails in single optimized batches to prevent rate limiting (HTTP 429).
    *
-   * @param {Array<Object>} emailsList - Liste des e-mails dédupliqués
-   * @return {Array<Object>} E-mails enrichis de leur analyse IA
+   * @param {Array<Object>} emailsList - Deduplicated email objects.
+   * @returns {Array<Object>} Enriched email objects with AI metadata.
    */
-  function analyzeEmails(emailsList) {
+  const analyzeEmails = (emailsList) => {
     if (!emailsList || emailsList.length === 0) {
       return [];
     }
@@ -26,19 +30,12 @@ const GeminiService = (function () {
       const totalBatches = Math.ceil(emailsList.length / batchSize);
 
       console.log(
-        'Analyse du lot Gemini ' +
-          batchIndex +
-          '/' +
-          totalBatches +
-          ' (' +
-          batch.length +
-          ' e-mails traités en un appel unique)...'
+        `Gemini analysis batch ${batchIndex}/${totalBatches} (${batch.length} emails in single API call)...`
       );
 
       const batchAnalysis = analyzeBatchWithRetry(batch, apiKey, batchIndex, totalBatches);
 
-      for (let b = 0; b < batch.length; b++) {
-        const originalMsg = batch[b];
+      for (const originalMsg of batch) {
         const aiData = batchAnalysis[originalMsg.id] || getFallbackAiData(originalMsg);
         enrichedResults.push(Object.assign({}, originalMsg, aiData));
       }
@@ -49,16 +46,22 @@ const GeminiService = (function () {
     }
 
     return enrichedResults;
-  }
+  };
 
   /**
-   * Traite un lot avec retry et cascade automatique de modèles en cas de 404 ou 503 temporaire.
+   * Executes a batch analysis with exponential backoff retry and model fallback.
+   *
+   * @param {Array<Object>} batch - Slice of emails to analyze.
+   * @param {string} apiKey - Gemini API Key.
+   * @param {number} batchIndex - Current batch index.
+   * @param {number} totalBatches - Total batches count.
+   * @returns {Object<string, Object>} Map of emailId -> AI analysis object.
    */
-  function analyzeBatchWithRetry(batch, apiKey, batchIndex, totalBatches) {
-    let currentModel = Config.getGeminiModel();
+  const analyzeBatchWithRetry = (batch, apiKey, batchIndex, totalBatches) => {
+    const currentModel = Config.getGeminiModel();
     const modelCascade = [
-      currentModel, // gemini-2.0-flash (ou modèle configuré)
-      Config.DEFAULTS.GEMINI_FALLBACK_MODEL, // gemini-flash-lite-latest
+      currentModel,
+      Config.DEFAULTS.GEMINI_FALLBACK_MODEL,
       'gemini-1.5-flash',
       'gemini-3.6-flash'
     ];
@@ -72,85 +75,69 @@ const GeminiService = (function () {
       const modelToTry = modelCascade[cascadeIndex] || Config.DEFAULTS.GEMINI_FALLBACK_MODEL;
       try {
         return callGeminiApi(batch, apiKey, modelToTry);
-      } catch (e) {
-        const statusCode = e.statusCode || 0;
-        const sanitizedMsg = Utils.redactSensitive(e.message);
+      } catch (error) {
+        const statusCode = error.statusCode || 0;
+        const sanitizedMsg = Utils.redactSensitive(error.message);
 
-        // Si le modèle retourne 404 (déprécié par Google sur v1beta), bascule immédiate sur le modèle de repli sans consommer de tentative
+        // Immediate cascade on HTTP 404 (e.g. deprecated model alias)
         if (statusCode === 404) {
-          console.warn('Modèle ' + modelToTry + ' non supporté (HTTP 404). Bascule immédiate vers le modèle de repli.');
+          console.warn(`Model ${modelToTry} unsupported (HTTP 404). Cascading to next available model.`);
           if (cascadeIndex < modelCascade.length - 1) {
             cascadeIndex++;
-            attempt--;
+            attempt--; // Do not consume an attempt on model migration
             continue;
           }
         }
 
-        // Erreurs non récupérables
+        // Fatal non-recoverable errors
         if (statusCode > 0 && !transientStatusCodes.includes(statusCode) && statusCode !== 404) {
-          console.error(
-            'Erreur API non récupérable (' +
-              sanitizedMsg +
-              '). Mode dégradé activé pour le lot ' +
-              batchIndex +
-              '.'
-          );
+          console.error(`Non-recoverable API error (${sanitizedMsg}). Activating fallback mode for batch ${batchIndex}.`);
           break;
         }
 
-        // Erreurs temporaires (503 High Demand, 429 Rate Limit) : attente exponentielle et retry
+        // Transient errors (503 High Demand, 429 Rate Limit) -> Exponential backoff retry
         if (attempt < maxAttempts) {
           const delay = Utils.calculateBackoffWithJitter(attempt, baseDelayMs);
           console.warn(
-            'API temporairement indisponible (' +
-              sanitizedMsg +
-              '). Tentative ' +
-              attempt +
-              '/' +
-              maxAttempts +
-              ' — Attente de ' +
-              delay +
-              ' ms avant nouvel essai...'
+            `API temporarily unavailable (${sanitizedMsg}). Attempt ${attempt}/${maxAttempts} — Retrying in ${delay} ms...`
           );
           Utilities.sleep(delay);
 
-          // Si 503 persiste après 2 essais sur ce modèle, passer au modèle suivant
+          // If 503 persists on current model after 2 attempts, try next cascade model
           if (attempt >= 2 && cascadeIndex < modelCascade.length - 1) {
             cascadeIndex++;
           }
         } else {
           console.error(
-            'Échec définitif du lot ' +
-              batchIndex +
-              '/' +
-              totalBatches +
-              ' après ' +
-              maxAttempts +
-              ' tentatives. Mode dégradé activé.'
+            `Batch ${batchIndex}/${totalBatches} failed after ${maxAttempts} attempts. Fallback activated.`
           );
         }
       }
     }
 
     const fallbackResult = {};
-    for (let i = 0; i < batch.length; i++) {
-      const msg = batch[i];
+    for (const msg of batch) {
       fallbackResult[msg.id] = getFallbackAiData(msg);
     }
     return fallbackResult;
-  }
+  };
 
   /**
-   * Effectue la requête HTTP vers Gemini avec URL propre sans duplication 'models/' et sortie JSON structurée.
+   * Calls the Gemini generateContent endpoint with native structured JSON schema.
+   *
+   * @param {Array<Object>} batch - Array of emails to analyze.
+   * @param {string} apiKey - Gemini API Key.
+   * @param {string} model - Target model identifier.
+   * @returns {Object<string, Object>} Map of emailId -> AI analysis object.
    */
-  function callGeminiApi(batch, apiKey, model) {
+  const callGeminiApi = (batch, apiKey, model) => {
     const cleanModel = String(model).replace(/^models\//, '').trim();
-    const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/' + cleanModel + ':generateContent?key=' + apiKey;
+    const endpoint = `${Config.DEFAULTS.GEMINI_API_BASE_URL}/${cleanModel}:generateContent?key=${apiKey}`;
 
-    const emailsPayload = batch.map(function (msg) {
+    const emailsPayload = batch.map((msg) => {
       let snippet = msg.body || '';
       if (snippet.length > 900) {
-        snippet = snippet.substring(0, 900) + '...';
+        snippet = `${snippet.substring(0, 900)}...`;
       }
       snippet = Utils.sanitizeText(snippet);
 
@@ -158,7 +145,7 @@ const GeminiService = (function () {
         emailId: msg.id,
         expediteur: Utils.sanitizeText(msg.senderDisplayName || msg.senderName),
         objet: Utils.sanitizeText(msg.subject),
-        date: msg.dateFormatted + ' ' + msg.timeFormatted,
+        date: `${msg.dateFormatted} ${msg.timeFormatted}`,
         nombreMessages: msg.duplicateCount || 1,
         contenuAbrege: snippet
       };
@@ -171,11 +158,11 @@ const GeminiService = (function () {
       "   - Invitations & Demandes de connexion réseau (contient 'invitation', 'connecter', 'rejoindre votre réseau', \"j'attends votre réponse\", 'invites you to connect') :\n" +
       "     - Catégorie : OBLIGATOIREMENT 'Réseaux sociaux & Culture' (JAMAIS dans 'Emploi & Carrière').\n" +
       "     - Résumé ('summary') : Formule obligatoire : 'Invitation de **[Nom de la personne]** à rejoindre votre réseau professionnel.'\n" +
-      "       (Ex: si l'expéditeur ou l'objet est 'Aïmen Mimoun : Kouroufia, j'attends votre réponse', résumer par : 'Invitation de **Aïmen Mimoun** à rejoindre votre réseau professionnel.').\n" +
+      "       (Exemple : si l'expéditeur ou l'objet est 'Aïmen Mimoun : Kouroufia, j'attends votre réponse', résumer par : 'Invitation de **Aïmen Mimoun** à rejoindre votre réseau professionnel.').\n" +
       "   - Vraies offres d'emploi (contient 'offre d'emploi', 'recrute', 'poste de', 'comptable', 'finance', 'jobs', 'hiring') :\n" +
       "     - Catégorie : OBLIGATOIREMENT 'Emploi & Carrière'.\n" +
       "     - Résumé ('summary') : Explique précisément l'opportunité avec termes clés en gras.\n" +
-      "   - Articles & Actualités partagées sur LinkedIn (actualités économiques, analyses comme 'Trump touts data centre build-out') :\n" +
+      "   - Articles & Actualités partagées sur LinkedIn (actualités économiques, analyses) :\n" +
       "     - Catégorie : OBLIGATOIREMENT 'Actualités & Veille'.\n" +
       "     - Résumé ('summary') : Synthèse en 1 phrase active en français.\n\n" +
       "2. ACTIONS PRIORITAIRES (actionRequired = true) :\n" +
@@ -251,19 +238,16 @@ const GeminiService = (function () {
           role: 'user',
           parts: [
             {
-              text:
-                systemPrompt +
-                '\n\nVoici les e-mails à analyser et synthétiser :\n' +
-                JSON.stringify(emailsPayload)
+              text: `${systemPrompt}\n\nVoici les e-mails à analyser et synthétiser :\n${JSON.stringify(emailsPayload)}`
             }
           ]
         }
       ],
       generationConfig: {
-        temperature: 0.2,
-        maxOutputTokens: 2048,
+        temperature: Config.DEFAULTS.TEMPERATURE,
+        maxOutputTokens: Config.DEFAULTS.MAX_OUTPUT_TOKENS,
         responseMimeType: 'application/json',
-        responseSchema: responseSchema
+        responseSchema
       }
     };
 
@@ -278,40 +262,33 @@ const GeminiService = (function () {
     try {
       response = UrlFetchApp.fetch(endpoint, options);
     } catch (netErr) {
-      const err = new Error('Erreur réseau de communication avec l’API : ' + netErr.message);
+      const err = new Error(`Network failure calling Gemini API: ${netErr.message}`);
       err.statusCode = 0;
       throw err;
     }
 
     const statusCode = response.getResponseCode();
-    let responseText = response.getContentText();
+    const responseText = response.getContentText();
 
     if (statusCode !== 200) {
       let parsedMessage = responseText.substring(0, 200);
       try {
         const errJson = JSON.parse(responseText);
-        if (errJson && errJson.error && errJson.error.message) {
+        if (errJson?.error?.message) {
           parsedMessage = errJson.error.message;
         }
-      } catch (_) {}
+      } catch {}
 
-      const err = new Error('HTTP ' + statusCode + ' : ' + parsedMessage);
+      const err = new Error(`HTTP ${statusCode} : ${parsedMessage}`);
       err.statusCode = statusCode;
       throw err;
     }
 
     const data = JSON.parse(responseText);
-    const candidateText =
-      data &&
-      data.candidates &&
-      data.candidates[0] &&
-      data.candidates[0].content &&
-      data.candidates[0].content.parts &&
-      data.candidates[0].content.parts[0] &&
-      data.candidates[0].content.parts[0].text;
+    const candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!candidateText) {
-      const emptyErr = new Error('Réponse Gemini vide.');
+      const emptyErr = new Error('Empty candidate received from Gemini API.');
       emptyErr.statusCode = 502;
       throw emptyErr;
     }
@@ -322,7 +299,7 @@ const GeminiService = (function () {
     let parsedArray;
     try {
       parsedArray = JSON.parse(cleanedJsonText);
-    } catch (parseErr) {
+    } catch {
       const sanitizedJson = cleanedJsonText.replace(/[\u0000-\u001F]+/g, ' ');
       parsedArray = JSON.parse(sanitizedJson);
     }
@@ -330,9 +307,8 @@ const GeminiService = (function () {
     const resultMap = {};
 
     if (Array.isArray(parsedArray)) {
-      for (let i = 0; i < parsedArray.length; i++) {
-        const item = parsedArray[i];
-        if (item && item.emailId) {
+      for (const item of parsedArray) {
+        if (item?.emailId) {
           resultMap[item.emailId] = {
             category: item.category ? Utils.sanitizeText(item.category) : 'Actualités & Veille',
             summary: item.summary ? Utils.sanitizeText(item.summary) : 'Nouvelles informations partagées.',
@@ -346,16 +322,19 @@ const GeminiService = (function () {
     }
 
     return resultMap;
-  }
+  };
 
   /**
-   * Mode dégradé défensif enrichi avec désambiguïsation LinkedIn précise et traduction.
+   * Deterministic fallback metadata generator when API is unreachable.
+   *
+   * @param {Object} msg - Email object.
+   * @returns {Object} Synthetic AI metadata.
    */
-  function getFallbackAiData(msg) {
+  const getFallbackAiData = (msg) => {
     let cleanSubj = Utils.sanitizeText(msg.subject) || 'Nouveau message';
-    const lower = (msg.from + ' ' + msg.subject).toLowerCase();
+    const lower = `${msg.from} ${msg.subject}`.toLowerCase();
 
-    // Nettoyage et traduction heuristique des termes d'emploi
+    // Heuristic translation of German/English job terms
     cleanSubj = cleanSubj.replace(/Sachbearbeiter\s*\/\s*in\s+Treuhand\s*&\s*Administration/gi, 'Collaborateur en fiduciaire et administration');
     cleanSubj = cleanSubj.replace(/Sachbearbeiter\s*\/\s*in/gi, 'Collaborateur / Assistant');
     cleanSubj = cleanSubj.replace(/Treuhand/gi, 'Fiduciaire');
@@ -369,160 +348,155 @@ const GeminiService = (function () {
     let actionTitle = '';
     let deadline = null;
 
-    // 1. Désambiguïsation LinkedIn
-    if (lower.indexOf('linkedin') !== -1) {
-      // A. Invitation ou demande de connexion
+    // 1. LinkedIn Disambiguation
+    if (lower.includes('linkedin')) {
       if (
-        lower.indexOf('attends votre réponse') !== -1 ||
-        lower.indexOf('rejoindre votre réseau') !== -1 ||
-        lower.indexOf('invitation') !== -1 ||
-        lower.indexOf('connecter') !== -1 ||
-        lower.indexOf('invites you to connect') !== -1
+        lower.includes('attends votre réponse') ||
+        lower.includes('rejoindre votre réseau') ||
+        lower.includes('invitation') ||
+        lower.includes('connecter') ||
+        lower.includes('invites you to connect')
       ) {
         cat = 'Réseaux sociaux & Culture';
         let personName = '';
         const parts = cleanSubj.split(':');
-        if (parts.length > 1 && parts[1].toLowerCase().indexOf('attends') !== -1) {
+        if (parts.length > 1 && parts[1].toLowerCase().includes('attends')) {
           personName = parts[0].trim();
         }
         summary = personName
-          ? 'Invitation de **' + personName + '** à rejoindre votre réseau professionnel.'
+          ? `Invitation de **${personName}** à rejoindre votre réseau professionnel.`
           : 'Invitation à rejoindre votre réseau professionnel sur LinkedIn.';
-      }
-      // B. Articles de presse et actualités partagées sur LinkedIn
-      else if (
-        lower.indexOf('trump') !== -1 ||
-        lower.indexOf('data centre') !== -1 ||
-        lower.indexOf('build-out') !== -1 ||
-        lower.indexOf('newsletter') !== -1
+      } else if (
+        lower.includes('trump') ||
+        lower.includes('data centre') ||
+        lower.includes('build-out') ||
+        lower.includes('newsletter')
       ) {
         cat = 'Actualités & Veille';
-        summary = 'Article et actualités partagés sur LinkedIn : ' + cleanSubj;
-      }
-      // C. Offres d'emploi LinkedIn
-      else {
+        summary = `Article et actualités partagés sur LinkedIn : ${cleanSubj}`;
+      } else {
         cat = 'Emploi & Carrière';
-        summary = 'Opportunité professionnelle sur LinkedIn : ' + cleanSubj;
+        summary = `Opportunité professionnelle sur LinkedIn : ${cleanSubj}`;
       }
     }
-    // 2. Emploi & Carrière (Michael Page, Meteojob, etc.)
+    // 2. Job & Recruitment Platforms
     else if (
-      lower.indexOf('michaelpage') !== -1 ||
-      lower.indexOf('michael page') !== -1 ||
-      lower.indexOf('meteojob') !== -1 ||
-      lower.indexOf('hellowork') !== -1 ||
-      lower.indexOf('apec') !== -1 ||
-      lower.indexOf('indeed') !== -1 ||
-      lower.indexOf('offres finance') !== -1 ||
-      lower.indexOf('finance & accounting') !== -1 ||
-      lower.indexOf('treuhand') !== -1 ||
-      lower.indexOf('recrutement') !== -1
+      lower.includes('michaelpage') ||
+      lower.includes('michael page') ||
+      lower.includes('meteojob') ||
+      lower.includes('hellowork') ||
+      lower.includes('apec') ||
+      lower.includes('indeed') ||
+      lower.includes('offres finance') ||
+      lower.includes('finance & accounting') ||
+      lower.includes('treuhand') ||
+      lower.includes('recrutement')
     ) {
       cat = 'Emploi & Carrière';
-      if (lower.indexOf('michael page') !== -1) {
+      if (lower.includes('michael page')) {
         summary = 'Nouvelles opportunités d’emploi en finance et comptabilité à Genève.';
-      } else if (lower.indexOf('meteojob') !== -1) {
+      } else if (lower.includes('meteojob')) {
         summary = 'Plus de 30 offres d’emploi récentes en finance, comptabilité et assurance.';
       } else {
-        summary = 'Opportunité professionnelle : ' + cleanSubj;
+        summary = `Opportunité professionnelle : ${cleanSubj}`;
       }
     }
-    // 3. Démarches & Administration publique
+    // 3. Public administration & Training
     else if (
-      lower.indexOf('francetravail') !== -1 ||
-      lower.indexOf('pole-emploi') !== -1 ||
-      lower.indexOf('croupier') !== -1 ||
-      lower.indexOf('formation') !== -1 ||
-      lower.indexOf('caf.fr') !== -1 ||
-      lower.indexOf('impots.gouv') !== -1
+      lower.includes('francetravail') ||
+      lower.includes('pole-emploi') ||
+      lower.includes('croupier') ||
+      lower.includes('formation') ||
+      lower.includes('caf.fr') ||
+      lower.includes('impots.gouv')
     ) {
       cat = 'Démarches & Administration';
-      if (lower.indexOf('croupier') !== -1 || lower.indexOf('formation') !== -1) {
+      if (lower.includes('croupier') || lower.includes('formation')) {
         isAction = true;
         actionTitle = "France Travail — Réunion d'information sur la formation Croupier";
         deadline = '10/09 à 09h00';
         summary = 'Confirmez votre participation à la session collective d’Annemasse pour valider votre inscription.';
       } else {
-        summary = 'Information sur vos démarches administratives : ' + cleanSubj;
+        summary = `Information sur vos démarches administratives : ${cleanSubj}`;
       }
     }
-    // 4. Santé et soins médicaux
+    // 4. Healthcare
     else if (
-      lower.indexOf('doctolib') !== -1 ||
-      lower.indexOf('qare') !== -1 ||
-      lower.indexOf('sante') !== -1 ||
-      lower.indexOf('soins') !== -1 ||
-      lower.indexOf('medecin') !== -1
+      lower.includes('doctolib') ||
+      lower.includes('qare') ||
+      lower.includes('sante') ||
+      lower.includes('soins') ||
+      lower.includes('medecin')
     ) {
       cat = 'Santé & Soins';
-      summary = 'Notification médicale concernant l’accès aux soins : ' + cleanSubj;
+      summary = `Notification médicale concernant l’accès aux soins : ${cleanSubj}`;
     }
-    // 5. Tech & Projets
-    else if (lower.indexOf('github') !== -1 || lower.indexOf('firebase') !== -1 || lower.indexOf('cloud') !== -1) {
+    // 5. Tech & Dev
+    else if (lower.includes('github') || lower.includes('firebase') || lower.includes('cloud')) {
       cat = 'Tech & Projets';
-      summary = 'Mise à jour technique sur le projet : ' + cleanSubj;
+      summary = `Mise à jour technique sur le projet : ${cleanSubj}`;
     }
-    // 6. Voyages & Loisirs
+    // 6. Travel & Leisure
     else if (
-      lower.indexOf('easyjet') !== -1 ||
-      lower.indexOf('getyourguide') !== -1 ||
-      lower.indexOf('voyage') !== -1 ||
-      lower.indexOf('american express') !== -1 ||
-      lower.indexOf('amex') !== -1
+      lower.includes('easyjet') ||
+      lower.includes('getyourguide') ||
+      lower.includes('voyage') ||
+      lower.includes('american express') ||
+      lower.includes('amex')
     ) {
       cat = 'Voyages & Loisirs';
-      summary = 'Offre de séjour et voyage : ' + cleanSubj;
+      summary = `Offre de séjour et voyage : ${cleanSubj}`;
     }
-    // 7. Achats & Offres
+    // 7. E-Commerce & Shopping
     else if (
-      lower.indexOf('asos') !== -1 ||
-      lower.indexOf('twistshake') !== -1 ||
-      lower.indexOf('aprizo') !== -1 ||
-      lower.indexOf('promo') !== -1 ||
-      lower.indexOf('solde') !== -1 ||
-      lower.indexOf('qonto') !== -1
+      lower.includes('asos') ||
+      lower.includes('twistshake') ||
+      lower.includes('aprizo') ||
+      lower.includes('promo') ||
+      lower.includes('solde') ||
+      lower.includes('qonto')
     ) {
       cat = 'Achats & Offres';
-      if (lower.indexOf('qonto') !== -1) {
+      if (lower.includes('qonto')) {
         summary = 'Offre partenaire : Un mois de mutuelle offert pour les indépendants et freelances.';
       } else {
-        summary = 'Offre promotionnelle : ' + cleanSubj;
+        summary = `Offre promotionnelle : ${cleanSubj}`;
       }
     }
-    // 8. Réseaux sociaux & Culture
+    // 8. Social Networks & Culture
     else if (
-      lower.indexOf('tiktok') !== -1 ||
-      lower.indexOf('facebook') !== -1 ||
-      lower.indexOf('instagram') !== -1 ||
-      lower.indexOf('lumosity') !== -1 ||
-      lower.indexOf('ugc') !== -1
+      lower.includes('tiktok') ||
+      lower.includes('facebook') ||
+      lower.includes('instagram') ||
+      lower.includes('lumosity') ||
+      lower.includes('ugc')
     ) {
       cat = 'Réseaux sociaux & Culture';
-      if (lower.indexOf('lumosity') !== -1) {
+      if (lower.includes('lumosity')) {
         summary = 'Exercices d’entraînement cérébral pour la mémoire et la concentration.';
-      } else if (lower.indexOf('ugc') !== -1) {
+      } else if (lower.includes('ugc')) {
         summary = 'Vos sorties cinéma et programmation de la semaine.';
       } else {
-        summary = 'Activité récente sur votre réseau : ' + cleanSubj;
+        summary = `Activité récente sur votre réseau : ${cleanSubj}`;
       }
     }
-    // 9. Sécurité & Accès
-    else if (lower.indexOf('securite') !== -1 || lower.indexOf('connexion') !== -1 || lower.indexOf('google') !== -1) {
+    // 9. Account Security
+    else if (lower.includes('securite') || lower.includes('connexion') || lower.includes('google')) {
       cat = 'Sécurité & Accès';
-      summary = 'Alerte de sécurité de compte : ' + cleanSubj;
+      summary = `Alerte de sécurité de compte : ${cleanSubj}`;
     }
 
     return {
       category: cat,
       summary: Utils.sanitizeText(summary),
       actionRequired: isAction,
-      actionTitle: actionTitle,
-      deadline: deadline,
+      actionTitle,
+      deadline,
       estimatedMinutes: isAction ? 5 : 0
     };
-  }
+  };
 
   return {
-    analyzeEmails: analyzeEmails
+    analyzeEmails
   };
 })();
