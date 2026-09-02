@@ -208,11 +208,9 @@ const BriefingService = (function () {
       isCalm: totalEmails === 0 && todayEventsCount === 0
     };
 
-    // Sujet d'e-mail propre et clair
+    // Sujet d'e-mail propre et exécutif (Version Définitive sans [TEST])
     let emailSubject = '';
-    if (isTestMode) {
-      emailSubject = '[TEST] Mon Briefing Quotidien • ' + formattedDate;
-    } else if (urgentCount > 0) {
+    if (urgentCount > 0) {
       emailSubject =
         '(' +
         urgentCount +

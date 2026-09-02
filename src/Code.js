@@ -1,37 +1,53 @@
 /**
  * Google CC Briefing Agent
- * Code.js — Points d'entrée, orchestration des tests et fonctions déclenchées
+ * Code.js — Points d'entrée, orchestration des tests et passage en Version Définitive (Production)
  */
 
 /**
- * Initialisation complète en 1 clic : configure le modèle, installe le déclencheur à 06:00 et lance le test !
+ * ACTIVE OFFICIELLEMENT LA VERSION DÉFINITIVE DU BRIEFING À 06:00 DU MATIN :
+ * 1. Configure le modèle Gemini
+ * 2. Réinitialise le checkpoint de production à l'instant présent (ignore les anciens e-mails passés)
+ * 3. Installe le déclencheur temporel quotidien automatique pour 06:00 (Europe/Paris)
  */
-function setupProjectAndRunTest() {
-  console.log('=== INITIALISATION COMPLÈTE DU PROJET ===');
+function activerBriefingQuotidien6h() {
+  console.log('=== ACTIVATION OFFICIELLE DE LA VERSION DÉFINITIVE (06:00 PARIS) ===');
   
   // 1. Initialisation de la clé API Gemini et du modèle
   const apiKey = Config.getGeminiApiKey();
   Config.setGeminiModel('gemini-2.0-flash');
-  console.log('✓ Modèle Gemini 2.0 Flash configuré.');
+  console.log('✓ Clé API et modèle Gemini configurés avec succès.');
 
   // 2. Initialisation du checkpoint de production
   setupInitialCheckpoint();
-  console.log('✓ Checkpoint initial enregistré (vos anciens e-mails ne seront pas retraités).');
+  console.log('✓ Checkpoint de production calé à cet instant (vos anciens messages déjà lus ne seront pas retraités).');
 
   // 3. Installation du déclencheur quotidien automatique (06:00 Paris)
-  installDailyTrigger();
-  console.log('✓ Déclencheur quotidien configuré pour 06:00.');
-
-  // 4. Lancement immédiat du test
-  console.log('✓ Lancement du briefing test...');
-  runBriefingTest();
+  TriggerService.installDailyTrigger();
+  console.log('✓ Déclencheur quotidien activé avec succès : envoi automatique programmé chaque matin à 06:00.');
+  console.log('=== LE BRIEFING QUOTIDIEN EST MAINTENANT EN PRODUCTION ! ===');
 }
 
 /**
- * Exécution principale de Production (appelée automatiquement par le déclencheur quotidien).
+ * Alias pour activer le déclencheur quotidien à 06:00.
+ */
+function setupDailyTrigger() {
+  activerBriefingQuotidien6h();
+}
+
+/**
+ * Alias de rétrocompatibilité.
+ */
+function setupProjectAndRunTest() {
+  activerBriefingQuotidien6h();
+  console.log('✓ Lancement immédiat d’un briefing de confirmation...');
+  runBriefingNow();
+}
+
+/**
+ * Exécution principale de Production (appelée automatiquement chaque matin à 06:00 par le déclencheur).
  */
 function runBriefing() {
-  console.log('=== Démarrage du Google CC Briefing Agent (Production) ===');
+  console.log('=== Démarrage du Google CC Briefing Agent (Version Définitive) ===');
 
   // 1. Verrouillage concurrentiel strict
   if (!StateService.acquireLock()) {
@@ -64,10 +80,10 @@ function runBriefing() {
     // 6. Récupération de l'agenda
     const agenda = CalendarService.getAgenda();
 
-    // 7. Analyse par Gemini (Free Tier avec sorties structurées)
+    // 7. Analyse par Gemini (avec cascade résiliente et sorties structurées)
     const enrichedEmails = GeminiService.analyzeEmails(rawEmails);
 
-    // 8. Assemblage et envoi de l'e-mail de briefing
+    // 8. Assemblage et envoi de l'e-mail de briefing officiel (sans mention TEST)
     const result = BriefingService.buildAndSendBriefing({
       emails: enrichedEmails,
       agenda: agenda,
@@ -77,7 +93,7 @@ function runBriefing() {
 
     // 9. Mise à jour du checkpoint de production UNIQUEMENT après succès de l'envoi
     StateService.recordSuccessfulRun(runStartTimeSec);
-    console.log('=== Briefing de production terminé et envoyé avec succès ===', result.stats);
+    console.log('=== Briefing quotidien envoyé avec succès ! ===', result.stats);
 
   } catch (error) {
     console.error('Erreur critique lors de l’exécution du briefing :', error.stack || error.message);
@@ -88,25 +104,17 @@ function runBriefing() {
 }
 
 /**
- * Exécution de Test manuelle et immédiate.
- * N'affecte JAMAIS le checkpoint de production. Ne marque aucun e-mail comme lu.
+ * Exécution manuelle immédiate de la version définitive (sans attendre 06:00 et sans mention TEST).
+ * Analyse les e-mails récents des dernières 24h et envoie le briefing définitif.
  */
-function runBriefingTest() {
-  console.log('=== Démarrage du Test Manuel — Google CC Briefing Agent ===');
+function runBriefingNow() {
+  console.log('=== Envoi immédiat du Briefing Quotidien (Version Définitive) ===');
 
   const lookbackHours = Config.getTestLookbackHours();
   const lookbackSec = Math.floor(Date.now() / 1000) - lookbackHours * 3600;
 
-  console.log(
-    'Mode Test : analyse des e-mails non lus des dernières ' +
-      lookbackHours +
-      ' heures (depuis ' +
-      new Date(lookbackSec * 1000).toISOString() +
-      ')...'
-  );
-
   try {
-    // 1. Récupération des e-mails récents non lus
+    // 1. Récupération des e-mails non lus
     const rawEmails = GmailService.fetchUnreadEmails(lookbackSec);
 
     // 2. Récupération de l'agenda
@@ -115,38 +123,43 @@ function runBriefingTest() {
     // 3. Analyse par Gemini
     const enrichedEmails = GeminiService.analyzeEmails(rawEmails);
 
-    // 4. Envoi du briefing test
+    // 4. Envoi du briefing sans mention TEST
     const result = BriefingService.buildAndSendBriefing({
       emails: enrichedEmails,
       agenda: agenda,
-      isTestMode: true,
+      isTestMode: false,
       recipientEmail: Config.getRecipientEmail()
     });
 
-    console.log('=== Test terminé avec succès ! E-mail test envoyé à ' + result.recipient + ' ===');
+    console.log('=== Briefing envoyé avec succès à ' + result.recipient + ' ===');
     console.log('Statistiques :', JSON.stringify(result.stats));
 
   } catch (error) {
-    console.error('Erreur lors du test manuel :', error.stack || error.message);
+    console.error('Erreur lors de l’envoi immédiat :', error.stack || error.message);
     throw error;
   }
 }
 
 /**
- * Alias pratique pour exécuter le test rapide sous le nom 'runBriefTest'.
+ * Alias pour exécuter le briefing immédiatement sans mention TEST.
  */
 function runBriefTest() {
-  runBriefingTest();
+  runBriefingNow();
+}
+
+/**
+ * Alias de rétrocompatibilité.
+ */
+function runBriefingTest() {
+  runBriefingNow();
 }
 
 /**
  * Initialise manuellement le checkpoint à l'instant présent.
- * À exécuter une fois lors de la mise en production officielle.
  */
 function setupInitialCheckpoint() {
   const ts = StateService.resetCheckpointToNow();
   console.log('Checkpoint initial défini à : ' + new Date(ts * 1000).toISOString());
-  console.log('Les futurs briefings de production ne traiteront que les messages reçus après cet instant.');
 }
 
 /**

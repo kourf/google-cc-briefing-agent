@@ -8,19 +8,10 @@
 <body style="margin: 0; padding: 24px 16px; background-color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1F2937; line-height: 1.55;">
   <div style="max-width: 600px; margin: 0 auto;">
 
-    <!-- EN-TÊTE MON BRIEFING QUOTIDIEN -->
-    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 6px;">
-      <tr>
-        <td style="vertical-align: middle;">
-          <span style="font-size: 19px; font-weight: 800; color: #111827; letter-spacing: -0.4px;">Mon Briefing Quotidien</span>
-        </td>
-        <? if (data.isTestMode) { ?>
-        <td style="text-align: right; vertical-align: middle;">
-          <span style="background-color: #FEF3C7; color: #92400E; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 12px; letter-spacing: 0.3px;">TEST</span>
-        </td>
-        <? } ?>
-      </tr>
-    </table>
+    <!-- EN-TÊTE MON BRIEFING QUOTIDIEN (VERSION DÉFINITIVE) -->
+    <div style="margin-bottom: 6px;">
+      <span style="font-size: 19px; font-weight: 800; color: #111827; letter-spacing: -0.4px;">Mon Briefing Quotidien</span>
+    </div>
 
     <div style="font-size: 12.5px; color: #6B7280; font-weight: 500; margin-bottom: 12px;">
       <?= data.dateTitle ?>
