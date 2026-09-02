@@ -1,100 +1,36 @@
 /**
  * Google CC Briefing Agent
- * Code.js — Public execution entry points and operational life-cycle handlers.
+ * Code.js — Points d'entrée officiels de l'application
  *
  * @author Kouroufia
  * @version 2.0.0
  */
 
 /**
- * Installs the exact-time 06:00:00 AM daily trigger and sets the initial checkpoint.
- * Call this function once to activate automatic daily operation.
+ * 1. CONFIGURATION DU DÉCLENCHEUR QUOTIDIEN (06:00 PILE)
+ * Installe le déclencheur temporel exact à 06:00:00 (Europe/Paris) et initialise le checkpoint.
+ * À exécuter une seule fois pour activer l'envoi automatique chaque matin.
  */
 function setupDailyTrigger() {
   console.log('=== ACTIVATION DU DÉCLENCHEUR QUOTIDIEN (06:00 PILE) ===');
 
-  // 1. Verify Gemini API Key configuration
+  // 1. Vérification de la clé API Gemini
   Config.getGeminiApiKey();
 
-  // 2. Initialize checkpoint to current instant
+  // 2. Initialisation du point de contrôle à l'instant présent
   StateService.resetCheckpointToNow();
   console.log('✓ Checkpoint de production calé à cet instant.');
 
-  // 3. Configure exact 06:00:00 trigger
+  // 3. Configuration du déclencheur exact à 06:00:00
   const targetDate = TriggerService.setupDailyTrigger();
   const formatted = Utilities.formatDate(targetDate, Config.DEFAULTS.TIMEZONE, 'dd/MM/yyyy à HH:mm:ss');
   console.log(`✓ Prochaine exécution programmée pour le ${formatted} (${Config.DEFAULTS.TIMEZONE}).`);
 }
 
 /**
- * Primary production execution handler called automatically at 06:00:00 AM.
- * Implements strict concurrency locking, idempotence check, and self-rescheduling.
- */
-function runDailyBriefing() {
-  console.log('=== Exécution du Briefing Quotidien (Production 06:00) ===');
-
-  // 1. Strict concurrency locking
-  if (!StateService.acquireLock()) {
-    console.warn('Exécution annulée : impossible d’acquérir le verrou ScriptLock.');
-    return;
-  }
-
-  try {
-    // 2. Weekend exclusion check
-    if (!Config.isWeekendEnabled() && TriggerService.isWeekendNow()) {
-      console.log('Briefing ignoré aujourd’hui (week-end désactivé).');
-      return;
-    }
-
-    // 3. Idempotence protection (anti-duplicate run)
-    if (StateService.hasRunToday()) {
-      console.log('Un briefing a déjà été envoyé aujourd’hui. Exécution terminée.');
-      return;
-    }
-
-    // 4. Checkpoint retrieval
-    const checkpointSec = StateService.initCheckpointIfMissing();
-    const runStartTimeSec = Math.floor(Date.now() / 1000);
-
-    console.log(`Période analysée depuis : ${new Date(checkpointSec * 1000).toISOString()}`);
-
-    // 5. Data extraction
-    const rawEmails = GmailService.fetchUnreadEmails(checkpointSec);
-    const agenda = CalendarService.getAgenda();
-
-    // 6. AI processing
-    const enrichedEmails = GeminiService.analyzeEmails(rawEmails);
-
-    // 7. HTML assembly and delivery
-    const result = BriefingService.buildAndSendBriefing({
-      emails: enrichedEmails,
-      agenda,
-      recipientEmail: Config.getRecipientEmail()
-    });
-
-    // 8. Advance checkpoint upon successful delivery
-    StateService.recordSuccessfulRun(runStartTimeSec);
-    console.log('=== Briefing quotidien envoyé avec succès ! ===', result.stats);
-
-  } catch (error) {
-    console.error(`Erreur critique lors du briefing : ${error.stack || error.message}`);
-  } finally {
-    StateService.releaseLock();
-
-    // 9. Exact-Time Self-Rescheduling Pattern:
-    // Automatically schedules tomorrow morning's run at 06:00:00 sharp
-    try {
-      console.log('Auto-reprogrammation pour le prochain matin à 06:00:00...');
-      TriggerService.setupDailyTrigger();
-    } catch (triggerError) {
-      console.error(`Erreur d’auto-reprogrammation : ${triggerError.message}`);
-    }
-  }
-}
-
-/**
- * On-demand manual execution of the definitive briefing.
- * Analyzes unread emails over the lookback window (default: 24h) and sends immediately.
+ * 2. ENVOI IMMÉDIAT DU BRIEFING (SUR DEMANDE)
+ * Analyse les e-mails non lus des dernières 24h et envoie immédiatement votre briefing officiel.
+ * Utile pour tester ou forcer un envoi en journée sans attendre 06:00.
  */
 function runBriefingNow() {
   console.log('=== Envoi immédiat du Briefing Quotidien ===');
@@ -121,52 +57,67 @@ function runBriefingNow() {
 }
 
 /**
- * Backward compatibility alias for setupDailyTrigger.
+ * 3. EXÉCUTION AUTOMATIQUE DE PRODUCTION (06:00:00 PILE)
+ * Fonction appelée automatiquement par le déclencheur chaque matin à 06:00:00.
+ * S'auto-reprogramme automatiquement pour le lendemain matin à la fin de son exécution.
  */
-function activerBriefingQuotidien6h() {
-  setupDailyTrigger();
-}
+function runDailyBriefing() {
+  console.log('=== Exécution du Briefing Quotidien (Production 06:00) ===');
 
-/**
- * Backward compatibility alias for setupProjectAndRunTest.
- */
-function setupProjectAndRunTest() {
-  setupDailyTrigger();
-  runBriefingNow();
-}
+  // 1. Verrouillage concurrentiel strict
+  if (!StateService.acquireLock()) {
+    console.warn('Exécution annulée : impossible d’acquérir le verrou ScriptLock.');
+    return;
+  }
 
-/**
- * Backward compatibility alias for runDailyBriefing.
- */
-function runBriefing() {
-  runDailyBriefing();
-}
+  try {
+    // 2. Vérification d'exclusion du week-end
+    if (!Config.isWeekendEnabled() && TriggerService.isWeekendNow()) {
+      console.log('Briefing ignoré aujourd’hui (week-end désactivé).');
+      return;
+    }
 
-/**
- * Backward compatibility alias for manual test execution.
- */
-function runBriefTest() {
-  runBriefingNow();
-}
+    // 3. Protection anti-double envoi
+    if (StateService.hasRunToday()) {
+      console.log('Un briefing a déjà été envoyé aujourd’hui. Exécution terminée.');
+      return;
+    }
 
-/**
- * Backward compatibility alias for runBriefingTest.
- */
-function runBriefingTest() {
-  runBriefingNow();
-}
+    // 4. Récupération du checkpoint horaire
+    const checkpointSec = StateService.initCheckpointIfMissing();
+    const runStartTimeSec = Math.floor(Date.now() / 1000);
 
-/**
- * Helper to manually reset the checkpoint to the current timestamp.
- */
-function setupInitialCheckpoint() {
-  const ts = StateService.resetCheckpointToNow();
-  console.log(`Checkpoint initial calé à : ${new Date(ts * 1000).toISOString()}`);
-}
+    console.log(`Période analysée depuis : ${new Date(checkpointSec * 1000).toISOString()}`);
 
-/**
- * Helper to safely purge all triggers.
- */
-function clearAllTriggers() {
-  TriggerService.clearAllTriggers();
+    // 5. Extraction des données
+    const rawEmails = GmailService.fetchUnreadEmails(checkpointSec);
+    const agenda = CalendarService.getAgenda();
+
+    // 6. Analyse par Gemini 2.0 Flash
+    const enrichedEmails = GeminiService.analyzeEmails(rawEmails);
+
+    // 7. Assemblage et livraison de l'e-mail
+    const result = BriefingService.buildAndSendBriefing({
+      emails: enrichedEmails,
+      agenda,
+      recipientEmail: Config.getRecipientEmail()
+    });
+
+    // 8. Avancement du checkpoint après succès
+    StateService.recordSuccessfulRun(runStartTimeSec);
+    console.log('=== Briefing quotidien envoyé avec succès ! ===', result.stats);
+
+  } catch (error) {
+    console.error(`Erreur critique lors du briefing : ${error.stack || error.message}`);
+  } finally {
+    StateService.releaseLock();
+
+    // 9. Auto-reprogrammation exacte pour le lendemain matin à 06:00:00 pile
+    try {
+      console.log('Auto-reprogrammation pour le prochain matin à 06:00:00...');
+      TriggerService.setupDailyTrigger();
+    } catch (triggerError) {
+      console.error(`Erreur d’auto-reprogrammation : ${triggerError.message}`);
+    }
+  }
 }
