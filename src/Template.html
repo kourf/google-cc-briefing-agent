@@ -34,20 +34,21 @@
     <!-- BADGE MÉTRIQUE DU BRIEFING (CALCUL NUMÉRIQUE STRICT) -->
     <div style="margin-bottom: 18px;">
       <span style="display: inline-block; background-color: #F3F4F6; color: #374151; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 6px; border: 1px solid #E5E7EB;">
-        &#x1F4CA; <?= Number(data.stats.totalEmails) ?> e-mails analysés &bull; <?= Number(data.stats.urgentCount) ?> action<?= Number(data.stats.urgentCount) > 1 ? 's' : '' ?> requise<?= Number(data.stats.urgentCount) > 1 ? 's' : '' ?>
+        &#x1F4CA; <?= Number(data.stats.totalEmails) ?> e-mail<?= Number(data.stats.totalEmails) > 1 ? 's' : '' ?> analysé<?= Number(data.stats.totalEmails) > 1 ? 's' : '' ?> &bull; <?= Number(data.stats.urgentCount) ?> action<?= Number(data.stats.urgentCount) > 1 ? 's' : '' ?> requise<?= Number(data.stats.urgentCount) > 1 ? 's' : '' ?>
       </span>
     </div>
 
     <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
 
-    <!-- ÉTAT CALME SI AUCUN ÉLÉMENT -->
-    <? if (data.isCalm) { ?>
-    <div style="font-size: 14px; color: #4B5563; margin-bottom: 20px; padding: 12px 16px; background-color: #F9FAFB; border-radius: 6px; border: 1px solid #E5E7EB;">
-      &#x2600;&#xFE0F; Tout est calme aujourd'hui. Aucun e-mail prioritaire ni rendez-vous à signaler.
+    <!-- ÉTAT ZÉRO E-MAIL NON LU DANS LA BOÎTE DE RÉCEPTION -->
+    <? if (data.hasZeroEmails) { ?>
+    <div style="margin-bottom: 20px; padding: 14px 18px; background-color: #F8FAFC; border-radius: 8px; border: 1px solid #E2E8F0; color: #334155; font-size: 14px; font-weight: 500; line-height: 1.5;">
+      &#x2728; Aucun nouvel e-mail non lu dans votre boîte de réception.
     </div>
+    <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
     <? } ?>
 
-    <!-- 1. ACTIONS PRIORITAIRES (TOP OF MIND) CONTEXTUALISÉES -->
+    <!-- 1. ACTIONS PRIORITAIRES (TOP OF MIND) CONTEXTUALISÉES ET DÉDUPLIQUÉES -->
     <? if (data.urgentItems && data.urgentItems.length > 0) { ?>
     <div style="margin-bottom: 20px;">
       <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 10px;">
@@ -97,7 +98,7 @@
     <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
     <? } ?>
 
-    <!-- 3. AU PLANNING DU JOUR (ON YOUR CALENDAR) -->
+    <!-- 3. AU PLANNING DU JOUR (CALENDRIER ET ÉVÉNEMENTS) -->
     <div style="margin-bottom: 20px;">
       <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 10px;">
         &#x1F4C5; Au planning du jour

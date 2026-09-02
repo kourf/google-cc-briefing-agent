@@ -6,13 +6,13 @@
 const Utils = (function () {
   /**
    * Décode exhaustivement toutes les entités HTML (nommées, décimales et hexadécimales).
-   * Transforme &amp; en &, &#039; et &#39; en apostrophe, &quot; en ", etc.
+   * Transforme &amp; en &, &#039; et &#39; en apostrophe, &quot; en ", &lt; en <, &gt; en >, etc.
    */
   function decodeHtmlEntities(str) {
     if (!str) return '';
     let text = String(str);
 
-    // 1. Décodage hexadécimal (ex: &#x27; -> ')
+    // 1. Décodage hexadécimal (ex: &#x27; -> ', &#x2F; -> /)
     text = text.replace(/&#x([0-9a-f]{1,6});/gi, function (_, hex) {
       try {
         return String.fromCodePoint(parseInt(hex, 16));
@@ -63,10 +63,11 @@ const Utils = (function () {
 
   /**
    * Assainisseur universel de texte :
-   * - Élimine définitivement les caractères de remplacement Unicode (\uFFFD, ) et caractères de contrôle
+   * - Élimine définitivement les caractères de remplacement Unicode (\uFFFD, \uFFFE, \uFFFF) et caractères de contrôle
+   * - Préserve les emojis valides tout en réparant les demi-codets isolés
    * - Neutralise les délimiteurs mathématiques LaTeX ($...$) et remplace (m/w/d) par (H/F)
    * - Décode toutes les entités HTML (&amp;, &#039;, etc.)
-   * - Supprime les balises HTML et normalise la typographie française (apostrophe ’)
+   * - Normalise la typographie française (apostrophe ’)
    *
    * @param {string} str - Texte brut à assainir
    * @return {string} Texte propre, fluide et lisible
@@ -75,31 +76,35 @@ const Utils = (function () {
     if (!str) return '';
     let text = decodeHtmlEntities(String(str));
 
-    // 1. Suppression des caractères de remplacement Unicode (\uFFFD, \uFFFE, \uFFFF, surrogates)
-    text = text.replace(/[\uFFFD\uFFFE\uFFFF\uDB80-\uDBFF\uDC00-\uDFFF]/g, '');
-    text = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, ' ');
+    // 1. Suppression stricte des caractères de remplacement Unicode (\uFFFD) et caractères de contrôle
+    text = text.replace(/[\uFFFD\uFFFE\uFFFF\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '');
 
-    // 2. Remplacement systématique des notations allemandes de genre et maths LaTeX : (m/w/d) -> (H/F)
+    // 2. Réparation ou suppression des demi-codets isolés (lone surrogates)
+    if (typeof text.toWellFormed === 'function') {
+      text = text.toWellFormed();
+    }
+
+    // 3. Remplacement systématique des notations de genre et maths LaTeX : (m/w/d) -> (H/F)
     text = text.replace(/\(?\$?\(?\s*m\s*\/\s*w\s*\/\s*d\s*\)?\$?\)?/gi, '(H/F)');
     text = text.replace(/\(?\$?\(?\s*h\s*\/\s*f\s*\)?\$?\)?/gi, '(H/F)');
 
-    // 3. Suppression des délimiteurs mathématiques LaTeX ($...$, \(...\))
+    // 4. Suppression des délimiteurs mathématiques LaTeX ($...$, \(...\))
     text = text.replace(/\$([^\$]+)\$/g, '$1');
     text = text.replace(/\\\(([^\)]+)\\\)/g, '$1');
     text = text.replace(/\\\[([^\]]+)\\\]/g, '$1');
     text = text.replace(/[\$\\]/g, '');
 
-    // 4. Suppression des balises HTML (<...>)
+    // 5. Suppression des balises HTML résiduelles (<...>)
     text = text.replace(/<\/?[a-z0-9]+(?:\s+[^>]*?)?\/?>/gi, ' ');
 
-    // 5. Typographie française (apostrophe réelle)
+    // 6. Typographie française (apostrophe réelle)
     text = text.replace(/['’]/g, '’');
 
-    // 6. Nettoyage des entités HTML résiduelles
+    // 7. Nettoyage des entités HTML résiduelles
     text = text.replace(/&amp;/gi, '&');
     text = text.replace(/&[a-zA-Z0-9#]+;/g, '');
 
-    // 7. Normalisation des espaces
+    // 8. Normalisation des espaces
     text = text.replace(/[ \t]+/g, ' ');
     text = text.replace(/\n\s*\n+/g, '\n');
 
@@ -387,7 +392,7 @@ const Utils = (function () {
    * Calcule le délai d'attente exponentiel avec gigue aléatoire (jitter).
    */
   function calculateBackoffWithJitter(attempt, baseDelayMs) {
-    const base = baseDelayMs || 2000;
+    const base = baseDelayMs || 2500;
     const exponent = Math.max(0, attempt - 1);
     const exponentialDelay = base * Math.pow(2, exponent);
     const jitter = Math.floor(Math.random() * 500) + 200;

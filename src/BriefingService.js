@@ -6,17 +6,42 @@
 
 const BriefingService = (function () {
   /**
-   * Corrige le routage par mots-clés de sécurité pour garantir qu'aucune offre d'emploi n'échappe à Emploi & Carrière.
+   * Corrige le routage par mots-clés de sécurité pour garantir la bonne catégorisation des e-mails.
+   * Inclut la désambiguïsation stricte des e-mails LinkedIn (invitations vs offres vs articles).
    */
   function routeCategorySafely(rawCategory, sender, subject) {
     const text = ((sender || '') + ' ' + (subject || '')).toLowerCase();
 
-    // 1. Emploi & Carrière (Michael Page, Meteojob, LinkedIn, HelloWork, France Travail, etc.)
+    // 1. Désambiguïsation spécifique LinkedIn
+    if (text.indexOf('linkedin') !== -1) {
+      // A. Invitations & Demandes de connexion réseau
+      if (
+        text.indexOf('attends votre réponse') !== -1 ||
+        text.indexOf('rejoindre votre réseau') !== -1 ||
+        text.indexOf('invitation') !== -1 ||
+        text.indexOf('connecter') !== -1 ||
+        text.indexOf('invites you to connect') !== -1
+      ) {
+        return 'Réseaux sociaux & Culture';
+      }
+      // B. Articles de presse et actualités partagées sur LinkedIn
+      if (
+        text.indexOf('trump') !== -1 ||
+        text.indexOf('data centre') !== -1 ||
+        text.indexOf('build-out') !== -1 ||
+        text.indexOf('newsletter') !== -1
+      ) {
+        return 'Actualités & Veille';
+      }
+      // C. Vraies offres d'emploi LinkedIn
+      return 'Emploi & Carrière';
+    }
+
+    // 2. Emploi & Carrière (Michael Page, Meteojob, HelloWork, Apec, etc.)
     if (
       text.indexOf('michaelpage') !== -1 ||
       text.indexOf('michael page') !== -1 ||
       text.indexOf('meteojob') !== -1 ||
-      text.indexOf('linkedin') !== -1 ||
       text.indexOf('hellowork') !== -1 ||
       text.indexOf('apec') !== -1 ||
       text.indexOf('indeed') !== -1 ||
@@ -30,7 +55,7 @@ const BriefingService = (function () {
       return 'Emploi & Carrière';
     }
 
-    // 2. Démarches & Administration publique
+    // 3. Démarches & Administration publique
     if (
       text.indexOf('caf.fr') !== -1 ||
       text.indexOf('impots.gouv') !== -1 ||
@@ -41,7 +66,7 @@ const BriefingService = (function () {
       return 'Démarches & Administration';
     }
 
-    // 3. Santé & Soins
+    // 4. Santé & Soins
     if (
       text.indexOf('doctolib') !== -1 ||
       text.indexOf('qare') !== -1 ||
@@ -99,7 +124,7 @@ const BriefingService = (function () {
         // DÉDUPLICATION STRICTE des actions prioritaires par titre ou sujet normalisé
         const actionNorm = Utils.normalizeSubject(email.actionTitle) || Utils.normalizeSubject(subjectClean);
         if (seenUrgentKeys[actionNorm]) {
-          continue; // Déjà présent dans les actions prioritaires, élimine les doublons France Travail
+          continue; // Élimine les doublons
         }
         seenUrgentKeys[actionNorm] = true;
 
@@ -113,7 +138,7 @@ const BriefingService = (function () {
           webUrl: email.webUrl
         });
       } else {
-        // Routage sécurisé par mots-clés garantissant qu'aucune offre d'emploi n'atterrisse dans Actualités & Veille
+        // Routage sécurisé par mots-clés avec désambiguïsation LinkedIn
         const rawCat = Utils.sanitizeText(email.category) || 'Actualités & Veille';
         const catKey = routeCategorySafely(rawCat, senderClean, subjectClean);
 
@@ -179,6 +204,7 @@ const BriefingService = (function () {
       sortedInfoGroups: sortedInfoGroups,
       todayEvents: agenda.todayEvents || [],
       tomorrowEvents: agenda.tomorrowEvents || [],
+      hasZeroEmails: totalEmails === 0,
       isCalm: totalEmails === 0 && todayEventsCount === 0
     };
 
@@ -248,6 +274,11 @@ const BriefingService = (function () {
     lines.push(data.dateTitle);
     lines.push(data.greeting);
     lines.push('');
+
+    if (data.hasZeroEmails) {
+      lines.push('✨ Aucun nouvel e-mail non lu dans votre boîte de réception.');
+      lines.push('');
+    }
 
     if (data.urgentItems.length > 0) {
       lines.push('=== ACTIONS PRIORITAIRES ===');

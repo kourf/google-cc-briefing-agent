@@ -1,7 +1,7 @@
 /**
  * Google CC Briefing Agent
- * GeminiService.js — Analyse IA en lot unique, routage strict vers Emploi & Carrière,
- * traduction professionnelle des titres étrangers (allemand/anglais), et cascade résiliente.
+ * GeminiService.js — Analyse IA en lot unique, désambiguïsation stricte des e-mails LinkedIn,
+ * routage fiable des offres d'emploi, et cascade de modèles résiliente face aux erreurs 503/404.
  */
 
 const GeminiService = (function () {
@@ -57,15 +57,15 @@ const GeminiService = (function () {
   function analyzeBatchWithRetry(batch, apiKey, batchIndex, totalBatches) {
     let currentModel = Config.getGeminiModel();
     const modelCascade = [
-      currentModel, // gemini-2.0-flash (ou configuré)
+      currentModel, // gemini-2.0-flash (ou modèle configuré)
       Config.DEFAULTS.GEMINI_FALLBACK_MODEL, // gemini-flash-lite-latest
-      'gemini-3.6-flash',
-      'gemini-3.7-flash'
+      'gemini-1.5-flash',
+      'gemini-3.6-flash'
     ];
 
     let cascadeIndex = 0;
     const maxAttempts = Config.DEFAULTS.MAX_RETRIES || 4;
-    const baseDelayMs = Config.DEFAULTS.INITIAL_BACKOFF_MS || 2000;
+    const baseDelayMs = Config.DEFAULTS.INITIAL_BACKOFF_MS || 2500;
     const transientStatusCodes = [429, 500, 502, 503, 504];
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -76,17 +76,17 @@ const GeminiService = (function () {
         const statusCode = e.statusCode || 0;
         const sanitizedMsg = Utils.redactSensitive(e.message);
 
-        // Si le modèle retourne 404 (ex: déprécié par Google sur v1beta), bascule immédiate sur le modèle de repli
+        // Si le modèle retourne 404 (déprécié par Google sur v1beta), bascule immédiate sur le modèle de repli sans consommer de tentative
         if (statusCode === 404) {
-          console.warn('Modèle ' + modelToTry + ' non supporté (HTTP 404). Bascule automatique vers modèle suivant.');
+          console.warn('Modèle ' + modelToTry + ' non supporté (HTTP 404). Bascule immédiate vers le modèle de repli.');
           if (cascadeIndex < modelCascade.length - 1) {
             cascadeIndex++;
-            attempt--; // ne consomme pas une tentative pour un 404
+            attempt--;
             continue;
           }
         }
 
-        // Erreurs non récupérables (hors status transitoires)
+        // Erreurs non récupérables
         if (statusCode > 0 && !transientStatusCodes.includes(statusCode) && statusCode !== 404) {
           console.error(
             'Erreur API non récupérable (' +
@@ -98,7 +98,7 @@ const GeminiService = (function () {
           break;
         }
 
-        // Erreurs temporaires (503 High Demand, 429 Rate Limit) : attente avec backoff exponentiel et retry
+        // Erreurs temporaires (503 High Demand, 429 Rate Limit) : attente exponentielle et retry
         if (attempt < maxAttempts) {
           const delay = Utils.calculateBackoffWithJitter(attempt, baseDelayMs);
           console.warn(
@@ -114,8 +114,8 @@ const GeminiService = (function () {
           );
           Utilities.sleep(delay);
 
-          // Si 503 persiste sur ce modèle, essayer le modèle suivant de la cascade
-          if (statusCode === 503 && cascadeIndex < modelCascade.length - 1) {
+          // Si 503 persiste après 2 essais sur ce modèle, passer au modèle suivant
+          if (attempt >= 2 && cascadeIndex < modelCascade.length - 1) {
             cascadeIndex++;
           }
         } else {
@@ -141,7 +141,7 @@ const GeminiService = (function () {
   }
 
   /**
-   * Effectue la requête HTTP vers Gemini avec URL nettoyée sans duplication 'models/' et sortie JSON structurée.
+   * Effectue la requête HTTP vers Gemini avec URL propre sans duplication 'models/' et sortie JSON structurée.
    */
   function callGeminiApi(batch, apiKey, model) {
     const cleanModel = String(model).replace(/^models\//, '').trim();
@@ -167,50 +167,46 @@ const GeminiService = (function () {
     const systemPrompt =
       "Tu es l'analyste exécutif en chef de 'Mon Briefing Quotidien'. Ta mission est de produire une synthèse de très haute précision, fluide et 100% en français pour chaque e-mail.\n\n" +
       "RÈGLES DE RÉDACTION STRICTES :\n\n" +
-      "1. ACTIONS PRIORITAIRES (actionRequired = true) :\n" +
-      "   - Définis actionRequired = true UNIQUEMENT si une décision ou une action humaine concrète est requise (ex: confirmer une réunion, s'inscrire à une formation, payer une facture, valider un document).\n" +
-      "   - Pour 'actionTitle', rédige un titre complet et précis au format strict :\n" +
+      "1. DÉSAMBIGUÏSATION CONTEXTUELLE DES E-MAILS LINKEDIN (CRITIQUE) :\n" +
+      "   - Invitations & Demandes de connexion réseau (contient 'invitation', 'connecter', 'rejoindre votre réseau', \"j'attends votre réponse\", 'invites you to connect') :\n" +
+      "     - Catégorie : OBLIGATOIREMENT 'Réseaux sociaux & Culture' (JAMAIS dans 'Emploi & Carrière').\n" +
+      "     - Résumé ('summary') : Formule obligatoire : 'Invitation de **[Nom de la personne]** à rejoindre votre réseau professionnel.'\n" +
+      "       (Ex: si l'expéditeur ou l'objet est 'Aïmen Mimoun : Kouroufia, j'attends votre réponse', résumer par : 'Invitation de **Aïmen Mimoun** à rejoindre votre réseau professionnel.').\n" +
+      "   - Vraies offres d'emploi (contient 'offre d'emploi', 'recrute', 'poste de', 'comptable', 'finance', 'jobs', 'hiring') :\n" +
+      "     - Catégorie : OBLIGATOIREMENT 'Emploi & Carrière'.\n" +
+      "     - Résumé ('summary') : Explique précisément l'opportunité avec termes clés en gras.\n" +
+      "   - Articles & Actualités partagées sur LinkedIn (actualités économiques, analyses comme 'Trump touts data centre build-out') :\n" +
+      "     - Catégorie : OBLIGATOIREMENT 'Actualités & Veille'.\n" +
+      "     - Résumé ('summary') : Synthèse en 1 phrase active en français.\n\n" +
+      "2. ACTIONS PRIORITAIRES (actionRequired = true) :\n" +
+      "   - Définis actionRequired = true UNIQUEMENT si une décision ou une action humaine est requise (ex: confirmer une réunion, s'inscrire à une formation, payer une facture, valider un document).\n" +
+      "   - Pour 'actionTitle', rédige impérativement un titre complet au format strict :\n" +
       "     '[Expéditeur / Organisme] — [Sujet précis et enjeu de la tâche ou réunion]'\n" +
-      "     Exemples parfaits :\n" +
-      "     - 'France Travail — Réunion d'information sur la formation Croupier'\n" +
-      "     - 'Qare — Consultation médicale de suivi avec le Dr Dupont'\n" +
-      "     - 'GitGuardian — Alerte de sécurité critique sur clé d'API exposée'\n" +
-      "     - 'Ameli — Transmission du justificatif d'arrêt de travail'\n" +
-      "     (INTERDICTION FORMELLE de titres vagues comme 'S'inscrire à la réunion' ou 'Payer').\n" +
+      "     Exemples : 'France Travail — Réunion d'information sur la formation Croupier', 'Qare — Consultation médicale de suivi'\n" +
       "   - Pour 'deadline', indique la date et l'heure précise (ex: '10/09 à 09h00', 'Aujourd'hui 18h') ou null.\n" +
-      "   - Pour 'summary', formule l'instruction concrète expliquant ce qu'il faut faire et l'enjeu en 1 phrase active :\n" +
+      "   - Pour 'summary', formule l'instruction concrète expliquant ce qu'il faut faire et pourquoi en 1 phrase active :\n" +
       "     Exemple : 'Confirmez votre participation à la session collective d'Annemasse pour valider votre inscription.'\n\n" +
-      "2. ROUTAGE STRICT VERS 'Emploi & Carrière' :\n" +
-      "   - TOUT e-mail provenant d'une plateforme d'emploi ou de recrutement (Michael Page, Meteojob, LinkedIn, HelloWork, France Travail, Apec, Indeed) ou contenant dans son sujet ou contenu 'Jobs', 'Offres', 'Recrutement', 'Candidature', 'Finance & Accounting', 'Fiduciaire', 'Comptable', 'Treuhand' DOIT ÊTRE CLASSÉ OBLIGATOIREMENT DANS 'Emploi & Carrière' (jamais dans Actualités & Veille).\n\n" +
-      "3. TRADUCTION OBLIGATOIRE EN FRANÇAIS PROFESSIONNEL (TITRES ÉTRANGERS) :\n" +
-      "   - Tout titre ou intitulé d'emploi en allemand ou en anglais DOIT être traduit et expliqué en français professionnel :\n" +
+      "3. ROUTAGE STRICT DES PLATEFORMES D'EMPLOI VERS 'Emploi & Carrière' :\n" +
+      "   - Tout e-mail provenant de Michael Page, Meteojob, HelloWork, Apec, Indeed ou mentionnant 'Finance & Accounting', 'Fiduciaire', 'Comptable', 'Treuhand' DOIT être classé dans 'Emploi & Carrière'.\n\n" +
+      "4. TRADUCTION OBLIGATOIRE EN FRANÇAIS (TITRES ÉTRANGERS) :\n" +
+      "   - Tout intitulé en allemand ou en anglais DOIT être traduit en français professionnel :\n" +
       "     - 'Sachbearbeiter/in Treuhand & Administration (m/w/d)' -> 'Collaborateur en fiduciaire et administration (H/F)'\n" +
       "     - 'New Jobs for: Finance & Accounting: Genève' -> 'Nouvelles offres d'emploi en finance et comptabilité à Genève'\n" +
-      "     - 'Project Manager - Remote' -> 'Chef de projet en télétravail'\n" +
-      "     - Remplacer systématiquement '(m/w/d)' par '(H/F)' (jamais de symboles mathématiques $).\n" +
-      "   - Interdiction de laisser des intitulés bruts en allemand ou en anglais.\n\n" +
-      "4. POUR INFORMATION (actionRequired = false) :\n" +
-      "   - Rédige un résumé informatif, fluide et précis en 1 phrase active en français naturel.\n" +
-      "   - METS EN GRAS (**) les éléments clés dans chaque résumé (noms propres, entreprises, montants en euros, remises ou délais).\n" +
-      "   - Exemples :\n" +
-      "     - 'Michael Page présente de nouvelles offres de poste en **finance et comptabilité** basées à **Genève**.'\n" +
-      "     - 'Twistshake propose jusqu'à **-50%** de réduction immédiate sur tous les articles de puériculture avec le code promo.'\n" +
-      "     - 'easyJet annonce des billets d'avion vers le **Maroc** à partir de **29 €** pour les prochaines vacances.'\n" +
-      "     - 'Lumosity présente un dossier d'entraînement cérébral sur la façon dont le **cerveau** détermine la **main dominante**.'\n\n" +
+      "     - Remplacer systématiquement '(m/w/d)' par '(H/F)'.\n\n" +
       "5. INTERDICTION ABSOLUE DE BOILERPLATE ROBOTIQUE ET D'ARTEFACTS :\n" +
       "   - Ne commence JAMAIS par '[Expéditeur] vous a envoyé un e-mail'.\n" +
       "   - N'écris JAMAIS 'Aucune action requise' dans le résumé.\n" +
       "   - N'inclus JAMAIS d'entités HTML (&amp;, &#039;), de symboles mathématiques ($) ou de caractères de remplacement Unicode (\\uFFFD).\n\n" +
       "6. TAXONOMIE STRICTE DES SOUS-CATÉGORIES :\n" +
-      "   - 'Emploi & Carrière' : Michael Page, Meteojob, LinkedIn, HelloWork, alertes emploi, recruteurs, candidatures\n" +
+      "   - 'Emploi & Carrière' : Michael Page, Meteojob, LinkedIn (offres d'emploi uniquement), HelloWork, candidatures\n" +
       "   - 'Santé & Soins' : Consultations, médecins, ordonnances, praticiens (Doctolib, Qare)\n" +
       "   - 'Démarches & Administration' : Services publics, formations, aides, impôts (France Travail, CAF, Ameli, impots.gouv)\n" +
       "   - 'Tech & Projets' : GitHub, intégration continue, serveurs, GCP, Firebase\n" +
-      "   - 'Achats & Offres' : Soldes, remises, réductions e-commerce (ASOS, Twistshake, Amazon)\n" +
-      "   - 'Voyages & Loisirs' : Billets d'avion, réservations, vacances (easyJet, GetYourGuide, SNCF)\n" +
-      "   - 'Réseaux sociaux & Culture' : Activité sociale, notifications, apprentissage (Facebook, TikTok, Instagram, Lumosity)\n" +
+      "   - 'Achats & Offres' : Soldes, remises, réductions e-commerce (ASOS, Twistshake, Amazon, Qonto)\n" +
+      "   - 'Voyages & Loisirs' : Billets d'avion, réservations, vacances (easyJet, GetYourGuide, SNCF, American Express)\n" +
+      "   - 'Réseaux sociaux & Culture' : Invitations de connexion LinkedIn, Facebook, TikTok, Instagram, Lumosity\n" +
       "   - 'Sécurité & Accès' : Codes 2FA, connexions suspectes, alertes de compte Google/Microsoft\n" +
-      "   - 'Actualités & Veille' : Newsletters d'information générale, revues de presse";
+      "   - 'Actualités & Veille' : Articles de presse LinkedIn, revues thématiques, cinéma UGC";
 
     const responseSchema = {
       type: 'ARRAY',
@@ -353,13 +349,13 @@ const GeminiService = (function () {
   }
 
   /**
-   * Mode dégradé défensif enrichi avec routage emploi strict et traduction des titres étrangers.
+   * Mode dégradé défensif enrichi avec désambiguïsation LinkedIn précise et traduction.
    */
   function getFallbackAiData(msg) {
     let cleanSubj = Utils.sanitizeText(msg.subject) || 'Nouveau message';
     const lower = (msg.from + ' ' + msg.subject).toLowerCase();
 
-    // Traduction heuristique des titres d'emploi en allemand ou anglais
+    // Nettoyage et traduction heuristique des termes d'emploi
     cleanSubj = cleanSubj.replace(/Sachbearbeiter\s*\/\s*in\s+Treuhand\s*&\s*Administration/gi, 'Collaborateur en fiduciaire et administration');
     cleanSubj = cleanSubj.replace(/Sachbearbeiter\s*\/\s*in/gi, 'Collaborateur / Assistant');
     cleanSubj = cleanSubj.replace(/Treuhand/gi, 'Fiduciaire');
@@ -373,20 +369,53 @@ const GeminiService = (function () {
     let actionTitle = '';
     let deadline = null;
 
-    // 1. Emploi & Carrière (Michael Page, Meteojob, LinkedIn, etc.)
-    if (
+    // 1. Désambiguïsation LinkedIn
+    if (lower.indexOf('linkedin') !== -1) {
+      // A. Invitation ou demande de connexion
+      if (
+        lower.indexOf('attends votre réponse') !== -1 ||
+        lower.indexOf('rejoindre votre réseau') !== -1 ||
+        lower.indexOf('invitation') !== -1 ||
+        lower.indexOf('connecter') !== -1 ||
+        lower.indexOf('invites you to connect') !== -1
+      ) {
+        cat = 'Réseaux sociaux & Culture';
+        let personName = '';
+        const parts = cleanSubj.split(':');
+        if (parts.length > 1 && parts[1].toLowerCase().indexOf('attends') !== -1) {
+          personName = parts[0].trim();
+        }
+        summary = personName
+          ? 'Invitation de **' + personName + '** à rejoindre votre réseau professionnel.'
+          : 'Invitation à rejoindre votre réseau professionnel sur LinkedIn.';
+      }
+      // B. Articles de presse et actualités partagées sur LinkedIn
+      else if (
+        lower.indexOf('trump') !== -1 ||
+        lower.indexOf('data centre') !== -1 ||
+        lower.indexOf('build-out') !== -1 ||
+        lower.indexOf('newsletter') !== -1
+      ) {
+        cat = 'Actualités & Veille';
+        summary = 'Article et actualités partagés sur LinkedIn : ' + cleanSubj;
+      }
+      // C. Offres d'emploi LinkedIn
+      else {
+        cat = 'Emploi & Carrière';
+        summary = 'Opportunité professionnelle sur LinkedIn : ' + cleanSubj;
+      }
+    }
+    // 2. Emploi & Carrière (Michael Page, Meteojob, etc.)
+    else if (
       lower.indexOf('michaelpage') !== -1 ||
       lower.indexOf('michael page') !== -1 ||
       lower.indexOf('meteojob') !== -1 ||
-      lower.indexOf('linkedin') !== -1 ||
       lower.indexOf('hellowork') !== -1 ||
       lower.indexOf('apec') !== -1 ||
       lower.indexOf('indeed') !== -1 ||
-      lower.indexOf('job') !== -1 ||
       lower.indexOf('offres finance') !== -1 ||
       lower.indexOf('finance & accounting') !== -1 ||
       lower.indexOf('treuhand') !== -1 ||
-      lower.indexOf('candidat') !== -1 ||
       lower.indexOf('recrutement') !== -1
     ) {
       cat = 'Emploi & Carrière';
@@ -398,7 +427,7 @@ const GeminiService = (function () {
         summary = 'Opportunité professionnelle : ' + cleanSubj;
       }
     }
-    // 2. Démarches & Administration publique
+    // 3. Démarches & Administration publique
     else if (
       lower.indexOf('francetravail') !== -1 ||
       lower.indexOf('pole-emploi') !== -1 ||
@@ -417,7 +446,7 @@ const GeminiService = (function () {
         summary = 'Information sur vos démarches administratives : ' + cleanSubj;
       }
     }
-    // 3. Santé et soins médicaux
+    // 4. Santé et soins médicaux
     else if (
       lower.indexOf('doctolib') !== -1 ||
       lower.indexOf('qare') !== -1 ||
@@ -428,12 +457,12 @@ const GeminiService = (function () {
       cat = 'Santé & Soins';
       summary = 'Notification médicale concernant l’accès aux soins : ' + cleanSubj;
     }
-    // 4. Tech & Projets
+    // 5. Tech & Projets
     else if (lower.indexOf('github') !== -1 || lower.indexOf('firebase') !== -1 || lower.indexOf('cloud') !== -1) {
       cat = 'Tech & Projets';
       summary = 'Mise à jour technique sur le projet : ' + cleanSubj;
     }
-    // 5. Voyages & Loisirs
+    // 6. Voyages & Loisirs
     else if (
       lower.indexOf('easyjet') !== -1 ||
       lower.indexOf('getyourguide') !== -1 ||
@@ -444,7 +473,7 @@ const GeminiService = (function () {
       cat = 'Voyages & Loisirs';
       summary = 'Offre de séjour et voyage : ' + cleanSubj;
     }
-    // 6. Achats & Offres
+    // 7. Achats & Offres
     else if (
       lower.indexOf('asos') !== -1 ||
       lower.indexOf('twistshake') !== -1 ||
@@ -454,9 +483,13 @@ const GeminiService = (function () {
       lower.indexOf('qonto') !== -1
     ) {
       cat = 'Achats & Offres';
-      summary = 'Offre promotionnelle : ' + cleanSubj;
+      if (lower.indexOf('qonto') !== -1) {
+        summary = 'Offre partenaire : Un mois de mutuelle offert pour les indépendants et freelances.';
+      } else {
+        summary = 'Offre promotionnelle : ' + cleanSubj;
+      }
     }
-    // 7. Réseaux sociaux & Culture
+    // 8. Réseaux sociaux & Culture
     else if (
       lower.indexOf('tiktok') !== -1 ||
       lower.indexOf('facebook') !== -1 ||
@@ -473,7 +506,7 @@ const GeminiService = (function () {
         summary = 'Activité récente sur votre réseau : ' + cleanSubj;
       }
     }
-    // 8. Sécurité & Accès
+    // 9. Sécurité & Accès
     else if (lower.indexOf('securite') !== -1 || lower.indexOf('connexion') !== -1 || lower.indexOf('google') !== -1) {
       cat = 'Sécurité & Accès';
       summary = 'Alerte de sécurité de compte : ' + cleanSubj;
