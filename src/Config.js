@@ -19,6 +19,9 @@ const Config = (function () {
     BRIEFING_RECIPIENT_EMAIL: 'kouroufia15@gmail.com',
     WEEKEND_ENABLED: true,
     TEST_LOOKBACK_HOURS: 24,
+    // Horaires stricts de déclenchement (06:00 Europe/Paris)
+    TRIGGER_HOUR: 6,
+    TRIGGER_MINUTE: 0,
     // Modèle officiel standardisé pour la production
     GEMINI_MODEL: 'gemini-2.0-flash',
     // Modèle de repli haute disponibilité

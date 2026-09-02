@@ -1,16 +1,16 @@
 /**
  * Google CC Briefing Agent
- * Code.js — Points d'entrée, orchestration des tests et passage en Version Définitive (Production)
+ * Code.js — Points d'entrée, orchestration des tests et passage en Version Définitive (06:00 pile)
  */
 
 /**
  * ACTIVE OFFICIELLEMENT LA VERSION DÉFINITIVE DU BRIEFING À 06:00 DU MATIN :
  * 1. Configure le modèle Gemini
  * 2. Réinitialise le checkpoint de production à l'instant présent (ignore les anciens e-mails passés)
- * 3. Installe le déclencheur temporel quotidien automatique pour 06:00 (Europe/Paris)
+ * 3. Installe le déclencheur temporel exact auto-reprogrammé pour 06:00:00 (Europe/Paris)
  */
-function activerBriefingQuotidien6h() {
-  console.log('=== ACTIVATION OFFICIELLE DE LA VERSION DÉFINITIVE (06:00 PARIS) ===');
+function setupDailyTrigger() {
+  console.log('=== ACTIVATION OFFICIELLE DU BRIEFING QUOTIDIEN (06:00 PILE) ===');
   
   // 1. Initialisation de la clé API Gemini et du modèle
   const apiKey = Config.getGeminiApiKey();
@@ -19,35 +19,40 @@ function activerBriefingQuotidien6h() {
 
   // 2. Initialisation du checkpoint de production
   setupInitialCheckpoint();
-  console.log('✓ Checkpoint de production calé à cet instant (vos anciens messages déjà lus ne seront pas retraités).');
+  console.log('✓ Checkpoint de production calé à cet instant (les anciens e-mails lus ne seront pas retraités).');
 
-  // 3. Installation du déclencheur quotidien automatique (06:00 Paris)
-  TriggerService.installDailyTrigger();
-  console.log('✓ Déclencheur quotidien activé avec succès : envoi automatique programmé chaque matin à 06:00.');
-  console.log('=== LE BRIEFING QUOTIDIEN EST MAINTENANT EN PRODUCTION ! ===');
+  // 3. Installation du déclencheur temporel exact (06:00:00 Paris)
+  const targetDate = TriggerService.setupDailyTrigger();
+  const targetFormatted = Utilities.formatDate(targetDate, Config.DEFAULTS.TIMEZONE, 'dd/MM/yyyy à HH:mm:ss');
+  
+  console.log('✓ Déclencheur précis configuré pour le ' + targetFormatted + ' (' + Config.DEFAULTS.TIMEZONE + ').');
+  console.log('=== LE BRIEFING QUOTIDIEN EST MAINTENANT ACTIF À 06H00 PILE ! ===');
 }
 
 /**
- * Alias pour activer le déclencheur quotidien à 06:00.
+ * Alias pratique pour l'activation.
  */
-function setupDailyTrigger() {
-  activerBriefingQuotidien6h();
+function activerBriefingQuotidien6h() {
+  setupDailyTrigger();
 }
 
 /**
  * Alias de rétrocompatibilité.
  */
 function setupProjectAndRunTest() {
-  activerBriefingQuotidien6h();
+  setupDailyTrigger();
   console.log('✓ Lancement immédiat d’un briefing de confirmation...');
   runBriefingNow();
 }
 
 /**
- * Exécution principale de Production (appelée automatiquement chaque matin à 06:00 par le déclencheur).
+ * Exécution principale de Production (appelée automatiquement chaque matin à 06:00:00).
+ * Auto-reprogramme systématiquement la prochaine exécution pour le lendemain à 06:00:00 pile.
  */
-function runBriefing() {
-  console.log('=== Démarrage du Google CC Briefing Agent (Version Définitive) ===');
+function runDailyBriefing() {
+  console.log('=== Démarrage du Google CC Briefing Agent (Exécution 06:00:00) ===');
+
+  let briefingSentSuccessfully = false;
 
   // 1. Verrouillage concurrentiel strict
   if (!StateService.acquireLock()) {
@@ -83,7 +88,7 @@ function runBriefing() {
     // 7. Analyse par Gemini (avec cascade résiliente et sorties structurées)
     const enrichedEmails = GeminiService.analyzeEmails(rawEmails);
 
-    // 8. Assemblage et envoi de l'e-mail de briefing officiel (sans mention TEST)
+    // 8. Assemblage et envoi de l'e-mail de briefing officiel
     const result = BriefingService.buildAndSendBriefing({
       emails: enrichedEmails,
       agenda: agenda,
@@ -93,18 +98,34 @@ function runBriefing() {
 
     // 9. Mise à jour du checkpoint de production UNIQUEMENT après succès de l'envoi
     StateService.recordSuccessfulRun(runStartTimeSec);
+    briefingSentSuccessfully = true;
     console.log('=== Briefing quotidien envoyé avec succès ! ===', result.stats);
 
   } catch (error) {
     console.error('Erreur critique lors de l’exécution du briefing :', error.stack || error.message);
-    // Le checkpoint n'est PAS avancé, permettant une reprise propre lors du prochain déclencheur
   } finally {
     StateService.releaseLock();
+
+    // 10. PATRON D'AUTO-REPROGRAMMATION EXACTE :
+    // Dès la fin de l'exécution, reprogramme automatiquement la prochaine exécution pour demain à 06:00:00 pile.
+    try {
+      console.log('Planification automatique de la prochaine exécution...');
+      TriggerService.setupDailyTrigger();
+    } catch (triggerErr) {
+      console.error('Erreur lors de l’auto-reprogrammation du déclencheur :', triggerErr.message);
+    }
   }
 }
 
 /**
- * Exécution manuelle immédiate de la version définitive (sans attendre 06:00 et sans mention TEST).
+ * Alias de compatibilité avec les anciens déclencheurs.
+ */
+function runBriefing() {
+  runDailyBriefing();
+}
+
+/**
+ * Exécution manuelle immédiate de la version définitive (sans attendre 06:00).
  * Analyse les e-mails récents des dernières 24h et envoie le briefing définitif.
  */
 function runBriefingNow() {
@@ -123,7 +144,7 @@ function runBriefingNow() {
     // 3. Analyse par Gemini
     const enrichedEmails = GeminiService.analyzeEmails(rawEmails);
 
-    // 4. Envoi du briefing sans mention TEST
+    // 4. Envoi du briefing officiel
     const result = BriefingService.buildAndSendBriefing({
       emails: enrichedEmails,
       agenda: agenda,
@@ -141,7 +162,7 @@ function runBriefingNow() {
 }
 
 /**
- * Alias pour exécuter le briefing immédiatement sans mention TEST.
+ * Alias pour exécuter le briefing immédiatement.
  */
 function runBriefTest() {
   runBriefingNow();
@@ -163,15 +184,15 @@ function setupInitialCheckpoint() {
 }
 
 /**
- * Installe le déclencheur quotidien à 06:00 heure de Paris.
+ * Supprime tous les déclencheurs existants.
  */
-function installDailyTrigger() {
-  TriggerService.installDailyTrigger();
+function clearAllTriggers() {
+  TriggerService.clearAllTriggers();
 }
 
 /**
- * Supprime le déclencheur quotidien.
+ * Alias de rétrocompatibilité pour la suppression.
  */
 function removeDailyTrigger() {
-  TriggerService.removeDailyTriggers();
+  TriggerService.clearAllTriggers();
 }
