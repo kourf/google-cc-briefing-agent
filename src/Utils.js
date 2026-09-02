@@ -262,12 +262,15 @@ const Utils = (() => {
 
   /**
    * Builds direct universal Gmail web URL for an email thread.
+   * Standardized to support both desktop browser tabs and mobile Gmail app intent handlers.
+   *
    * @param {string} threadId - Gmail thread identifier.
-   * @returns {string} Direct web link.
+   * @returns {string} Direct deep-link web URL.
    */
   const buildGmailUrl = (threadId) => {
     if (!threadId) return 'https://mail.google.com/mail/u/0/#inbox';
-    return `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(threadId)}`;
+    const cleanId = encodeURIComponent(String(threadId).trim());
+    return `https://mail.google.com/mail/u/0/#search/id%3A${cleanId}`;
   };
 
   /**

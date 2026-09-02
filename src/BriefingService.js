@@ -143,7 +143,7 @@ const BriefingService = (() => {
           actionTitle: Utils.sanitizeText(email.actionTitle),
           summary: Utils.sanitizeText(email.summary),
           deadline: email.deadline ? Utils.sanitizeText(email.deadline) : null,
-          webUrl: email.webUrl
+          webUrl: email.webUrl || Utils.buildGmailUrl(email.threadId)
         });
       } else {
         const rawCat = Utils.sanitizeText(email.category) || 'Actualités & Veille';
@@ -161,7 +161,7 @@ const BriefingService = (() => {
             id: email.id,
             sender: senderClean,
             summary: Utils.sanitizeText(email.summary),
-            webUrl: email.webUrl
+            webUrl: email.webUrl || Utils.buildGmailUrl(email.threadId)
           });
         }
       }
