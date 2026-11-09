@@ -60,20 +60,40 @@ const StateService = (() => {
   };
 
   /**
-   * Initializes the checkpoint if missing, preventing historical backlog processing on first launch.
+   * Initializes the checkpoint if missing or too old, preventing historical backlog timeout.
+   * Clamps lookback to 24-48 hours maximum if the last run was weeks ago.
    * @returns {number} Active checkpoint timestamp in seconds.
    */
   const initCheckpointIfMissing = () => {
     const current = getLastCheckpointTime();
-    if (!current) {
-      const nowSec = Math.floor(Date.now() / 1000);
-      try {
-        PropertiesService.getScriptProperties().setProperty(Config.KEYS.LAST_CHECKPOINT_TIME, String(nowSec));
-      } catch {}
-      console.log(`Initial checkpoint created at ${new Date(nowSec * 1000).toISOString()}`);
-      return nowSec;
+    const nowSec = Math.floor(Date.now() / 1000);
+    const MAX_LOOKBACK_SEC = 48 * 3600; // 48h limit
+
+    if (!current || (nowSec - current) > MAX_LOOKBACK_SEC) {
+      const safeStartSec = nowSec - (24 * 3600); // 24h
+      resetCheckpointTo(safeStartSec);
+      console.log(`Checkpoint initialisé/recalibré sur 24h : ${new Date(safeStartSec * 1000).toISOString()}`);
+      return safeStartSec;
     }
     return current;
+  };
+
+  /**
+   * Explicitly sets the checkpoint timestamp to a specific value in seconds.
+   * @param {number} timestampSec - UNIX timestamp in seconds.
+   * @returns {number} Set timestamp in seconds.
+   */
+  const resetCheckpointTo = (timestampSec) => {
+    try {
+      PropertiesService.getScriptProperties().setProperty(
+        Config.KEYS.LAST_CHECKPOINT_TIME,
+        String(timestampSec)
+      );
+    } catch (error) {
+      console.warn(`resetCheckpointTo error: ${error.message}`);
+    }
+    console.log(`Checkpoint défini à : ${new Date(timestampSec * 1000).toISOString()}`);
+    return timestampSec;
   };
 
   /**
@@ -82,13 +102,7 @@ const StateService = (() => {
    */
   const resetCheckpointToNow = () => {
     const nowSec = Math.floor(Date.now() / 1000);
-    try {
-      PropertiesService.getScriptProperties().setProperty(Config.KEYS.LAST_CHECKPOINT_TIME, String(nowSec));
-    } catch (error) {
-      console.warn(`resetCheckpointToNow error: ${error.message}`);
-    }
-    console.log(`Checkpoint reset to now: ${new Date(nowSec * 1000).toISOString()}`);
-    return nowSec;
+    return resetCheckpointTo(nowSec);
   };
 
   /**
@@ -137,6 +151,7 @@ const StateService = (() => {
     releaseLock,
     getLastCheckpointTime,
     initCheckpointIfMissing,
+    resetCheckpointTo,
     resetCheckpointToNow,
     hasRunToday,
     recordSuccessfulRun

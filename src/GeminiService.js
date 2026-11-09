@@ -9,6 +9,82 @@
 
 const GeminiService = (() => {
   /**
+   * Generates weather advice based on raw weather data, with retry and model fallback.
+   */
+  const generateWeatherAdvice = (rawWeatherContext) => {
+    if (!rawWeatherContext) return null;
+
+    let apiKey = null;
+    try {
+      apiKey = Config.getGeminiApiKey();
+    } catch (e) {
+      console.warn(`Weather advice skipped: ${e.message}`);
+      return null;
+    }
+    if (!apiKey) return null;
+
+    const currentModel = Config.getGeminiModel();
+    const modelCascade = [
+      currentModel,
+      Config.DEFAULTS.GEMINI_FALLBACK_MODEL,
+      'gemini-1.5-flash'
+    ];
+
+    const systemPrompt = 
+      "Tu es un assistant pratique et direct.\n" +
+      "Rédige un bulletin météo très court (1 paragraphe en tout) pour la ville détectée, détaillant la situation le matin (9h), l'après-midi (15h) et le soir (21h).\n" +
+      "IMPORTANT : Tu DOIS commencer ta réponse en annonçant clairement la ville, par exemple : 'Pour [Ville], ...'\n" +
+      "Donne les températures, les risques de pluie et des conseils vestimentaires simples (t-shirt, veste, parapluie).\n" +
+      "INSPIRE-TOI EXACTEMENT DE CE FORMAT/TON (ne fais pas plus long) :\n" +
+      "**Pour Annemasse :** Matin (9h) : Il fera assez frais (10°C), prévoyez une petite veste pour partir. Après-midi (15h) : Le soleil s'installe avec 22°C, vous pourrez largement rester en t-shirt. Soir (21h) : Attention, le ciel se couvre (80% de chance d'averses) et la température redescend à 14°C. Pensez à prendre une veste imperméable ou un parapluie si vous sortez.";
+
+    const requestBody = {
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: `${systemPrompt}\n\nVoici les données brutes :\n${rawWeatherContext}` }]
+        }
+      ],
+      generationConfig: {
+        temperature: 0.3,
+        maxOutputTokens: 256
+      }
+    };
+
+    const options = {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(requestBody),
+      muteHttpExceptions: true
+    };
+
+    for (let model of modelCascade) {
+      if (!model) continue;
+      const cleanModel = String(model).replace(/^models\//, '').trim();
+      const url = `${Config.DEFAULTS.GEMINI_API_BASE_URL}/${cleanModel}:generateContent?key=${apiKey}`;
+
+      try {
+        const response = UrlFetchApp.fetch(url, options);
+        const statusCode = response.getResponseCode();
+        if (statusCode === 200) {
+          const json = JSON.parse(response.getContentText());
+          return json.candidates?.[0]?.content?.parts?.[0]?.text || null;
+        } else {
+          console.warn(`Weather advice failed on model ${cleanModel} with HTTP ${statusCode}: ${response.getContentText().substring(0, 150)}`);
+          if (statusCode !== 429 && statusCode !== 503 && statusCode !== 404) {
+             // If it's a 400 error, cascading won't help.
+             break;
+          }
+        }
+      } catch (e) {
+        console.error(`Error generating weather advice with ${cleanModel}: ${e.message}`);
+      }
+    }
+    
+    return null;
+  };
+
+  /**
    * Analyzes an array of deduplicated email objects using Gemini API.
    * Processes emails in single optimized batches to prevent rate limiting (HTTP 429).
    *
@@ -20,7 +96,17 @@ const GeminiService = (() => {
       return [];
     }
 
-    const apiKey = Config.getGeminiApiKey();
+    let apiKey = null;
+    try {
+      apiKey = Config.getGeminiApiKey();
+    } catch (e) {
+      console.warn(`Clé API Gemini non configurée (${e.message}). Mode de repli heuristique automatique activé.`);
+    }
+
+    if (!apiKey) {
+      return emailsList.map(msg => Object.assign({}, msg, getFallbackAiData(msg)));
+    }
+
     const batchSize = Config.DEFAULTS.BATCH_SIZE || 25;
     const enrichedResults = [];
 
@@ -186,14 +272,16 @@ const GeminiService = (() => {
       "   - N'inclus JAMAIS d'entités HTML (&amp;, &#039;), de symboles mathématiques ($) ou de caractères de remplacement Unicode (\\uFFFD).\n\n" +
       "6. TAXONOMIE STRICTE DES SOUS-CATÉGORIES :\n" +
       "   - 'Emploi & Carrière' : Michael Page, Meteojob, LinkedIn (offres d'emploi uniquement), HelloWork, candidatures\n" +
+      "   - 'Banque & Finances' : Revolut, Société Générale, SG, PayPal, Qonto, virements, relevés bancaires\n" +
+      "   - 'Commandes & Livraisons' : Chronopost, Colissimo, Amazon, suivi de colis, commandes en cours, UPS\n" +
       "   - 'Santé & Soins' : Consultations, médecins, ordonnances, praticiens (Doctolib, Qare)\n" +
       "   - 'Démarches & Administration' : Services publics, formations, aides, impôts (France Travail, CAF, Ameli, impots.gouv)\n" +
-      "   - 'Tech & Projets' : GitHub, intégration continue, serveurs, GCP, Firebase\n" +
-      "   - 'Achats & Offres' : Soldes, remises, réductions e-commerce (ASOS, Twistshake, Amazon, Qonto)\n" +
-      "   - 'Voyages & Loisirs' : Billets d'avion, réservations, vacances (easyJet, GetYourGuide, SNCF, American Express)\n" +
-      "   - 'Réseaux sociaux & Culture' : Invitations de connexion LinkedIn, Facebook, TikTok, Instagram, Lumosity\n" +
       "   - 'Sécurité & Accès' : Codes 2FA, connexions suspectes, alertes de compte Google/Microsoft\n" +
-      "   - 'Actualités & Veille' : Articles de presse LinkedIn, revues thématiques, cinéma UGC";
+      "   - 'Voyages & Loisirs' : Billets d'avion, réservations, vacances (easyJet, GetYourGuide, SNCF, American Express)\n" +
+      "   - 'Achats & Offres' : Soldes, remises, réductions e-commerce (ASOS, Twistshake)\n" +
+      "   - 'Actualités & Newsletters' : Articles de presse, Dribbble, newsletters générales\n" +
+      "   - 'Réseaux Sociaux' : Facebook, LinkedIn (réseau/messages), Instagram, TikTok\n" +
+      "   - 'Tech & Outils Numériques' : GitHub, Firebase, GCP, HeyGen, Lumosity, outils logiciels";
 
     const responseSchema = {
       type: 'ARRAY',
@@ -206,14 +294,16 @@ const GeminiService = (() => {
             type: 'STRING',
             enum: [
               'Emploi & Carrière',
+              'Banque & Finances',
+              'Commandes & Livraisons',
               'Santé & Soins',
               'Démarches & Administration',
-              'Tech & Projets',
-              'Achats & Offres',
-              'Voyages & Loisirs',
-              'Réseaux sociaux & Culture',
               'Sécurité & Accès',
-              'Actualités & Veille'
+              'Voyages & Loisirs',
+              'Achats & Offres',
+              'Actualités & Newsletters',
+              'Réseaux Sociaux',
+              'Tech & Outils Numériques'
             ]
           },
           summary: {
@@ -310,7 +400,7 @@ const GeminiService = (() => {
       for (const item of parsedArray) {
         if (item?.emailId) {
           resultMap[item.emailId] = {
-            category: item.category ? Utils.sanitizeText(item.category) : 'Actualités & Veille',
+            category: item.category ? Utils.sanitizeText(item.category) : 'Actualités & Newsletters',
             summary: item.summary ? Utils.sanitizeText(item.summary) : 'Nouvelles informations partagées.',
             actionRequired: Boolean(item.actionRequired),
             actionTitle: item.actionTitle ? Utils.sanitizeText(item.actionTitle) : (item.actionRequired ? 'Action requise' : ''),
@@ -342,7 +432,7 @@ const GeminiService = (() => {
     cleanSubj = cleanSubj.replace(/Finance & Accounting/gi, 'Finance & Comptabilité');
     cleanSubj = cleanSubj.replace(/Project Manager\s*-\s*Remote/gi, 'Chef de projet en télétravail');
 
-    let cat = 'Actualités & Veille';
+    let cat = 'Actualités & Newsletters';
     let summary = cleanSubj;
     let isAction = false;
     let actionTitle = '';
@@ -357,7 +447,7 @@ const GeminiService = (() => {
         lower.includes('connecter') ||
         lower.includes('invites you to connect')
       ) {
-        cat = 'Réseaux sociaux & Culture';
+        cat = 'Réseaux Sociaux';
         let personName = '';
         const parts = cleanSubj.split(':');
         if (parts.length > 1 && parts[1].toLowerCase().includes('attends')) {
@@ -372,7 +462,7 @@ const GeminiService = (() => {
         lower.includes('build-out') ||
         lower.includes('newsletter')
       ) {
-        cat = 'Actualités & Veille';
+        cat = 'Tech & Outils Numériques';
         summary = `Article et actualités partagés sur LinkedIn : ${cleanSubj}`;
       } else {
         cat = 'Emploi & Carrière';
@@ -431,12 +521,17 @@ const GeminiService = (() => {
       cat = 'Santé & Soins';
       summary = `Notification médicale concernant l’accès aux soins : ${cleanSubj}`;
     }
-    // 5. Tech & Dev
-    else if (lower.includes('github') || lower.includes('firebase') || lower.includes('cloud')) {
-      cat = 'Tech & Projets';
-      summary = `Mise à jour technique sur le projet : ${cleanSubj}`;
+    // 5. Bank & Finance
+    else if (lower.includes('revolut') || lower.includes('sg') || lower.includes('société générale') || lower.includes('paypal') || lower.includes('qonto') || lower.includes('banque')) {
+      cat = 'Banque & Finances';
+      summary = `Notification bancaire : ${cleanSubj}`;
     }
-    // 6. Travel & Leisure
+    // 6. Orders & Delivery
+    else if (lower.includes('chronopost') || lower.includes('colissimo') || lower.includes('amazon') || lower.includes('suivi de commande') || lower.includes('livraison')) {
+      cat = 'Commandes & Livraisons';
+      summary = `Suivi de commande et livraison : ${cleanSubj}`;
+    }
+    // 7. Travel & Leisure
     else if (
       lower.includes('easyjet') ||
       lower.includes('getyourguide') ||
@@ -447,37 +542,39 @@ const GeminiService = (() => {
       cat = 'Voyages & Loisirs';
       summary = `Offre de séjour et voyage : ${cleanSubj}`;
     }
-    // 7. E-Commerce & Shopping
+    // 8. E-Commerce & Shopping
     else if (
       lower.includes('asos') ||
       lower.includes('twistshake') ||
       lower.includes('aprizo') ||
       lower.includes('promo') ||
-      lower.includes('solde') ||
-      lower.includes('qonto')
+      lower.includes('solde')
     ) {
       cat = 'Achats & Offres';
-      if (lower.includes('qonto')) {
-        summary = 'Offre partenaire : Un mois de mutuelle offert pour les indépendants et freelances.';
-      } else {
-        summary = `Offre promotionnelle : ${cleanSubj}`;
-      }
+      summary = `Offre promotionnelle : ${cleanSubj}`;
     }
-    // 8. Social Networks & Culture
+    // 9. Tech, Social Networks, News
     else if (
-      lower.includes('tiktok') ||
-      lower.includes('facebook') ||
-      lower.includes('instagram') ||
-      lower.includes('lumosity') ||
-      lower.includes('ugc')
+      lower.includes('github') || lower.includes('firebase') || lower.includes('cloud') ||
+      lower.includes('heygen') || lower.includes('lumosity') || lower.includes('api')
     ) {
-      cat = 'Réseaux sociaux & Culture';
+      cat = 'Tech & Outils Numériques';
       if (lower.includes('lumosity')) {
         summary = 'Exercices d’entraînement cérébral pour la mémoire et la concentration.';
-      } else if (lower.includes('ugc')) {
+      } else {
+        summary = `Activité ou mise à jour technique : ${cleanSubj}`;
+      }
+    }
+    else if (lower.includes('tiktok') || lower.includes('facebook') || lower.includes('instagram')) {
+      cat = 'Réseaux Sociaux';
+      summary = `Notification réseau social : ${cleanSubj}`;
+    }
+    else if (lower.includes('dribbble') || lower.includes('ugc') || lower.includes('newsletter')) {
+      cat = 'Actualités & Newsletters';
+      if (lower.includes('ugc')) {
         summary = 'Vos sorties cinéma et programmation de la semaine.';
       } else {
-        summary = `Activité récente sur votre réseau : ${cleanSubj}`;
+        summary = `Actualités et veille : ${cleanSubj}`;
       }
     }
     // 9. Account Security
@@ -497,6 +594,7 @@ const GeminiService = (() => {
   };
 
   return {
-    analyzeEmails
+    analyzeEmails,
+    generateWeatherAdvice
   };
 })();

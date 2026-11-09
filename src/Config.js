@@ -33,7 +33,7 @@ const Config = (() => {
     TRIGGER_HOUR: 6,
     TRIGGER_MINUTE: 0,
     GEMINI_MODEL: 'gemini-2.0-flash',
-    GEMINI_FALLBACK_MODEL: 'gemini-flash-lite-latest',
+    GEMINI_FALLBACK_MODEL: 'gemini-1.5-flash',
     GEMINI_API_BASE_URL: 'https://generativelanguage.googleapis.com/v1beta/models',
     BATCH_SIZE: 25,
     MAX_RETRIES: 4,
@@ -41,7 +41,9 @@ const Config = (() => {
     MAX_OUTPUT_TOKENS: 2048,
     TEMPERATURE: 0.2,
     LOCK_TIMEOUT_MS: 30000,
-    MAX_BODY_CHARS: 1200
+    MAX_BODY_CHARS: 1200,
+    WEATHER_BASE_LOCATION: 'Annemasse',
+    WEATHER_ENABLED: true
   });
 
   /**

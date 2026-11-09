@@ -8,6 +8,7 @@
 
 const TriggerService = (() => {
   const TRIGGER_FUNCTION_NAME = 'runDailyBriefing';
+  const WATCHDOG_FUNCTION_NAME = 'watchdogSafetyCheck';
   const LEGACY_FUNCTION_NAMES = ['runBriefing', 'runBriefingPrecise'];
 
   /**
@@ -93,6 +94,54 @@ const TriggerService = (() => {
   };
 
   /**
+   * Installs the recurring daily Watchdog safety trigger.
+   * Runs daily between 7am and 8am as a safety net:
+   * If the 6h trigger failed, it automatically runs the briefing and restores the schedule.
+   */
+  const setupWatchdogTrigger = () => {
+    const tz = Config.DEFAULTS.TIMEZONE || 'Europe/Paris';
+    const allTriggers = ScriptApp.getProjectTriggers();
+    for (const t of allTriggers) {
+      if (t.getHandlerFunction() === WATCHDOG_FUNCTION_NAME) {
+        try {
+          ScriptApp.deleteTrigger(t);
+        } catch {}
+      }
+    }
+
+    ScriptApp.newTrigger(WATCHDOG_FUNCTION_NAME)
+      .timeBased()
+      .everyDays(1)
+      .atHour(7)
+      .inTimezone(tz)
+      .create();
+
+    console.log(`✓ Watchdog récurrent de sécurité installé à 07:00 (${tz}).`);
+  };
+
+  /**
+   * Installs the complete dual-layer trigger architecture:
+   * 1. Exact 06:00:00 daily trigger.
+   * 2. Daily Watchdog safety net.
+   */
+  const setupAllTriggers = () => {
+    setupDailyTrigger();
+    setupWatchdogTrigger();
+  };
+
+  /**
+   * Returns a diagnostic list of all currently active project triggers.
+   * @returns {Array<{handler: string, type: string}>}
+   */
+  const getTriggersSummary = () => {
+    const triggers = ScriptApp.getProjectTriggers();
+    return triggers.map((t) => ({
+      handler: t.getHandlerFunction(),
+      type: t.getEventType() ? String(t.getEventType()) : 'TIME_DRIVEN'
+    }));
+  };
+
+  /**
    * Checks whether the current moment is a weekend day (Saturday or Sunday) in Paris.
    * @returns {boolean} True if Saturday or Sunday.
    */
@@ -105,6 +154,9 @@ const TriggerService = (() => {
 
   return {
     setupDailyTrigger,
+    setupWatchdogTrigger,
+    setupAllTriggers,
+    getTriggersSummary,
     clearAllTriggers,
     calculateNextTargetDate,
     isWeekendNow

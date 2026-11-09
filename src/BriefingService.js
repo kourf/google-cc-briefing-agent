@@ -194,6 +194,21 @@ const BriefingService = (() => {
     const urgentCount = Number(urgentItems.length) || 0;
     const todayEventsCount = Number(agenda.todayEvents?.length) || 0;
 
+    let weatherAdviceHtml = null;
+    if (Config.DEFAULTS.WEATHER_ENABLED) {
+      console.log('Fetching weather context...');
+      const rawWeather = WeatherService.getRawWeatherContext(agenda.todayEvents);
+      if (rawWeather) {
+        console.log('Generating AI weather advice...');
+        // Convert Markdown bold to HTML bold since it will be injected into Template.html
+        let advice = GeminiService.generateWeatherAdvice(rawWeather);
+        if (advice) {
+           advice = advice.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+           weatherAdviceHtml = advice;
+        }
+      }
+    }
+
     const templateData = {
       dateTitle: formattedDate,
       greeting: temporalGreeting,
@@ -210,7 +225,8 @@ const BriefingService = (() => {
       todayEvents: agenda.todayEvents || [],
       tomorrowEvents: agenda.tomorrowEvents || [],
       hasZeroEmails: totalEmails === 0,
-      isCalm: totalEmails === 0 && todayEventsCount === 0
+      isCalm: totalEmails === 0 && todayEventsCount === 0,
+      weatherAdviceHtml
     };
 
     // Executive email subject
