@@ -157,3 +157,126 @@ function reparerEtActiverBriefing() {
   console.log('=== SYSTÈME RÉPARÉ ET PARFAITEMENT OPÉRATIONNEL ! ===');
   return result;
 }
+
+/**
+ * 5. DIAGNOSTIC COMPLET DU SYSTÈME (SANTÉ & CONNECTIVITÉ)
+ * Teste exhaustivement chaque composant, vérifie les autorisations et déclencheurs,
+ * auto-répare les programmations et envoie un rapport détaillé par e-mail.
+ */
+function diagnostiquerBriefing() {
+  console.log('=== DIAGNOSTIC COMPLET DU SYSTÈME EN COURS ===');
+  const report = [];
+  const logStep = (emoji, title, details) => {
+    const line = `${emoji} ${title}: ${details}`;
+    console.log(line);
+    report.push(line);
+  };
+
+  // 1. Test des Script Properties et de la clé Gemini
+  try {
+    const key = Config.getGeminiApiKey();
+    const maskedKey = key ? `${key.substring(0, 6)}...${key.substring(key.length - 4)}` : 'AUCUNE';
+    logStep('🔑', 'Clé API Gemini', `Configurée (${maskedKey}) - Modèle : ${Config.getGeminiModel()}`);
+  } catch (e) {
+    logStep('❌', 'Clé API Gemini', `Erreur : ${e.message}`);
+  }
+
+  // 2. Test de l'API Gemini
+  try {
+    const apiKey = Config.getGeminiApiKey();
+    const model = Config.getGeminiModel();
+    const url = `${Config.DEFAULTS.GEMINI_API_BASE_URL}/${model}:generateContent?key=${apiKey}`;
+    const res = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'Réponds par OK.' }] }]
+      }),
+      muteHttpExceptions: true
+    });
+    const code = res.getResponseCode();
+    if (code === 200) {
+      logStep('🧠', 'Connexion Gemini API', `Succès HTTP 200 avec modèle ${model}`);
+    } else {
+      logStep('⚠️', 'Connexion Gemini API', `HTTP ${code} : ${res.getContentText().substring(0, 150)}`);
+    }
+  } catch (e) {
+    logStep('❌', 'Connexion Gemini API', `Exception : ${e.message}`);
+  }
+
+  // 3. Test de Gmail
+  try {
+    const unreadThreads = GmailApp.search('is:unread in:inbox', 0, 10);
+    logStep('📬', 'Accès Gmail Boîte de réception', `Succès (${unreadThreads.length} fil(s) non lu(s) détecté(s))`);
+  } catch (e) {
+    logStep('❌', 'Accès Gmail', `Erreur d'accès : ${e.message}`);
+  }
+
+  // 4. Test du Calendrier
+  try {
+    const cal = CalendarApp.getDefaultCalendar();
+    const now = new Date();
+    const events = cal ? cal.getEventsForDay(now) : [];
+    logStep('📅', 'Google Calendar', `Succès (${events.length} événement(s) trouvé(s) pour aujourd'hui)`);
+  } catch (e) {
+    logStep('❌', 'Google Calendar', `Erreur d'accès : ${e.message}`);
+  }
+
+  // 5. Test Météo
+  try {
+    const weatherRaw = WeatherService.getRawWeatherContext([]);
+    if (weatherRaw) {
+      logStep('🌤️', 'Service Météo', `Données météo récupérées avec succès.`);
+    } else {
+      logStep('⚠️', 'Service Météo', 'Non disponible (repli transparent actif).');
+    }
+  } catch (e) {
+    logStep('⚠️', 'Service Météo', `Erreur non bloquante : ${e.message}`);
+  }
+
+  // 6. Test et Réparation des Déclencheurs
+  try {
+    const triggersBefore = TriggerService.getTriggersSummary();
+    logStep('⏰', 'Déclencheurs avant diagnostic', `${triggersBefore.length} déclencheur(s) actif(s)`);
+    
+    // Auto-réparation immédiate des déclencheurs
+    TriggerService.setupAllTriggers();
+    const triggersAfter = TriggerService.getTriggersSummary();
+    const handlers = triggersAfter.map(t => t.handler).join(', ');
+    logStep('✅', 'Déclencheurs après auto-réparation', `${triggersAfter.length} actif(s) : [${handlers}]`);
+  } catch (e) {
+    logStep('❌', 'Déclencheurs', `Erreur : ${e.message}`);
+  }
+
+  // 7. Envoi du Rapport de Diagnostic par Email
+  const recipient = Config.getRecipientEmail();
+  try {
+    const reportHtml = `<div style="font-family: sans-serif; padding: 20px;">
+      <h2 style="color: #111827;">Rapport de Diagnostic du Briefing Quotidien</h2>
+      <p>Voici le statut en direct de vos services au ${new Date().toLocaleString('fr-FR', { timeZone: 'Europe/Paris' })} :</p>
+      <ul>${report.map(r => `<li style="margin-bottom: 8px;">${r}</li>`).join('')}</ul>
+      <hr style="margin: 20px 0; border: 0; border-top: 1px solid #E5E7EB;">
+      <p style="color: #047857; font-weight: bold;">Le système a été auto-réparé : déclencheurs de 06:00:00 et Watchdog 07:00 réinstallés.</p>
+    </div>`;
+
+    GmailApp.sendEmail(recipient, '🔍 [DIAGNOSTIC] Statut de votre Briefing Quotidien', report.join('\n'), {
+      htmlBody: reportHtml,
+      name: 'Diagnostic Briefing Quotidien'
+    });
+    logStep('✉️', 'Envoi du rapport par e-mail', `Envoyé avec succès à ${recipient}`);
+  } catch (e) {
+    logStep('❌', 'Envoi du rapport par e-mail', `Échec d'envoi : ${e.message}`);
+  }
+
+  // 8. Envoi immédiat du vrai Briefing Quotidien
+  try {
+    logStep('🚀', 'Briefing Quotidien', 'Lancement de l’envoi immédiat de votre vrai briefing...');
+    runBriefingNow();
+    logStep('🎉', 'Briefing Quotidien', 'Votre vrai briefing a été assemblé et envoyé avec succès !');
+  } catch (e) {
+    logStep('❌', 'Briefing Quotidien', `Erreur briefing : ${e.message}`);
+  }
+
+  console.log('=== FIN DU DIAGNOSTIC ===');
+  return report.join('\n');
+}

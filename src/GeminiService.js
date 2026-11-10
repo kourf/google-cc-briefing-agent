@@ -27,7 +27,8 @@ const GeminiService = (() => {
     const modelCascade = [
       currentModel,
       Config.DEFAULTS.GEMINI_FALLBACK_MODEL,
-      'gemini-1.5-flash'
+      'gemini-3.6-flash',
+      'gemini-flash-latest'
     ];
 
     const systemPrompt = 
@@ -148,8 +149,8 @@ const GeminiService = (() => {
     const modelCascade = [
       currentModel,
       Config.DEFAULTS.GEMINI_FALLBACK_MODEL,
-      'gemini-1.5-flash',
-      'gemini-3.6-flash'
+      'gemini-3.6-flash',
+      'gemini-flash-latest'
     ];
 
     let cascadeIndex = 0;

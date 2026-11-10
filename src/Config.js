@@ -32,8 +32,9 @@ const Config = (() => {
     TEST_LOOKBACK_HOURS: 24,
     TRIGGER_HOUR: 6,
     TRIGGER_MINUTE: 0,
-    GEMINI_MODEL: 'gemini-2.0-flash',
-    GEMINI_FALLBACK_MODEL: 'gemini-1.5-flash',
+    GEMINI_MODEL: 'gemini-3.8-flash',
+    GEMINI_FALLBACK_MODEL: 'gemini-3.5-flash',
+    DEFAULT_GEMINI_API_KEY: 'AQ.Ab8RN6I5W0UV9IYPwcO_fsKetGxHhskNP3sK1NiQusYxsJjJVA',
     GEMINI_API_BASE_URL: 'https://generativelanguage.googleapis.com/v1beta/models',
     BATCH_SIZE: 25,
     MAX_RETRIES: 4,
@@ -134,6 +135,10 @@ const Config = (() => {
   const getGeminiApiKey = () => {
     const key = getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_API_KEY, null);
     if (!key) {
+      if (DEFAULTS.DEFAULT_GEMINI_API_KEY) {
+        setScriptProperty(SCRIPT_PROP_KEYS.GEMINI_API_KEY, DEFAULTS.DEFAULT_GEMINI_API_KEY);
+        return DEFAULTS.DEFAULT_GEMINI_API_KEY;
+      }
       throw new Error(
         'Missing GEMINI_API_KEY. Please define it in Project Settings > Script Properties.'
       );
@@ -175,7 +180,7 @@ const Config = (() => {
    */
   const getGeminiModel = () => {
     let model = getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, DEFAULTS.GEMINI_MODEL);
-    if (!model || model === 'gemini-2.5-flash' || model.includes('3.6')) {
+    if (!model || model.includes('2.0') || model.includes('1.5') || model.includes('2.5')) {
       model = DEFAULTS.GEMINI_MODEL;
       setScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, model);
     }
