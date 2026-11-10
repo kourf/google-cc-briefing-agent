@@ -681,16 +681,28 @@ const GeminiService = (() => {
     const modelCascade = getModelCascade();
 
     const systemPrompt = [
-      'Tu es le rédacteur en chef d’un briefing exécutif quotidien.',
-      'Rédige une synthèse fluide, dense et factuelle de la vidéo quotidienne "Les Actus du Jour" d’HugoDécrypte.',
-      'CONSIGNES STRICTES :',
-      '1. Pour CHAQUE segment du SOMMAIRE fourni (ignore impérativement Intro et Outro/Conclusion) :',
-      '   - "timestamp" : le minutage (ex: "00:27").',
-      '   - "segmentTitle" : titre clair du sujet.',
-      '   - "category" : choisis parmi ["Tech, IA & Sciences", "Économie, Finance & Entreprises", "Politique & Société (France)", "Géopolitique & International", "Culture, Médias & Sport"].',
-      '   - "summary" : 2 phrases fluides avec les faits clés, chiffres et enjeux.',
-      '2. N’utilise STRICTEMENT AUCUN emoji ni symbole graphique.',
-      '3. Réponds UNIQUEMENT en JSON avec la structure {"segments": [...]}'
+      'Tu es un journaliste vulgarisateur et pédagogue de premier plan pour un briefing quotidien.',
+      'Ton rôle : expliquer l’actualité avec un maximum de clarté, de pédagogie et de fluidité, comme si tu t’adressais à un jeune de 15 ans très curieux.',
+      '',
+      'DIRECTIVES MAJEURES (STRICTES ET OBLIGATOIRES) :',
+      '1. NIVEAU 15 ANS ET PHRASES COURTES :',
+      '   - Rédige en phrases courtes, simples et percutantes (Sujet + Verbe + Complément).',
+      '   - Évite tout jargon technique, juridique ou économique abstrait sans l’expliquer immédiatement en mots simples.',
+      '2. CONTEXTUALISATION SYSTÉMATIQUE DES PERSONNES CITÉES :',
+      '   - Dès qu’une personne est mentionnée, indique TOUJOURS son rôle, son métier ou sa fonction (entre parenthèses ou naturellement dans la phrase) pour qu’on sache exactement qui c’est.',
+      '   - Exemples : "Michel Zecler (un producteur de musique)", "Michel Barnier (le Premier ministre français)", "Donald Trump (le président élu des États-Unis)", "Jerome Powell (le patron de la banque centrale américaine)".',
+      '3. CONTEXTUALISATION SYSTÉMATIQUE DES ENTREPRISES ET MARQUES :',
+      '   - Dès qu’une entreprise, marque ou institution est mentionnée, explique TOUJOURS en quelques mots simples ce qu’elle fabrique ou son domaine d’activité.',
+      '   - Exemples : "Nvidia (le géant américain qui fabrique les puces d’intelligence artificielle)", "OpenAI (l’entreprise qui a inventé ChatGPT)", "Boeing (l’un des plus grands constructeurs d’avions de ligne au monde)", "Stellantis (le groupe automobile qui possède Peugeot, Citroën et Fiat)".',
+      '4. STRUCTURE PÉDAGOGIQUE EN 2 À 3 PHRASES MAXIMUM PAR SUJET :',
+      '   - Phrase 1 : Que s’est-il passé ? (Le fait concret avec le rôle précis des personnes et des entreprises).',
+      '   - Phrase 2 : Pourquoi cela arrive ? (Le contexte ou la cause de façon très simple).',
+      '   - Phrase 3 : Qu’est-ce que ça change ? (L’enjeu concret ou ce qui va se passer ensuite).',
+      '5. DEUX BLOCS ATTENDUS DANS LE JSON :',
+      '   - "segments" : pour chaque segment du sommaire d’HugoDécrypte (ignore Intro et Outro). Précise le minutage exact ("timestamp"), le titre clair ("segmentTitle"), la catégorie ("category" parmi ["Tech, IA & Sciences", "Économie, Finance & Entreprises", "Politique & Société (France)", "Géopolitique & International", "Culture, Médias & Sport"]) et le résumé vulgarisé ("summary").',
+      '   - "categories" : pour chacune des 5 grandes rubriques ["Géopolitique & International", "Économie, Finance & Entreprises", "Politique & Société (France)", "Tech, IA & Sciences", "Culture, Médias & Sport"], sélectionne l’actualité la plus marquante issue des flux Google News fournis, indique la rubrique ("categoryName"), un titre percutant ("headline") et explique l’actualité dans "summary" avec le même niveau de contexte vulgarisé (rôle des personnes, activité des entreprises, faits et pourquoi).',
+      '6. ZÉRO ÉMOJI : n’utilise strictement aucun emoji ni symbole dans le texte généré.',
+      '7. Réponds UNIQUEMENT en JSON avec la structure spécifiée dans le schéma.'
     ].join('\n');
 
     const responseSchema = {
@@ -708,9 +720,21 @@ const GeminiService = (() => {
             },
             required: ['timestamp', 'segmentTitle', 'category', 'summary']
           }
+        },
+        categories: {
+          type: 'ARRAY',
+          items: {
+            type: 'OBJECT',
+            properties: {
+              categoryName: { type: 'STRING' },
+              headline: { type: 'STRING' },
+              summary: { type: 'STRING' }
+            },
+            required: ['categoryName', 'headline', 'summary']
+          }
         }
       },
-      required: ['segments']
+      required: ['segments', 'categories']
     };
 
     for (const model of modelCascade) {
@@ -734,7 +758,7 @@ const GeminiService = (() => {
             role: 'user',
             parts: [
               {
-                text: `${systemPrompt}\n\nSOURCES DU JOUR :\n${newsData.rawContext.substring(0, 4000)}`
+                text: `${systemPrompt}\n\nSOURCES DU JOUR :\n${newsData.rawContext.substring(0, 7000)}`
               }
             ]
           }
@@ -777,38 +801,50 @@ const GeminiService = (() => {
               segments: sanitizedSegments
             } : null;
 
-            // Group segments into categories
-            const categoryBuckets = {};
-            for (const cat of NewsService.CATEGORIES) {
-              categoryBuckets[cat.name] = [];
-            }
-
-            for (const seg of sanitizedSegments) {
-              const matchedCat = Object.keys(categoryBuckets).find((k) => k.toLowerCase() === seg.category.toLowerCase()) || 'Actualités & Société';
-              if (!categoryBuckets[matchedCat]) {
-                categoryBuckets[matchedCat] = [];
+            // Catégories complémentaires contextualisées et vulgarisées
+            let finalCategories = [];
+            if (Array.isArray(parsed.categories) && parsed.categories.length > 0) {
+              finalCategories = parsed.categories.map((cat) => ({
+                name: Utils.sanitizeText(cat.categoryName),
+                items: [
+                  {
+                    headline: Utils.sanitizeText(cat.headline),
+                    summary: Utils.sanitizeText(cat.summary)
+                  }
+                ]
+              }));
+            } else {
+              // Reconstitution de sécurité si le bloc catégories est manquant
+              const categoryBuckets = {};
+              for (const cat of NewsService.CATEGORIES) {
+                categoryBuckets[cat.name] = [];
               }
-              categoryBuckets[matchedCat].push({
-                headline: `[${seg.timestamp}] ${seg.segmentTitle}`,
-                summary: seg.summary
-              });
-            }
 
-            // Fill categories that have no video segments with top Google News headlines
-            const finalCategories = [];
-            for (const [catName, items] of Object.entries(categoryBuckets)) {
-              if (items.length > 0) {
-                finalCategories.push({
-                  name: catName,
-                  items
+              for (const seg of sanitizedSegments) {
+                const matchedCat = Object.keys(categoryBuckets).find((k) => k.toLowerCase() === seg.category.toLowerCase()) || 'Politique & Société (France)';
+                if (!categoryBuckets[matchedCat]) {
+                  categoryBuckets[matchedCat] = [];
+                }
+                categoryBuckets[matchedCat].push({
+                  headline: `[${seg.timestamp}] ${seg.segmentTitle}`,
+                  summary: seg.summary
                 });
-              } else {
-                const fb = (newsData.fallbackCategories || []).find((f) => f.name === catName);
-                if (fb && fb.items && fb.items.length > 0) {
+              }
+
+              for (const [catName, items] of Object.entries(categoryBuckets)) {
+                if (items.length > 0) {
                   finalCategories.push({
                     name: catName,
-                    items: fb.items.slice(0, 2)
+                    items
                   });
+                } else {
+                  const fb = (newsData.fallbackCategories || []).find((f) => f.name === catName);
+                  if (fb && fb.items && fb.items.length > 0) {
+                    finalCategories.push({
+                      name: catName,
+                      items: fb.items.slice(0, 2)
+                    });
+                  }
                 }
               }
             }
