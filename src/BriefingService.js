@@ -200,12 +200,21 @@ const BriefingService = (() => {
       const rawWeather = WeatherService.getRawWeatherContext(agenda.todayEvents);
       if (rawWeather) {
         console.log('Generating AI weather advice...');
-        // Convert Markdown bold to HTML bold since it will be injected into Template.html
         let advice = GeminiService.generateWeatherAdvice(rawWeather);
         if (advice) {
            advice = advice.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
            weatherAdviceHtml = advice;
         }
+      }
+    }
+
+    let newsDigest = null;
+    if (Config.DEFAULTS.NEWS_ENABLED !== false) {
+      console.log('Fetching daily news (HugoDécrypte + Google Actualités)...');
+      const rawNewsData = NewsService.fetchDailyNewsData();
+      if (rawNewsData) {
+        console.log('Generating AI daily news digest...');
+        newsDigest = GeminiService.generateNewsDigest(rawNewsData);
       }
     }
 
@@ -226,7 +235,8 @@ const BriefingService = (() => {
       tomorrowEvents: agenda.tomorrowEvents || [],
       hasZeroEmails: totalEmails === 0,
       isCalm: totalEmails === 0 && todayEventsCount === 0,
-      weatherAdviceHtml
+      weatherAdviceHtml,
+      newsDigest
     };
 
     // Executive email subject
@@ -311,6 +321,20 @@ const BriefingService = (() => {
       for (const ev of data.todayEvents) {
         lines.push(`• ${ev.timeFormatted} : ${ev.title}${ev.location ? ` (${ev.location})` : ''}`);
         if (ev.conferenceLink) lines.push(`  Visio : ${ev.conferenceLink}`);
+      }
+      lines.push('');
+    }
+
+    if (data.newsDigest && data.newsDigest.categories && data.newsDigest.categories.length > 0) {
+      lines.push('=== LES ACTUS DU JOUR (HUGODÉCRYPTE & ACTUALITÉS) ===');
+      for (const cat of data.newsDigest.categories) {
+        lines.push(`• ${cat.name} :`);
+        for (const item of cat.items || []) {
+          lines.push(`  - ${item.headline} : ${item.summary}`);
+        }
+      }
+      if (data.newsDigest.hugoEpisode && data.newsDigest.hugoEpisode.url) {
+        lines.push(`  Voir l’édition HugoDécrypte : ${data.newsDigest.hugoEpisode.url}`);
       }
       lines.push('');
     }

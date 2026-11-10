@@ -27,8 +27,7 @@ const GeminiService = (() => {
     const modelCascade = [
       currentModel,
       Config.DEFAULTS.GEMINI_FALLBACK_MODEL,
-      'gemini-3.6-flash',
-      'gemini-flash-latest'
+      'gemini-3.1-flash-lite'
     ];
 
     const systemPrompt = 
@@ -149,8 +148,7 @@ const GeminiService = (() => {
     const modelCascade = [
       currentModel,
       Config.DEFAULTS.GEMINI_FALLBACK_MODEL,
-      'gemini-3.6-flash',
-      'gemini-flash-latest'
+      'gemini-3.1-flash-lite'
     ];
 
     let cascadeIndex = 0;
@@ -594,8 +592,139 @@ const GeminiService = (() => {
     };
   };
 
+  /**
+   * Génère le résumé quotidien des actualités (façon HugoDécrypte + Google Actualités) classé par catégorie.
+   *
+   * @param {Object} newsData - Données brutes issues de NewsService.fetchDailyNewsData().
+   * @returns {Object|null} { categories: Array<{name: string, items: Array<{headline: string, summary: string}>}>, hugoEpisode: Object|null }
+   */
+  const generateNewsDigest = (newsData) => {
+    if (!newsData || !newsData.rawContext) return null;
+
+    let apiKey = null;
+    try {
+      apiKey = Config.getGeminiApiKey();
+    } catch {
+      return {
+        categories: newsData.fallbackCategories || [],
+        hugoEpisode: newsData.hugoEpisode || null
+      };
+    }
+
+    const currentModel = Config.getGeminiModel();
+    const modelCascade = [
+      currentModel,
+      Config.DEFAULTS.GEMINI_FALLBACK_MODEL,
+      'gemini-3.1-flash-lite'
+    ];
+
+    const systemPrompt = [
+      'Tu es HugoDécrypte, journaliste spécialisé dans la synthèse d’actualité claire, factuelle, directe et accessible.',
+      'À partir des sources fournies (les Actus du jour d’HugoDécrypte en priorité + les dépêches Google Actualités en complément), rédige le grand récapitulatif des actualités du jour en français.',
+      'RÈGLES STRICTES :',
+      '1. Classe les actualités dans ces 5 catégories exactes :',
+      '   - "🌍 Géopolitique & International"',
+      '   - "📈 Économie, Finance & Entreprises"',
+      '   - "🇫🇷 Politique & Social (France)"',
+      '   - "💻 Tech, IA & Sciences"',
+      '   - "🎭 Culture, Médias & Sport"',
+      '2. Sélectionne 2 à 3 faits marquants par catégorie (les plus importants du jour, en privilégiant ceux traités par HugoDécrypte).',
+      '3. Pour chaque actualité :',
+      '   - "headline" : Un titre court et percutant (3 à 6 mots max, ex: "Soupçons d’espionnage chez Nvidia", "Hausse du SMIC et colère sociale").',
+      '   - "summary" : 1 à 2 phrases claires qui expliquent le fait et son enjeu concret, dans le style direct d’HugoDécrypte.',
+      '4. Réponds UNIQUEMENT avec un objet JSON valide suivant ce schéma.'
+    ].join('\n');
+
+    const responseSchema = {
+      type: 'OBJECT',
+      properties: {
+        categories: {
+          type: 'ARRAY',
+          items: {
+            type: 'OBJECT',
+            properties: {
+              name: { type: 'STRING' },
+              items: {
+                type: 'ARRAY',
+                items: {
+                  type: 'OBJECT',
+                  properties: {
+                    headline: { type: 'STRING' },
+                    summary: { type: 'STRING' }
+                  },
+                  required: ['headline', 'summary']
+                }
+              }
+            },
+            required: ['name', 'items']
+          }
+        }
+      },
+      required: ['categories']
+    };
+
+    const requestBody = {
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: `${systemPrompt}\n\nSOURCES DU JOUR :\n${newsData.rawContext.substring(0, 9000)}`
+            }
+          ]
+        }
+      ],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 1500,
+        responseMimeType: 'application/json',
+        responseSchema
+      }
+    };
+
+    const options = {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(requestBody),
+      muteHttpExceptions: true
+    };
+
+    for (const model of modelCascade) {
+      if (!model) continue;
+      const cleanModel = String(model).replace(/^models\//, '').trim();
+      const url = `${Config.DEFAULTS.GEMINI_API_BASE_URL}/${cleanModel}:generateContent?key=${apiKey}`;
+
+      try {
+        const response = UrlFetchApp.fetch(url, options);
+        if (response.getResponseCode() === 200) {
+          const json = JSON.parse(response.getContentText());
+          const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (rawText) {
+            const parsed = JSON.parse(rawText);
+            if (parsed && Array.isArray(parsed.categories) && parsed.categories.length > 0) {
+              return {
+                categories: parsed.categories,
+                hugoEpisode: newsData.hugoEpisode || null
+              };
+            }
+          }
+        } else {
+          console.warn(`News digest HTTP ${response.getResponseCode()} on ${cleanModel}`);
+        }
+      } catch (e) {
+        console.warn(`Error generating news digest with ${cleanModel}: ${e.message}`);
+      }
+    }
+
+    return {
+      categories: newsData.fallbackCategories || [],
+      hugoEpisode: newsData.hugoEpisode || null
+    };
+  };
+
   return {
     analyzeEmails,
-    generateWeatherAdvice
+    generateWeatherAdvice,
+    generateNewsDigest
   };
 })();

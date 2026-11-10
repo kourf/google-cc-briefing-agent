@@ -222,7 +222,7 @@ function diagnostiquerBriefing() {
     logStep('❌', 'Google Calendar', `Erreur d'accès : ${e.message}`);
   }
 
-  // 5. Test Météo
+  // 5. Test Météo & Actualités
   try {
     const weatherRaw = WeatherService.getRawWeatherContext([]);
     if (weatherRaw) {
@@ -232,6 +232,18 @@ function diagnostiquerBriefing() {
     }
   } catch (e) {
     logStep('⚠️', 'Service Météo', `Erreur non bloquante : ${e.message}`);
+  }
+
+  try {
+    const newsData = NewsService.fetchDailyNewsData();
+    if (newsData && newsData.rawContext) {
+      const hugoTitle = newsData.hugoEpisode ? newsData.hugoEpisode.title : 'Flux actif';
+      logStep('🗞️', 'Actus du Jour (HugoDécrypte + Google News)', `Succès — Édition détectée : "${hugoTitle}"`);
+    } else {
+      logStep('⚠️', 'Actus du Jour', 'Flux non disponible.');
+    }
+  } catch (e) {
+    logStep('⚠️', 'Actus du Jour', `Erreur non bloquante : ${e.message}`);
   }
 
   // 6. Test et Réparation des Déclencheurs

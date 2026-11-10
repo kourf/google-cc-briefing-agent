@@ -18,31 +18,22 @@ const GmailService = (() => {
     const query = `is:unread in:inbox -in:spam -in:trash -from:calendar-notification@google.com -subject:"agenda quotidien" after:${Math.floor(afterTimestampSec)}`;
     console.log(`Executing Gmail search query: ${query}`);
 
-    const threads = [];
-    const PAGE_SIZE = 50;
-    const MAX_THREADS = 300;
-    let startIndex = 0;
+    const threads = GmailApp.search(query, 0, 50) || [];
+    console.log(`Found ${threads.length} thread(s). Extracting unread messages in batch...`);
 
-    // 1. Paginated thread retrieval
-    while (true) {
-      const batch = GmailApp.search(query, startIndex, PAGE_SIZE);
-      if (!batch || batch.length === 0) break;
-
-      threads.push(...batch);
-      if (batch.length < PAGE_SIZE || threads.length >= MAX_THREADS) break;
-
-      startIndex += PAGE_SIZE;
+    if (threads.length === 0) {
+      return [];
     }
-
-    console.log(`Found ${threads.length} thread(s). Extracting unread messages...`);
 
     const rawMessages = [];
     const seenMessageIds = new Set();
 
-    // 2. Individual unread message extraction
-    for (const thread of threads) {
-      const threadId = thread.getId();
-      const messages = thread.getMessages();
+    // 2. Batch unread message extraction via getMessagesForThreads (1 single RPC call instead of N)
+    const threadsMessages = GmailApp.getMessagesForThreads(threads);
+
+    for (let t = 0; t < threads.length; t++) {
+      const threadId = threads[t].getId();
+      const messages = threadsMessages[t] || [];
 
       for (const msg of messages) {
         const msgId = msg.getId();
@@ -65,14 +56,19 @@ const GmailService = (() => {
 
           seenMessageIds.add(msgId);
 
-          const plainBody = msg.getPlainBody() || '';
-          let rawHtml = '';
+          let plainBody = '';
           try {
-            rawHtml = msg.getBody() || '';
+            plainBody = msg.getPlainBody() || '';
           } catch {}
 
+          let rawHtml = '';
+          if (!plainBody || plainBody.trim().length < 25) {
+            try {
+              rawHtml = msg.getBody() || '';
+            } catch {}
+          }
+
           const cleanedBody = Utils.cleanEmailBody(plainBody, rawHtml);
-          const attachments = msg.getAttachments() || [];
           const cleanSubject = Utils.sanitizeText(subjectRaw);
           const senderName = Utils.cleanSenderName(fromRaw);
 
@@ -87,8 +83,8 @@ const GmailService = (() => {
             timeFormatted: Utils.formatTime(msgDate),
             dateFormatted: Utils.formatDateFrench(msgDate),
             body: cleanedBody,
-            hasAttachments: attachments.length > 0,
-            attachmentsCount: attachments.length,
+            hasAttachments: false,
+            attachmentsCount: 0,
             webUrl: Utils.buildGmailUrl(threadId)
           });
         }

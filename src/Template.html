@@ -139,6 +139,40 @@
     </div>
     <? } ?>
 
+    <!-- 5. LES ACTUS DU JOUR (HUGODÉCRYPTE & GOOGLE ACTUALITÉS) -->
+    <? if (data.newsDigest && data.newsDigest.categories && data.newsDigest.categories.length > 0) { ?>
+    <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
+    <div style="margin-bottom: 20px;">
+      <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 12px;">
+        Les Actus du Jour (Synthèse HugoDécrypte &amp; Actualités)
+      </div>
+      <ul style="margin: 0; padding-left: 20px; list-style-type: disc;">
+        <? for (var nc = 0; nc < data.newsDigest.categories.length; nc++) {
+             var nCat = data.newsDigest.categories[nc];
+             if (!nCat.items || nCat.items.length === 0) continue;
+        ?>
+        <li style="margin-bottom: 14px; font-size: 13.8px; line-height: 1.5; color: #111827;">
+          <strong><?= nCat.name ?> :</strong>
+          <ul style="margin: 6px 0 4px 0; padding-left: 20px; list-style-type: circle;">
+            <? for (var ni = 0; ni < nCat.items.length; ni++) {
+                 var nItem = nCat.items[ni];
+            ?>
+            <li style="margin-bottom: 8px; font-size: 13.5px; line-height: 1.5; color: #374151;">
+              <strong><?= nItem.headline ?> :</strong> <?= nItem.summary ?>
+            </li>
+            <? } ?>
+          </ul>
+        </li>
+        <? } ?>
+      </ul>
+      <? if (data.newsDigest.hugoEpisode && data.newsDigest.hugoEpisode.url) { ?>
+      <div style="margin-top: 12px;">
+        <a href="<?= data.newsDigest.hugoEpisode.url ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 6px 12px; background-color: #FEF2F2; color: #B91C1C; border: 1px solid #FECACA; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: 600;">&#x25B6;&#xFE0F; Voir la dernière édition HugoDécrypte</a>
+      </div>
+      <? } ?>
+    </div>
+    <? } ?>
+
     <!-- PIED DE PAGE ÉPURÉ -->
     <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 24px 0 16px 0;">
 
