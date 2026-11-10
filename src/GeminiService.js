@@ -54,10 +54,19 @@ const GeminiService = (() => {
   const getModelCascade = () => {
     const primary = Config.getGeminiModel() || 'gemini-3.8-flash';
     const fallback = Config.DEFAULTS.GEMINI_FALLBACK_MODEL || 'gemini-3.6-flash';
-    const allModels = [primary, fallback, 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+    const allModels = [
+      primary,
+      fallback,
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.1-flash-lite',
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash'
+    ];
 
     const available = allModels.filter((m) => !exhaustedModels.has(m));
-    const models = available.length > 0 ? available : ['gemini-3.5-flash-lite'];
+    const models = available.length > 0 ? available : ['gemini-3.5-flash-lite', 'gemini-2.5-flash', 'gemini-1.5-flash'];
 
     if (activeWorkingModel && models.includes(activeWorkingModel) && !exhaustedModels.has(activeWorkingModel)) {
       return [activeWorkingModel, ...models.filter((m) => m !== activeWorkingModel)];
@@ -888,9 +897,11 @@ const GeminiService = (() => {
             markModelExhausted(cleanModel);
           }
           console.warn(`News digest HTTP ${statusCode} on ${cleanModel}`);
+          Utilities.sleep(1500);
         }
       } catch (e) {
         console.warn(`Error generating news digest with ${cleanModel}: ${e.message}`);
+        Utilities.sleep(1000);
       }
     }
 

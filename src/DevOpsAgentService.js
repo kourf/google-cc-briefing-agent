@@ -177,21 +177,21 @@ const DevOpsAgentService = (() => {
       statusBadgeColor = '#EF4444'; // Rouge
       statusBgColor = '#FEF2F2';
       statusBorderColor = '#FECACA';
-      engineerNote = 'Bonjour Kouroufia, ici votre ingénieur système. Une anomalie externe nécessite votre attention. Le briefing a été assemblé grâce à nos filets de sécurité, mais un paramètre doit être ajusté.';
+      engineerNote = 'Attention Kouroufia : une anomalie externe nécessite une action manuelle.';
     } else if (hasAutoRepaired) {
       status = 'AUTO_REPAIRED';
-      statusPill = '🟡 Incidents interceptés & 100% auto-réparés';
+      statusPill = '🟡 Incidents interceptés & auto-réparés';
       statusBadgeColor = '#F59E0B'; // Ambre
       statusBgColor = '#FFFBEB';
       statusBorderColor = '#FDE68A';
-      engineerNote = 'Bonjour Kouroufia, ici votre ingénieur système. Lors de ma ronde ce matin, j’ai intercepté des anomalies techniques sur les serveurs externes. J’ai automatiquement appliqué les correctifs nécessaires : votre briefing a été intégralement préservé et livré sans retard.';
+      engineerNote = 'Bonjour Kouroufia, j’ai intercepté et corrigé automatiquement des anomalies sur les serveurs externes : votre briefing a été intégralement préservé.';
     } else {
       status = 'ALL_CLEAR';
-      statusPill = '🟢 Tous les systèmes sont au vert';
+      statusPill = '🟢 Systèmes 100% nominaux';
       statusBadgeColor = '#10B981';
       statusBgColor = '#ECFDF5';
       statusBorderColor = '#A7F3D0';
-      engineerNote = 'Bonjour Kouroufia, ici votre ingénieur système. Ma ronde de maintenance matinale confirme que tout fonctionne comme une horloge : les flux Gmail, Agenda, Météo et Actualités sont nominaux, les quotas sont sous contrôle et la programmation de demain à 06:00:00 est verrouillée. Rien à signaler !';
+      engineerNote = 'Bonjour Kouroufia, tous les systèmes sont au vert et tournent parfaitement ce matin !';
     }
 
     return {

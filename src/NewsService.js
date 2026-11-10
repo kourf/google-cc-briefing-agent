@@ -104,10 +104,19 @@ const NewsService = (() => {
         });
 
         if (fullVideos.length > 0) {
-          // Rechercher la vidéo quotidienne complète qui contient le SOMMAIRE et les LIENS SOURCES
-          const targetEntry =
-            fullVideos.find((e) => e.includes('SOMMAIRE') || e.includes('LIENS POUR EN SAVOIR PLUS')) ||
-            fullVideos[0];
+          // 1. Recherche de la vidéo complète la plus récente d'Hugo (Actus du jour)
+          // fullVideos est ordonné par YouTube du plus récent au plus ancien.
+          // Priorité 1 : La vidéo la plus récente dont le titre contient "actu" ou "actualité"
+          let targetEntry = fullVideos.find((e) => {
+            const tMatch = e.match(/<title>([\s\S]*?)<\/title>/i);
+            const t = tMatch ? tMatch[1].toLowerCase() : '';
+            return t.includes('actu') || t.includes('actualité');
+          });
+
+          // Priorité 2 : Si aucun titre n'a "actu", prendre tout simplement la première vidéo (la plus récente absolue)
+          if (!targetEntry) {
+            targetEntry = fullVideos[0];
+          }
 
           const titleMatch = targetEntry.match(/<title>([\s\S]*?)<\/title>/);
           const linkMatch = targetEntry.match(/<link[^>]*href="([^"]+)"/);
@@ -129,9 +138,12 @@ const NewsService = (() => {
             }
           }
 
-          // Découpage du Sommaire et des Liens sources
-          const sommaireIdx = desc.indexOf('SOMMAIRE');
-          const liensIdx = desc.indexOf('LIENS POUR EN SAVOIR PLUS');
+          // Découpage flexible du Sommaire et des Liens sources (insensible à la casse)
+          const sommaireMatch = desc.match(/(?:sommaire|chapitres?|au programme)/i);
+          const liensMatch = desc.match(/(?:liens?\s*(?:pour\s*en\s*savoir\s*plus)?|sources?)/i);
+
+          const sommaireIdx = sommaireMatch ? sommaireMatch.index : -1;
+          const liensIdx = liensMatch ? liensMatch.index : -1;
 
           let sommaireSection = '';
           let liensSection = '';
@@ -148,24 +160,25 @@ const NewsService = (() => {
             sommaireSection = desc.substring(sommaireIdx);
           } else if (liensIdx > -1) {
             liensSection = desc.substring(liensIdx);
+          } else {
+            sommaireSection = desc;
           }
 
-          // Extraction des segments horodatés du sommaire
+          // Extraction des segments horodatés du sommaire (ex: 00:27 Titre du sujet)
           const parsedSegments = [];
-          if (sommaireSection) {
-            const lines = sommaireSection.split('\n');
-            for (const line of lines) {
-              const m = line.match(/(\d{1,2}:\d{2})\s+([^\r\n]+)/);
-              if (m) {
-                const time = m[1];
-                const segName = cleanXmlText(m[2]).replace(/^-+\s*/, '');
-                const lower = segName.toLowerCase();
-                if (!lower.includes('intro') && !lower.includes('outro') && !lower.includes('conclusion')) {
-                  parsedSegments.push({
-                    timestamp: time,
-                    title: segName
-                  });
-                }
+          const textToParse = sommaireSection || desc;
+          const lines = textToParse.split('\n');
+          for (const line of lines) {
+            const m = line.match(/(\d{1,2}:\d{2})\s+([^\r\n]+)/);
+            if (m) {
+              const time = m[1];
+              const segName = cleanXmlText(m[2]).replace(/^-+\s*/, '');
+              const lower = segName.toLowerCase();
+              if (!lower.includes('intro') && !lower.includes('outro') && !lower.includes('conclusion')) {
+                parsedSegments.push({
+                  timestamp: time,
+                  title: segName
+                });
               }
             }
           }
