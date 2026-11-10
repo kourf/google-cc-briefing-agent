@@ -9,7 +9,33 @@
 
 const GeminiService = (() => {
   /**
+   * Cached active working model for the current execution cycle.
+   * Prevents repeated 503/429 attempts on overloaded models.
+   * @type {string|null}
+   */
+  let activeWorkingModel = null;
+
+  /**
+   * Resolves the prioritized model cascade list.
+   * Puts the currently verified working model first if known.
+   *
+   * @returns {Array<string>} Ordered list of models to try.
+   */
+  const getModelCascade = () => {
+    const primary = Config.getGeminiModel() || 'gemini-3.8-flash';
+    const fallback = Config.DEFAULTS.GEMINI_FALLBACK_MODEL || 'gemini-3.6-flash';
+    const models = [primary, fallback, 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+    if (activeWorkingModel && models.includes(activeWorkingModel)) {
+      return [activeWorkingModel, ...models.filter((m) => m !== activeWorkingModel)];
+    }
+    return [...new Set(models)];
+  };
+
+  /**
    * Generates weather advice based on raw weather data, with retry and model fallback.
+   *
+   * @param {string} rawWeatherContext - Formatted weather metrics.
+   * @returns {string|null} Advice string or null.
    */
   const generateWeatherAdvice = (rawWeatherContext) => {
     if (!rawWeatherContext) return null;
@@ -23,58 +49,59 @@ const GeminiService = (() => {
     }
     if (!apiKey) return null;
 
-    const currentModel = Config.getGeminiModel();
-    const modelCascade = [
-      currentModel,
-      Config.DEFAULTS.GEMINI_FALLBACK_MODEL,
-      'gemini-3.1-flash-lite'
-    ];
+    const modelCascade = getModelCascade();
 
     const systemPrompt = 
       "Tu es un assistant pratique et direct.\n" +
       "Rédige un bulletin météo très court (1 paragraphe en tout) pour la ville détectée, détaillant la situation le matin (9h), l'après-midi (15h) et le soir (21h).\n" +
       "IMPORTANT : Tu DOIS commencer ta réponse en annonçant clairement la ville, par exemple : 'Pour [Ville], ...'\n" +
       "Donne les températures, les risques de pluie et des conseils vestimentaires simples (t-shirt, veste, parapluie).\n" +
+      "N'utilise STRICTEMENT AUCUN emoji, pictogramme ou caractère spécial.\n" +
       "INSPIRE-TOI EXACTEMENT DE CE FORMAT/TON (ne fais pas plus long) :\n" +
       "**Pour Annemasse :** Matin (9h) : Il fera assez frais (10°C), prévoyez une petite veste pour partir. Après-midi (15h) : Le soleil s'installe avec 22°C, vous pourrez largement rester en t-shirt. Soir (21h) : Attention, le ciel se couvre (80% de chance d'averses) et la température redescend à 14°C. Pensez à prendre une veste imperméable ou un parapluie si vous sortez.";
-
-    const requestBody = {
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: `${systemPrompt}\n\nVoici les données brutes :\n${rawWeatherContext}` }]
-        }
-      ],
-      generationConfig: {
-        temperature: 0.3,
-        maxOutputTokens: 256
-      }
-    };
-
-    const options = {
-      method: 'post',
-      contentType: 'application/json',
-      payload: JSON.stringify(requestBody),
-      muteHttpExceptions: true
-    };
 
     for (let model of modelCascade) {
       if (!model) continue;
       const cleanModel = String(model).replace(/^models\//, '').trim();
       const url = `${Config.DEFAULTS.GEMINI_API_BASE_URL}/${cleanModel}:generateContent?key=${apiKey}`;
 
+      const genConfig = {
+        temperature: 0.3,
+        maxOutputTokens: 512
+      };
+      if (!cleanModel.includes('lite')) {
+        genConfig.thinkingConfig = { thinkingBudget: 0 };
+      }
+
+      const requestBody = {
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: `${systemPrompt}\n\nVoici les données brutes :\n${rawWeatherContext}` }]
+          }
+        ],
+        generationConfig: genConfig
+      };
+
+      const options = {
+        method: 'post',
+        contentType: 'application/json',
+        payload: JSON.stringify(requestBody),
+        muteHttpExceptions: true
+      };
+
       try {
         const response = UrlFetchApp.fetch(url, options);
         const statusCode = response.getResponseCode();
         if (statusCode === 200) {
           const json = JSON.parse(response.getContentText());
-          return json.candidates?.[0]?.content?.parts?.[0]?.text || null;
-        } else {
-          console.warn(`Weather advice failed on model ${cleanModel} with HTTP ${statusCode}: ${response.getContentText().substring(0, 150)}`);
-          if (statusCode !== 429 && statusCode !== 503 && statusCode !== 404) {
-             // If it's a 400 error, cascading won't help.
-             break;
+          const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) {
+            activeWorkingModel = cleanModel;
+            return Utils.sanitizeText(text);
           }
+        } else {
+          console.warn(`Weather advice failed on model ${cleanModel} with HTTP ${statusCode}`);
         }
       } catch (e) {
         console.error(`Error generating weather advice with ${cleanModel}: ${e.message}`);
@@ -144,32 +171,28 @@ const GeminiService = (() => {
    * @returns {Object<string, Object>} Map of emailId -> AI analysis object.
    */
   const analyzeBatchWithRetry = (batch, apiKey, batchIndex, totalBatches) => {
-    const currentModel = Config.getGeminiModel();
-    const modelCascade = [
-      currentModel,
-      Config.DEFAULTS.GEMINI_FALLBACK_MODEL,
-      'gemini-3.1-flash-lite'
-    ];
-
+    const modelCascade = getModelCascade();
     let cascadeIndex = 0;
     const maxAttempts = Config.DEFAULTS.MAX_RETRIES || 4;
-    const baseDelayMs = Config.DEFAULTS.INITIAL_BACKOFF_MS || 2500;
+    const baseDelayMs = Config.DEFAULTS.INITIAL_BACKOFF_MS || 1500;
     const transientStatusCodes = [429, 500, 502, 503, 504];
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const modelToTry = modelCascade[cascadeIndex] || Config.DEFAULTS.GEMINI_FALLBACK_MODEL;
+      const modelToTry = modelCascade[cascadeIndex] || modelCascade[0];
       try {
-        return callGeminiApi(batch, apiKey, modelToTry);
+        const result = callGeminiApi(batch, apiKey, modelToTry);
+        activeWorkingModel = modelToTry;
+        return result;
       } catch (error) {
         const statusCode = error.statusCode || 0;
         const sanitizedMsg = Utils.redactSensitive(error.message);
 
-        // Immediate cascade on HTTP 404 (e.g. deprecated model alias)
-        if (statusCode === 404) {
-          console.warn(`Model ${modelToTry} unsupported (HTTP 404). Cascading to next available model.`);
+        // Immediate cascade on HTTP 404, 503 (high demand), 429 (quota), or network timeout (0)
+        if (statusCode === 404 || statusCode === 503 || statusCode === 429 || statusCode === 0) {
+          console.warn(`Model ${modelToTry} unavailable (${sanitizedMsg}). Cascading to next available model.`);
           if (cascadeIndex < modelCascade.length - 1) {
             cascadeIndex++;
-            attempt--; // Do not consume an attempt on model migration
+            attempt--; // Do not consume an attempt when instantly cascading
             continue;
           }
         }
@@ -180,16 +203,14 @@ const GeminiService = (() => {
           break;
         }
 
-        // Transient errors (503 High Demand, 429 Rate Limit) -> Exponential backoff retry
+        // Transient errors with backoff
         if (attempt < maxAttempts) {
           const delay = Utils.calculateBackoffWithJitter(attempt, baseDelayMs);
           console.warn(
             `API temporarily unavailable (${sanitizedMsg}). Attempt ${attempt}/${maxAttempts} — Retrying in ${delay} ms...`
           );
           Utilities.sleep(delay);
-
-          // If 503 persists on current model after 2 attempts, try next cascade model
-          if (attempt >= 2 && cascadeIndex < modelCascade.length - 1) {
+          if (cascadeIndex < modelCascade.length - 1) {
             cascadeIndex++;
           }
         } else {
@@ -321,6 +342,17 @@ const GeminiService = (() => {
       }
     };
 
+    const genConfig = {
+      temperature: Config.DEFAULTS.TEMPERATURE || 0.2,
+      maxOutputTokens: Config.DEFAULTS.MAX_OUTPUT_TOKENS || 8192,
+      responseMimeType: 'application/json',
+      responseSchema
+    };
+
+    if (!cleanModel.includes('lite')) {
+      genConfig.thinkingConfig = { thinkingBudget: 0 };
+    }
+
     const requestBody = {
       contents: [
         {
@@ -332,12 +364,7 @@ const GeminiService = (() => {
           ]
         }
       ],
-      generationConfig: {
-        temperature: Config.DEFAULTS.TEMPERATURE,
-        maxOutputTokens: Config.DEFAULTS.MAX_OUTPUT_TOKENS,
-        responseMimeType: 'application/json',
-        responseSchema
-      }
+      generationConfig: genConfig
     };
 
     const options = {
@@ -593,10 +620,10 @@ const GeminiService = (() => {
   };
 
   /**
-   * Génère le résumé quotidien des actualités (façon HugoDécrypte + Google Actualités) classé par catégorie.
+   * Génère le résumé exécutif des actualités (vidéo quotidienne complète HugoDécrypte + dépêches par catégorie).
    *
    * @param {Object} newsData - Données brutes issues de NewsService.fetchDailyNewsData().
-   * @returns {Object|null} { categories: Array<{name: string, items: Array<{headline: string, summary: string}>}>, hugoEpisode: Object|null }
+   * @returns {Object} { hugoEdition: Object|null, categories: Array<Object>, hugoEpisode: Object|null }
    */
   const generateNewsDigest = (newsData) => {
     if (!newsData || !newsData.rawContext) return null;
@@ -606,38 +633,65 @@ const GeminiService = (() => {
       apiKey = Config.getGeminiApiKey();
     } catch {
       return {
+        hugoEdition: newsData.hugoEpisode ? {
+          videoTitle: Utils.sanitizeText(newsData.hugoEpisode.title),
+          videoUrl: newsData.hugoEpisode.url,
+          publishedDate: Utils.sanitizeText(newsData.hugoEpisode.publishedDate),
+          editionTitle: Utils.sanitizeText(newsData.hugoEpisode.editionTitle),
+          segments: (newsData.hugoEpisode.segments || []).map((seg) => ({
+            timestamp: Utils.sanitizeText(seg.timestamp),
+            segmentTitle: Utils.sanitizeText(seg.title),
+            category: 'Actualités',
+            summary: Utils.sanitizeText(seg.title)
+          }))
+        } : null,
         categories: newsData.fallbackCategories || [],
         hugoEpisode: newsData.hugoEpisode || null
       };
     }
 
-    const currentModel = Config.getGeminiModel();
-    const modelCascade = [
-      currentModel,
-      Config.DEFAULTS.GEMINI_FALLBACK_MODEL,
-      'gemini-3.1-flash-lite'
-    ];
+    const modelCascade = getModelCascade();
 
     const systemPrompt = [
-      'Tu es HugoDécrypte, journaliste spécialisé dans la synthèse d’actualité claire, factuelle, directe et accessible.',
-      'À partir des sources fournies (les Actus du jour d’HugoDécrypte en priorité + les dépêches Google Actualités en complément), rédige le grand récapitulatif des actualités du jour en français.',
-      'RÈGLES STRICTES :',
-      '1. Classe les actualités dans ces 5 catégories exactes :',
-      '   - "🌍 Géopolitique & International"',
-      '   - "📈 Économie, Finance & Entreprises"',
-      '   - "🇫🇷 Politique & Social (France)"',
-      '   - "💻 Tech, IA & Sciences"',
-      '   - "🎭 Culture, Médias & Sport"',
-      '2. Sélectionne 2 à 3 faits marquants par catégorie (les plus importants du jour, en privilégiant ceux traités par HugoDécrypte).',
-      '3. Pour chaque actualité :',
-      '   - "headline" : Un titre court et percutant (3 à 6 mots max, ex: "Soupçons d’espionnage chez Nvidia", "Hausse du SMIC et colère sociale").',
-      '   - "summary" : 1 à 2 phrases claires qui expliquent le fait et son enjeu concret, dans le style direct d’HugoDécrypte.',
-      '4. Réponds UNIQUEMENT avec un objet JSON valide suivant ce schéma.'
+      'Tu es le rédacteur en chef d’un briefing exécutif quotidien de haut niveau.',
+      'À partir des données fournies :',
+      '1. Si une édition vidéo d’HugoDécrypte ("Les Actus du Jour") est présente :',
+      '   - Pour CHAQUE segment de son SOMMAIRE (ignore impérativement Intro et Outro/Conclusion) :',
+      '     - Rédige une synthèse dense, factuelle et fluide de 2 à 3 phrases avec les faits, acteurs clés, chiffres et enjeux sans nécessiter de regarder la vidéo.',
+      '     - Associe le segment à l’une de ces 5 catégories strictes :',
+      '       "Tech, IA & Sciences", "Économie, Finance & Entreprises", "Politique & Société (France)", "Géopolitique & International", "Culture, Médias & Sport".',
+      '2. Remplis les actualités complémentaires par catégorie à partir des dépêches Google Actualités (2 à 3 faits majeurs par catégorie).',
+      '3. RÈGLES FORMELLES STRICTES :',
+      '   - N’utilise STRICTEMENT AUCUN emoji, AUCUN pictogramme, AUCUN caractère de remplacement Unicode (\\uFFFD).',
+      '   - Réponds UNIQUEMENT avec un objet JSON valide correspondant au schéma fourni.'
     ].join('\n');
 
     const responseSchema = {
       type: 'OBJECT',
       properties: {
+        hugoEdition: {
+          type: 'OBJECT',
+          properties: {
+            videoTitle: { type: 'STRING' },
+            videoUrl: { type: 'STRING' },
+            publishedDate: { type: 'STRING' },
+            editionTitle: { type: 'STRING' },
+            segments: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  timestamp: { type: 'STRING' },
+                  segmentTitle: { type: 'STRING' },
+                  category: { type: 'STRING' },
+                  summary: { type: 'STRING' }
+                },
+                required: ['timestamp', 'segmentTitle', 'category', 'summary']
+              }
+            }
+          },
+          required: ['videoTitle', 'videoUrl', 'segments']
+        },
         categories: {
           type: 'ARRAY',
           items: {
@@ -663,36 +717,41 @@ const GeminiService = (() => {
       required: ['categories']
     };
 
-    const requestBody = {
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              text: `${systemPrompt}\n\nSOURCES DU JOUR :\n${newsData.rawContext.substring(0, 9000)}`
-            }
-          ]
-        }
-      ],
-      generationConfig: {
-        temperature: 0.2,
-        maxOutputTokens: 1500,
-        responseMimeType: 'application/json',
-        responseSchema
-      }
-    };
-
-    const options = {
-      method: 'post',
-      contentType: 'application/json',
-      payload: JSON.stringify(requestBody),
-      muteHttpExceptions: true
-    };
-
     for (const model of modelCascade) {
       if (!model) continue;
       const cleanModel = String(model).replace(/^models\//, '').trim();
       const url = `${Config.DEFAULTS.GEMINI_API_BASE_URL}/${cleanModel}:generateContent?key=${apiKey}`;
+
+      const genConfig = {
+        temperature: 0.2,
+        maxOutputTokens: 8192,
+        responseMimeType: 'application/json',
+        responseSchema
+      };
+      if (!cleanModel.includes('lite')) {
+        genConfig.thinkingConfig = { thinkingBudget: 0 };
+      }
+
+      const requestBody = {
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: `${systemPrompt}\n\nSOURCES DU JOUR :\n${newsData.rawContext.substring(0, 10000)}`
+              }
+            ]
+          }
+        ],
+        generationConfig: genConfig
+      };
+
+      const options = {
+        method: 'post',
+        contentType: 'application/json',
+        payload: JSON.stringify(requestBody),
+        muteHttpExceptions: true
+      };
 
       try {
         const response = UrlFetchApp.fetch(url, options);
@@ -701,12 +760,50 @@ const GeminiService = (() => {
           const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text;
           if (rawText) {
             const parsed = JSON.parse(rawText);
-            if (parsed && Array.isArray(parsed.categories) && parsed.categories.length > 0) {
-              return {
-                categories: parsed.categories,
-                hugoEpisode: newsData.hugoEpisode || null
+            activeWorkingModel = cleanModel;
+
+            let hugoEdition = null;
+            if (parsed.hugoEdition && Array.isArray(parsed.hugoEdition.segments) && parsed.hugoEdition.segments.length > 0) {
+              hugoEdition = {
+                videoTitle: Utils.sanitizeText(parsed.hugoEdition.videoTitle || newsData.hugoEpisode?.title || 'Les Actus du Jour'),
+                videoUrl: parsed.hugoEdition.videoUrl || newsData.hugoEpisode?.url || 'https://www.youtube.com/@HugoDecrypte',
+                publishedDate: Utils.sanitizeText(parsed.hugoEdition.publishedDate || newsData.hugoEpisode?.publishedDate || ''),
+                editionTitle: Utils.sanitizeText(parsed.hugoEdition.editionTitle || newsData.hugoEpisode?.editionTitle || 'Les Actus du Jour'),
+                segments: parsed.hugoEdition.segments.map((seg) => ({
+                  timestamp: Utils.sanitizeText(seg.timestamp),
+                  segmentTitle: Utils.sanitizeText(seg.segmentTitle),
+                  category: Utils.sanitizeText(seg.category),
+                  summary: Utils.sanitizeText(seg.summary)
+                }))
+              };
+            } else if (newsData.hugoEpisode) {
+              hugoEdition = {
+                videoTitle: Utils.sanitizeText(newsData.hugoEpisode.title),
+                videoUrl: newsData.hugoEpisode.url,
+                publishedDate: Utils.sanitizeText(newsData.hugoEpisode.publishedDate),
+                editionTitle: Utils.sanitizeText(newsData.hugoEpisode.editionTitle),
+                segments: (newsData.hugoEpisode.segments || []).map((seg) => ({
+                  timestamp: Utils.sanitizeText(seg.timestamp),
+                  segmentTitle: Utils.sanitizeText(seg.title),
+                  category: 'Actualités',
+                  summary: Utils.sanitizeText(seg.title)
+                }))
               };
             }
+
+            const cleanCategories = (parsed.categories || []).map((cat) => ({
+              name: Utils.sanitizeText(cat.name),
+              items: (cat.items || []).map((it) => ({
+                headline: Utils.sanitizeText(it.headline),
+                summary: Utils.sanitizeText(it.summary)
+              }))
+            }));
+
+            return {
+              hugoEdition,
+              categories: cleanCategories.length > 0 ? cleanCategories : newsData.fallbackCategories,
+              hugoEpisode: newsData.hugoEpisode || null
+            };
           }
         } else {
           console.warn(`News digest HTTP ${response.getResponseCode()} on ${cleanModel}`);
@@ -717,6 +814,18 @@ const GeminiService = (() => {
     }
 
     return {
+      hugoEdition: newsData.hugoEpisode ? {
+        videoTitle: Utils.sanitizeText(newsData.hugoEpisode.title),
+        videoUrl: newsData.hugoEpisode.url,
+        publishedDate: Utils.sanitizeText(newsData.hugoEpisode.publishedDate),
+        editionTitle: Utils.sanitizeText(newsData.hugoEpisode.editionTitle),
+        segments: (newsData.hugoEpisode.segments || []).map((seg) => ({
+          timestamp: Utils.sanitizeText(seg.timestamp),
+          segmentTitle: Utils.sanitizeText(seg.title),
+          category: 'Actualités',
+          summary: Utils.sanitizeText(seg.title)
+        }))
+      } : null,
       categories: newsData.fallbackCategories || [],
       hugoEpisode: newsData.hugoEpisode || null
     };

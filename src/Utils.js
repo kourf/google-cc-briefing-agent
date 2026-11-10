@@ -84,35 +84,42 @@ const Utils = (() => {
     if (!str) return '';
     let text = decodeHtmlEntities(String(str));
 
-    // 1. Strip replacement characters and non-printable control characters
-    text = text.replace(/[\uFFFD\uFFFE\uFFFF\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '');
+    // 1. Strip raw lone surrogates and replacement characters first
+    text = text.replace(/[\uD800-\uDFFF\uFFFD\uFFFE\uFFFF]/g, '');
 
-    // 2. Ensure well-formed Unicode (handles isolated surrogates without breaking emojis)
+    // 2. Ensure well-formed Unicode
     if (typeof text.toWellFormed === 'function') {
       text = text.toWellFormed();
     }
 
-    // 3. Standardize German/math gender indicators: (m/w/d) -> (H/F)
+    // 3. Remove all emojis, pictographs, symbols, flags, variation selectors, keycaps, and any re-introduced replacement chars
+    // Note: We avoid \p{Emoji_Component} because it matches standard ASCII digits 0-9.
+    text = text.replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}\p{Emoji_Modifier}\u20E3\uFE00-\uFE0F\u200D\uFFFD\uFFFE\uFFFF]/gu, '');
+
+    // 4. Strip non-printable control characters
+    text = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '');
+
+    // 5. Standardize German/math gender indicators: (m/w/d) -> (H/F)
     text = text.replace(/\(?\$?\(?\s*m\s*\/\s*w\s*\/\s*d\s*\)?\$?\)?/gi, '(H/F)');
     text = text.replace(/\(?\$?\(?\s*h\s*\/\s*f\s*\)?\$?\)?/gi, '(H/F)');
 
-    // 4. Remove LaTeX math delimiters ($...$, \(...\))
+    // 6. Remove LaTeX math delimiters ($...$, \(...\))
     text = text.replace(/\$([^\$]+)\$/g, '$1');
     text = text.replace(/\\\(([^\)]+)\\\)/g, '$1');
     text = text.replace(/\\\[([^\]]+)\\\]/g, '$1');
     text = text.replace(/[\$\\]/g, '');
 
-    // 5. Strip residual HTML tags
+    // 7. Strip residual HTML tags
     text = text.replace(/<\/?[a-z0-9]+(?:\s+[^>]*?)?\/?>/gi, ' ');
 
-    // 6. French typography normalization
+    // 8. French typography normalization
     text = text.replace(/['’]/g, '’');
 
-    // 7. Strip residual unparsed entity remnants
+    // 9. Strip residual unparsed entity remnants
     text = text.replace(/&amp;/gi, '&');
     text = text.replace(/&[a-zA-Z0-9#]+;/g, '');
 
-    // 8. Whitespace compaction
+    // 10. Whitespace compaction
     text = text.replace(/[ \t]+/g, ' ');
     text = text.replace(/\n\s*\n+/g, '\n');
 

@@ -50,7 +50,7 @@ const CalendarService = (() => {
     const confLink = extractConferenceLink(event);
     const location = event.getLocation() || '';
     const titleRaw = event.getTitle() || '(Sans titre)';
-    const title = titleRaw.replace(/[\p{Emoji_Presentation}\uFE0F\u200D]/gu, '').trim();
+    const title = Utils.sanitizeText(titleRaw) || '(Sans titre)';
 
     return {
       id: event.getId(),

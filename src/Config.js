@@ -32,14 +32,14 @@ const Config = (() => {
     TEST_LOOKBACK_HOURS: 24,
     TRIGGER_HOUR: 6,
     TRIGGER_MINUTE: 0,
-    GEMINI_MODEL: 'gemini-3.5-flash-lite',
-    GEMINI_FALLBACK_MODEL: 'gemini-3.5-flash',
+    GEMINI_MODEL: 'gemini-3.8-flash',
+    GEMINI_FALLBACK_MODEL: 'gemini-3.6-flash',
     DEFAULT_GEMINI_API_KEY: 'AQ.Ab8RN6I5W0UV9IYPwcO_fsKetGxHhskNP3sK1NiQusYxsJjJVA',
     GEMINI_API_BASE_URL: 'https://generativelanguage.googleapis.com/v1beta/models',
     BATCH_SIZE: 30,
-    MAX_RETRIES: 2,
-    INITIAL_BACKOFF_MS: 1000,
-    MAX_OUTPUT_TOKENS: 2048,
+    MAX_RETRIES: 4,
+    INITIAL_BACKOFF_MS: 1500,
+    MAX_OUTPUT_TOKENS: 8192,
     TEMPERATURE: 0.2,
     LOCK_TIMEOUT_MS: 30000,
     MAX_BODY_CHARS: 1000,
@@ -60,7 +60,7 @@ const Config = (() => {
       badgeBg: '#F0FDFA',
       badgeColor: '#0F766E',
       badgeBorder: '#99F6E4',
-      icon: '🏢'
+      icon: ''
     },
     {
       email: 'kouroufia15@gmail.com',
@@ -69,7 +69,7 @@ const Config = (() => {
       badgeBg: '#EFF6FF',
       badgeColor: '#1D4ED8',
       badgeBorder: '#BFDBFE',
-      icon: '👤'
+      icon: ''
     },
     {
       email: 'dkouroufia27@outlook.fr',
@@ -78,7 +78,7 @@ const Config = (() => {
       badgeBg: '#F5F3FF',
       badgeColor: '#6D28D9',
       badgeBorder: '#DDD6FE',
-      icon: '✉️'
+      icon: ''
     }
   ]);
 
@@ -183,11 +183,10 @@ const Config = (() => {
     let model = getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, DEFAULTS.GEMINI_MODEL);
     if (
       !model ||
-      model.includes('3.8') ||
-      model.includes('3.6') ||
       model.includes('2.0') ||
       model.includes('1.5') ||
-      model.includes('2.5')
+      model.includes('2.5') ||
+      model.includes('lite')
     ) {
       model = DEFAULTS.GEMINI_MODEL;
       setScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, model);

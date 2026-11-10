@@ -185,18 +185,27 @@ function diagnostiquerBriefing() {
   try {
     const apiKey = Config.getGeminiApiKey();
     const model = Config.getGeminiModel();
-    const url = `${Config.DEFAULTS.GEMINI_API_BASE_URL}/${model}:generateContent?key=${apiKey}`;
+    const cleanModel = String(model).replace(/^models\//, '').trim();
+    const url = `${Config.DEFAULTS.GEMINI_API_BASE_URL}/${cleanModel}:generateContent?key=${apiKey}`;
+    const genConfig = {
+      temperature: 0.2,
+      maxOutputTokens: 64
+    };
+    if (!cleanModel.includes('lite')) {
+      genConfig.thinkingConfig = { thinkingBudget: 0 };
+    }
     const res = UrlFetchApp.fetch(url, {
       method: 'post',
       contentType: 'application/json',
       payload: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: 'Réponds par OK.' }] }]
+        contents: [{ role: 'user', parts: [{ text: 'Réponds par OK.' }] }],
+        generationConfig: genConfig
       }),
       muteHttpExceptions: true
     });
     const code = res.getResponseCode();
     if (code === 200) {
-      logStep('🧠', 'Connexion Gemini API', `Succès HTTP 200 avec modèle ${model}`);
+      logStep('🧠', 'Connexion Gemini API', `Succès HTTP 200 avec modèle ${cleanModel}`);
     } else {
       logStep('⚠️', 'Connexion Gemini API', `HTTP ${code} : ${res.getContentText().substring(0, 150)}`);
     }

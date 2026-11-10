@@ -290,13 +290,13 @@ const BriefingService = (() => {
     ];
 
     if (data.hasZeroEmails) {
-      lines.push('✨ Aucun nouvel e-mail non lu dans votre boîte de réception.', '');
+      lines.push('Aucun nouvel e-mail non lu dans votre boîte de réception.', '');
     }
 
     if (data.urgentItems.length > 0) {
       lines.push('=== ACTIONS PRIORITAIRES ===');
       for (const item of data.urgentItems) {
-        let line = `• ⏱ ${item.timeEstimate} — ${item.actionTitle}`;
+        let line = `• [${item.timeEstimate}] ${item.actionTitle}`;
         if (item.deadline) line += ` (${item.deadline})`;
         if (item.summary) line += ` : ${item.summary}`;
         line += ` — ${item.webUrl}`;
@@ -325,18 +325,30 @@ const BriefingService = (() => {
       lines.push('');
     }
 
-    if (data.newsDigest && data.newsDigest.categories && data.newsDigest.categories.length > 0) {
-      lines.push('=== LES ACTUS DU JOUR (HUGODÉCRYPTE & ACTUALITÉS) ===');
-      for (const cat of data.newsDigest.categories) {
-        lines.push(`• ${cat.name} :`);
-        for (const item of cat.items || []) {
-          lines.push(`  - ${item.headline} : ${item.summary}`);
+    if (data.newsDigest) {
+      if (data.newsDigest.hugoEdition) {
+        const he = data.newsDigest.hugoEdition;
+        lines.push(`=== LES ACTUS DU JOUR (HUGODÉCRYPTE) ===`);
+        lines.push(`Édition vidéo : "${he.videoTitle}" (${he.publishedDate})`);
+        lines.push(`Regarder la vidéo complète sur YouTube : ${he.videoUrl}`);
+        if (Array.isArray(he.segments) && he.segments.length > 0) {
+          for (const seg of he.segments) {
+            lines.push(`• [${seg.timestamp}] ${seg.segmentTitle} (${seg.category}) : ${seg.summary}`);
+          }
         }
+        lines.push('');
       }
-      if (data.newsDigest.hugoEpisode && data.newsDigest.hugoEpisode.url) {
-        lines.push(`  Voir l’édition HugoDécrypte : ${data.newsDigest.hugoEpisode.url}`);
+
+      if (data.newsDigest.categories && data.newsDigest.categories.length > 0) {
+        lines.push('=== COMPLÉMENT D\'ACTUALITÉS PAR CATÉGORIE ===');
+        for (const cat of data.newsDigest.categories) {
+          lines.push(`• ${cat.name} :`);
+          for (const item of cat.items || []) {
+            lines.push(`  - ${item.headline} : ${item.summary}`);
+          }
+        }
+        lines.push('');
       }
-      lines.push('');
     }
 
     if (data.isCalm) {

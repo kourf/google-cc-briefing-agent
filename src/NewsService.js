@@ -1,9 +1,9 @@
 /**
  * Google CC Briefing Agent
- * NewsService.js — Extraction des actualités quotidiennes (HugoDécrypte "Actus du jour" + Google Actualités par catégorie).
+ * NewsService.js — Extraction des actualités quotidiennes (HugoDécrypte "Actus du jour" en vidéo longue + Google Actualités par catégorie).
  *
  * @author Kouroufia
- * @version 2.1.0
+ * @version 2.2.0
  */
 
 const NewsService = (() => {
@@ -11,38 +11,41 @@ const NewsService = (() => {
   const HUGO_ACAST_FEED = 'https://feeds.acast.com/public/shows/61365f9fb4ac8f42e6668a5c';
 
   /**
-   * Catégories officielles disponibles et configurables pour les actualités.
+   * Catégories officielles disponibles (sans aucun emoji pour éviter tout artefact visuel).
    */
   const CATEGORIES = Object.freeze([
     {
       id: 'GEOPOLITIQUE',
-      name: '🌍 Géopolitique & International',
+      name: 'Géopolitique & International',
       rssUrl: 'https://news.google.com/rss/headlines/section/topic/WORLD?hl=fr&gl=FR&ceid=FR:fr'
     },
     {
       id: 'ECONOMIE',
-      name: '📈 Économie, Finance & Entreprises',
+      name: 'Économie, Finance & Entreprises',
       rssUrl: 'https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=fr&gl=FR&ceid=FR:fr'
     },
     {
       id: 'FRANCE_SOCIAL',
-      name: '🇫🇷 Politique & Social (France)',
+      name: 'Politique & Société (France)',
       rssUrl: 'https://news.google.com/rss/headlines/section/topic/NATION?hl=fr&gl=FR&ceid=FR:fr'
     },
     {
       id: 'TECH_IA',
-      name: '💻 Tech, IA & Sciences',
+      name: 'Tech, IA & Sciences',
       rssUrl: 'https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=fr&gl=FR&ceid=FR:fr'
     },
     {
       id: 'CULTURE_SPORT',
-      name: '🎭 Culture, Médias & Sport',
+      name: 'Culture, Médias & Sport',
       rssUrl: 'https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=fr&gl=FR&ceid=FR:fr'
     }
   ]);
 
   /**
-   * Nettoie les entités XML/HTML basiques d'un titre RSS.
+   * Nettoie les entités XML/HTML basiques d'un texte ou titre.
+   *
+   * @param {string} str - Texte brut.
+   * @returns {string} Texte XML nettoyé.
    */
   const cleanXmlText = (str) => {
     if (!str) return '';
@@ -59,11 +62,14 @@ const NewsService = (() => {
   };
 
   /**
-   * Récupère en parallèle les flux HugoDécrypte (YouTube + Podcast) et les flux Google Actualités par catégorie.
-   * Utilise UrlFetchApp.fetchAll pour tout charger simultanément en moins d'une seconde.
+   * Récupère en parallèle les flux HugoDécrypte et les flux Google Actualités par catégorie.
+   * Isole strictement la vraie vidéo quotidienne complète d'HugoDécrypte (exclut tous les Shorts),
+   * analyse le sommaire détaillé et enrichit les liens sources des articles de presse.
+   *
+   * @returns {Object|null} Données structurées pour l'analyse IA.
    */
   const fetchDailyNewsData = () => {
-    const requests = [
+    const initialRequests = [
       { url: HUGO_YOUTUBE_FEED, muteHttpExceptions: true },
       { url: HUGO_ACAST_FEED, muteHttpExceptions: true },
       ...CATEGORIES.map((c) => ({ url: c.rssUrl, muteHttpExceptions: true }))
@@ -71,9 +77,9 @@ const NewsService = (() => {
 
     let responses = [];
     try {
-      responses = UrlFetchApp.fetchAll(requests);
+      responses = UrlFetchApp.fetchAll(initialRequests);
     } catch (e) {
-      console.warn(`NewsService fetchAll warning: ${e.message}`);
+      console.warn(`NewsService fetchAll initial error: ${e.message}`);
       return null;
     }
 
@@ -86,84 +92,169 @@ const NewsService = (() => {
       const ytRes = responses[0];
       if (ytRes && ytRes.getResponseCode() === 200) {
         const ytXml = ytRes.getContentText();
-        const entries = ytXml.split('<entry>').slice(1, 8);
-        const hugoLines = [];
+        const entries = ytXml.split('<entry>').slice(1);
 
-        for (const entry of entries) {
-          const titleMatch = entry.match(/<title>([\s\S]*?)<\/title>/);
-          const linkMatch = entry.match(/<link[^>]*href="([^"]+)"/);
-          const descMatch = entry.match(/<media:description>([\s\S]*?)<\/media:description>/);
+        // Filtrage strict : éliminer catégoriquement les YouTube Shorts (/shorts/ ou #shorts)
+        const fullVideos = entries.filter((e) => {
+          const lMatch = e.match(/<link[^>]*href="([^"]+)"/);
+          const tMatch = e.match(/<title>([\s\S]*?)<\/title>/);
+          const link = lMatch ? lMatch[1] : '';
+          const title = tMatch ? tMatch[1] : '';
+          return !link.includes('/shorts/') && !title.toLowerCase().includes('#shorts');
+        });
+
+        if (fullVideos.length > 0) {
+          // Rechercher la vidéo quotidienne complète qui contient le SOMMAIRE et les LIENS SOURCES
+          const targetEntry =
+            fullVideos.find((e) => e.includes('SOMMAIRE') || e.includes('LIENS POUR EN SAVOIR PLUS')) ||
+            fullVideos[0];
+
+          const titleMatch = targetEntry.match(/<title>([\s\S]*?)<\/title>/);
+          const linkMatch = targetEntry.match(/<link[^>]*href="([^"]+)"/);
+          const pubMatch = targetEntry.match(/<published>([\s\S]*?)<\/published>/);
+          const descMatch = targetEntry.match(/<media:description>([\s\S]*?)<\/media:description>/);
 
           const title = cleanXmlText(titleMatch ? titleMatch[1] : '');
           const link = linkMatch ? linkMatch[1] : 'https://www.youtube.com/@HugoDecrypte';
+          const pubIso = pubMatch ? pubMatch[1] : '';
           const desc = descMatch ? descMatch[1] : '';
 
-          if (title) {
-            hugoLines.push(`- Sujet HugoDécrypte : ${title}`);
+          let publishedDateFormatted = '';
+          if (pubIso) {
+            try {
+              const d = new Date(pubIso);
+              publishedDateFormatted = Utils.formatDateFrench(d);
+            } catch {
+              publishedDateFormatted = 'Date récente';
+            }
           }
 
-          // Si c'est la grande vidéo quotidienne avec SOMMAIRE et LIENS
-          if (desc && (desc.includes('SOMMAIRE') || desc.includes('LIENS POUR EN SAVOIR PLUS'))) {
-            if (!hugoEpisode) {
-              hugoEpisode = {
-                title,
-                url: link
-              };
-            }
-            const liensIdx = desc.indexOf('LIENS POUR EN SAVOIR PLUS');
-            const sommaireIdx = desc.indexOf('SOMMAIRE');
-            const startIdx = liensIdx > -1 ? liensIdx : sommaireIdx;
-            if (startIdx > -1) {
-              const relevantBlock = desc.substring(startIdx, Math.min(desc.length, startIdx + 3000));
-              hugoLines.push(`Détails & Sommaire de l'édition HugoDécrypte :\n${cleanXmlText(relevantBlock)}`);
-            }
-          } else if (!hugoEpisode && title) {
-            hugoEpisode = {
-              title,
-              url: link
-            };
-          }
-        }
+          // Découpage du Sommaire et des Liens sources
+          const sommaireIdx = desc.indexOf('SOMMAIRE');
+          const liensIdx = desc.indexOf('LIENS POUR EN SAVOIR PLUS');
 
-        if (hugoLines.length > 0) {
-          rawContext += `=== SOURCE PRIORITAIRE : HUGODÉCRYPTE (LES ACTUS DU JOUR) ===\n${hugoLines.join('\n')}\n\n`;
+          let sommaireSection = '';
+          let liensSection = '';
+
+          if (sommaireIdx > -1 && liensIdx > -1) {
+            if (liensIdx > sommaireIdx) {
+              sommaireSection = desc.substring(sommaireIdx, liensIdx);
+              liensSection = desc.substring(liensIdx);
+            } else {
+              liensSection = desc.substring(liensIdx, sommaireIdx);
+              sommaireSection = desc.substring(sommaireIdx);
+            }
+          } else if (sommaireIdx > -1) {
+            sommaireSection = desc.substring(sommaireIdx);
+          } else if (liensIdx > -1) {
+            liensSection = desc.substring(liensIdx);
+          }
+
+          // Extraction des segments horodatés du sommaire
+          const parsedSegments = [];
+          if (sommaireSection) {
+            const lines = sommaireSection.split('\n');
+            for (const line of lines) {
+              const m = line.match(/(\d{1,2}:\d{2})\s+([^\r\n]+)/);
+              if (m) {
+                const time = m[1];
+                const segName = cleanXmlText(m[2]).replace(/^-+\s*/, '');
+                const lower = segName.toLowerCase();
+                if (!lower.includes('intro') && !lower.includes('outro') && !lower.includes('conclusion')) {
+                  parsedSegments.push({
+                    timestamp: time,
+                    title: segName
+                  });
+                }
+              }
+            }
+          }
+
+          // Extraction et enrichissement parallèle des articles de presse sources
+          const articleSnippets = [];
+          if (liensSection) {
+            const urlMatches = [...liensSection.matchAll(/https?:\/\/[^\s<>"]+/g)].map((m) => m[0]);
+            const filteredUrls = urlMatches
+              .filter(
+                (u) =>
+                  !u.includes('youtube.com') &&
+                  !u.includes('youtu.be') &&
+                  !u.includes('instagram.com') &&
+                  !u.includes('twitter.com') &&
+                  !u.includes('x.com') &&
+                  !u.includes('tiktok.com') &&
+                  !u.includes('acast.com')
+              )
+              .slice(0, 10);
+
+            if (filteredUrls.length > 0) {
+              try {
+                const articleRequests = filteredUrls.map((u) => ({
+                  url: u,
+                  muteHttpExceptions: true,
+                  headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+                }));
+                const articleResponses = UrlFetchApp.fetchAll(articleRequests);
+
+                for (let k = 0; k < articleResponses.length; k++) {
+                  const aRes = articleResponses[k];
+                  const aUrl = filteredUrls[k];
+                  if (aRes && aRes.getResponseCode() === 200) {
+                    const html = aRes.getContentText();
+                    const tMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+                    const dMatch =
+                      html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i) ||
+                      html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
+
+                    const aTitle = cleanXmlText(tMatch ? tMatch[1] : '');
+                    const aDesc = cleanXmlText(dMatch ? dMatch[1] : '');
+                    if (aTitle || aDesc) {
+                      articleSnippets.push(`- Source (${aUrl}) : Titre="${aTitle}" | Résumé="${aDesc}"`);
+                    }
+                  }
+                }
+              } catch (enrichErr) {
+                console.warn(`Article enrichment warning: ${enrichErr.message}`);
+              }
+            }
+          }
+
+          hugoEpisode = {
+            title,
+            url: link,
+            publishedDate: publishedDateFormatted,
+            publishedIso: pubIso,
+            editionTitle: `Les Actus du Jour du ${publishedDateFormatted}`,
+            segments: parsedSegments
+          };
+
+          rawContext += `=== SOURCE PRIORITAIRE : HUGODÉCRYPTE (VIDÉO QUOTIDIENNE DU ${publishedDateFormatted}) ===\n`;
+          rawContext += `Titre de l'édition : "${title}"\n`;
+          rawContext += `Lien vidéo complète (jamais de short) : ${link}\n`;
+          rawContext += `Date de publication : ${publishedDateFormatted} (${pubIso})\n\n`;
+
+          if (parsedSegments.length > 0) {
+            rawContext += `SOMMAIRE DÉTAILLÉ DE LA VIDÉO :\n`;
+            for (const seg of parsedSegments) {
+              rawContext += `[${seg.timestamp}] ${seg.title}\n`;
+            }
+            rawContext += `\n`;
+          }
+
+          if (articleSnippets.length > 0) {
+            rawContext += `DÉTAILS ET FAITS CLÉS ISSUS DES ARTICLES SOURCES DE LA VIDÉO :\n`;
+            rawContext += `${articleSnippets.join('\n')}\n\n`;
+          } else if (liensSection) {
+            rawContext += `LIENS SOURCES :\n${cleanXmlText(liensSection.substring(0, 1500))}\n\n`;
+          }
         }
       }
     } catch (e) {
       console.warn(`Erreur lecture flux YouTube HugoDécrypte : ${e.message}`);
     }
 
-    // 2. Analyse du flux Podcast Acast HugoDécrypte
-    try {
-      const acastRes = responses[1];
-      if (acastRes && acastRes.getResponseCode() === 200) {
-        const acastXml = acastRes.getContentText();
-        const items = acastXml.split('<item>').slice(1, 5);
-        const podcastTitles = [];
-
-        for (const item of items) {
-          const tMatch = item.match(/<title>([\s\S]*?)<\/title>/);
-          const lMatch = item.match(/<link>([\s\S]*?)<\/link>/);
-          const t = cleanXmlText(tMatch ? tMatch[1] : '');
-          const l = cleanXmlText(lMatch ? lMatch[1] : '');
-          if (t) {
-            podcastTitles.push(`- Épisode Podcast HugoDécrypte : ${t}`);
-            if (!hugoEpisode && l) {
-              hugoEpisode = { title: t, url: l };
-            }
-          }
-        }
-
-        if (podcastTitles.length > 0) {
-          rawContext += `=== PODCAST HUGODÉCRYPTE ===\n${podcastTitles.join('\n')}\n\n`;
-        }
-      }
-    } catch (e) {
-      console.warn(`Erreur lecture flux Acast HugoDécrypte : ${e.message}`);
-    }
-
-    // 3. Analyse des flux Google Actualités par catégorie (Complément temps réel & Secours)
-    rawContext += `=== ACTUALITÉS EN TEMPS RÉEL PAR CATÉGORIE (GOOGLE ACTUALITÉS) ===\n`;
+    // 2. Analyse des flux Google Actualités par catégorie (Complément d'information)
+    rawContext += `=== COMPLÉMENT D'ACTUALITÉS PAR CATÉGORIE (GOOGLE ACTUALITÉS FRANCE) ===\n`;
 
     for (let i = 0; i < CATEGORIES.length; i++) {
       const cat = CATEGORIES[i];
@@ -206,8 +297,8 @@ const NewsService = (() => {
             const source = parts.length > 1 ? parts.pop().trim() : 'Actualités';
             const headline = parts.join(' - ').trim();
             return {
-              headline: source,
-              summary: headline,
+              headline: Utils.sanitizeText(source),
+              summary: Utils.sanitizeText(headline),
               url: it.url
             };
           })
