@@ -185,7 +185,7 @@ const NewsService = (() => {
                   !u.includes('tiktok.com') &&
                   !u.includes('acast.com')
               )
-              .slice(0, 10);
+              .slice(0, 3);
 
             if (filteredUrls.length > 0) {
               try {

@@ -16,16 +16,38 @@ const GeminiService = (() => {
   let activeWorkingModel = null;
 
   /**
+   * Set of models that have hit daily quota limits (HTTP 429).
+   * Prevents repeated quota failure spam during the current run.
+   * @type {Set<string>}
+   */
+  const exhaustedModels = new Set();
+
+  /**
+   * Marks a model as quota-exhausted for the remainder of this session.
+   * @param {string} modelName - Model name.
+   */
+  const markModelExhausted = (modelName) => {
+    const clean = String(modelName).replace(/^models\//, '').trim();
+    exhaustedModels.add(clean);
+    console.warn(`Modèle ${clean} marqué comme quota-épuisé pour cette session.`);
+  };
+
+  /**
    * Resolves the prioritized model cascade list.
    * Puts the currently verified working model first if known.
+   * Automatically filters out any models that have hit daily quota limits.
    *
    * @returns {Array<string>} Ordered list of models to try.
    */
   const getModelCascade = () => {
     const primary = Config.getGeminiModel() || 'gemini-3.8-flash';
     const fallback = Config.DEFAULTS.GEMINI_FALLBACK_MODEL || 'gemini-3.6-flash';
-    const models = [primary, fallback, 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
-    if (activeWorkingModel && models.includes(activeWorkingModel)) {
+    const allModels = [primary, fallback, 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+
+    const available = allModels.filter((m) => !exhaustedModels.has(m));
+    const models = available.length > 0 ? available : ['gemini-3.5-flash-lite'];
+
+    if (activeWorkingModel && models.includes(activeWorkingModel) && !exhaustedModels.has(activeWorkingModel)) {
       return [activeWorkingModel, ...models.filter((m) => m !== activeWorkingModel)];
     }
     return [...new Set(models)];
@@ -101,6 +123,9 @@ const GeminiService = (() => {
             return Utils.sanitizeText(text);
           }
         } else {
+          if (statusCode === 429) {
+            markModelExhausted(cleanModel);
+          }
           console.warn(`Weather advice failed on model ${cleanModel} with HTTP ${statusCode}`);
         }
       } catch (e) {
@@ -189,6 +214,9 @@ const GeminiService = (() => {
 
         // Immediate cascade on HTTP 404, 503 (high demand), 429 (quota), or network timeout (0)
         if (statusCode === 404 || statusCode === 503 || statusCode === 429 || statusCode === 0) {
+          if (statusCode === 429 || (error.message && error.message.includes('quota'))) {
+            markModelExhausted(modelToTry);
+          }
           console.warn(`Model ${modelToTry} unavailable (${sanitizedMsg}). Cascading to next available model.`);
           if (cascadeIndex < modelCascade.length - 1) {
             cascadeIndex++;
@@ -653,68 +681,36 @@ const GeminiService = (() => {
     const modelCascade = getModelCascade();
 
     const systemPrompt = [
-      'Tu es le rédacteur en chef d’un briefing exécutif quotidien de haut niveau.',
-      'À partir des données fournies :',
-      '1. Si une édition vidéo d’HugoDécrypte ("Les Actus du Jour") est présente :',
-      '   - Pour CHAQUE segment de son SOMMAIRE (ignore impérativement Intro et Outro/Conclusion) :',
-      '     - Rédige une synthèse dense, factuelle et fluide de 2 à 3 phrases avec les faits, acteurs clés, chiffres et enjeux sans nécessiter de regarder la vidéo.',
-      '     - Associe le segment à l’une de ces 5 catégories strictes :',
-      '       "Tech, IA & Sciences", "Économie, Finance & Entreprises", "Politique & Société (France)", "Géopolitique & International", "Culture, Médias & Sport".',
-      '2. Remplis les actualités complémentaires par catégorie à partir des dépêches Google Actualités (2 à 3 faits majeurs par catégorie).',
-      '3. RÈGLES FORMELLES STRICTES :',
-      '   - N’utilise STRICTEMENT AUCUN emoji, AUCUN pictogramme, AUCUN caractère de remplacement Unicode (\\uFFFD).',
-      '   - Réponds UNIQUEMENT avec un objet JSON valide correspondant au schéma fourni.'
+      'Tu es le rédacteur en chef d’un briefing exécutif quotidien.',
+      'Rédige une synthèse fluide, dense et factuelle de la vidéo quotidienne "Les Actus du Jour" d’HugoDécrypte.',
+      'CONSIGNES STRICTES :',
+      '1. Pour CHAQUE segment du SOMMAIRE fourni (ignore impérativement Intro et Outro/Conclusion) :',
+      '   - "timestamp" : le minutage (ex: "00:27").',
+      '   - "segmentTitle" : titre clair du sujet.',
+      '   - "category" : choisis parmi ["Tech, IA & Sciences", "Économie, Finance & Entreprises", "Politique & Société (France)", "Géopolitique & International", "Culture, Médias & Sport"].',
+      '   - "summary" : 2 phrases fluides avec les faits clés, chiffres et enjeux.',
+      '2. N’utilise STRICTEMENT AUCUN emoji ni symbole graphique.',
+      '3. Réponds UNIQUEMENT en JSON avec la structure {"segments": [...]}'
     ].join('\n');
 
     const responseSchema = {
       type: 'OBJECT',
       properties: {
-        hugoEdition: {
-          type: 'OBJECT',
-          properties: {
-            videoTitle: { type: 'STRING' },
-            videoUrl: { type: 'STRING' },
-            publishedDate: { type: 'STRING' },
-            editionTitle: { type: 'STRING' },
-            segments: {
-              type: 'ARRAY',
-              items: {
-                type: 'OBJECT',
-                properties: {
-                  timestamp: { type: 'STRING' },
-                  segmentTitle: { type: 'STRING' },
-                  category: { type: 'STRING' },
-                  summary: { type: 'STRING' }
-                },
-                required: ['timestamp', 'segmentTitle', 'category', 'summary']
-              }
-            }
-          },
-          required: ['videoTitle', 'videoUrl', 'segments']
-        },
-        categories: {
+        segments: {
           type: 'ARRAY',
           items: {
             type: 'OBJECT',
             properties: {
-              name: { type: 'STRING' },
-              items: {
-                type: 'ARRAY',
-                items: {
-                  type: 'OBJECT',
-                  properties: {
-                    headline: { type: 'STRING' },
-                    summary: { type: 'STRING' }
-                  },
-                  required: ['headline', 'summary']
-                }
-              }
+              timestamp: { type: 'STRING' },
+              segmentTitle: { type: 'STRING' },
+              category: { type: 'STRING' },
+              summary: { type: 'STRING' }
             },
-            required: ['name', 'items']
+            required: ['timestamp', 'segmentTitle', 'category', 'summary']
           }
         }
       },
-      required: ['categories']
+      required: ['segments']
     };
 
     for (const model of modelCascade) {
@@ -724,7 +720,7 @@ const GeminiService = (() => {
 
       const genConfig = {
         temperature: 0.2,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 2048,
         responseMimeType: 'application/json',
         responseSchema
       };
@@ -738,7 +734,7 @@ const GeminiService = (() => {
             role: 'user',
             parts: [
               {
-                text: `${systemPrompt}\n\nSOURCES DU JOUR :\n${newsData.rawContext.substring(0, 10000)}`
+                text: `${systemPrompt}\n\nSOURCES DU JOUR :\n${newsData.rawContext.substring(0, 4000)}`
               }
             ]
           }
@@ -755,64 +751,86 @@ const GeminiService = (() => {
 
       try {
         const response = UrlFetchApp.fetch(url, options);
-        if (response.getResponseCode() === 200) {
+        const statusCode = response.getResponseCode();
+
+        if (statusCode === 200) {
           const json = JSON.parse(response.getContentText());
           const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text;
           if (rawText) {
             const parsed = JSON.parse(rawText);
             activeWorkingModel = cleanModel;
 
-            let hugoEdition = null;
-            if (parsed.hugoEdition && Array.isArray(parsed.hugoEdition.segments) && parsed.hugoEdition.segments.length > 0) {
-              hugoEdition = {
-                videoTitle: Utils.sanitizeText(parsed.hugoEdition.videoTitle || newsData.hugoEpisode?.title || 'Les Actus du Jour'),
-                videoUrl: parsed.hugoEdition.videoUrl || newsData.hugoEpisode?.url || 'https://www.youtube.com/@HugoDecrypte',
-                publishedDate: Utils.sanitizeText(parsed.hugoEdition.publishedDate || newsData.hugoEpisode?.publishedDate || ''),
-                editionTitle: Utils.sanitizeText(parsed.hugoEdition.editionTitle || newsData.hugoEpisode?.editionTitle || 'Les Actus du Jour'),
-                segments: parsed.hugoEdition.segments.map((seg) => ({
-                  timestamp: Utils.sanitizeText(seg.timestamp),
-                  segmentTitle: Utils.sanitizeText(seg.segmentTitle),
-                  category: Utils.sanitizeText(seg.category),
-                  summary: Utils.sanitizeText(seg.summary)
-                }))
-              };
-            } else if (newsData.hugoEpisode) {
-              hugoEdition = {
-                videoTitle: Utils.sanitizeText(newsData.hugoEpisode.title),
-                videoUrl: newsData.hugoEpisode.url,
-                publishedDate: Utils.sanitizeText(newsData.hugoEpisode.publishedDate),
-                editionTitle: Utils.sanitizeText(newsData.hugoEpisode.editionTitle),
-                segments: (newsData.hugoEpisode.segments || []).map((seg) => ({
-                  timestamp: Utils.sanitizeText(seg.timestamp),
-                  segmentTitle: Utils.sanitizeText(seg.title),
-                  category: 'Actualités',
-                  summary: Utils.sanitizeText(seg.title)
-                }))
-              };
+            const segments = Array.isArray(parsed.segments) ? parsed.segments : [];
+            const sanitizedSegments = segments.map((seg) => ({
+              timestamp: Utils.sanitizeText(seg.timestamp),
+              segmentTitle: Utils.sanitizeText(seg.segmentTitle),
+              category: Utils.sanitizeText(seg.category),
+              summary: Utils.sanitizeText(seg.summary)
+            }));
+
+            // Structure Hugo Edition
+            const hugoEdition = newsData.hugoEpisode ? {
+              videoTitle: Utils.sanitizeText(newsData.hugoEpisode.title),
+              videoUrl: newsData.hugoEpisode.url,
+              publishedDate: Utils.sanitizeText(newsData.hugoEpisode.publishedDate),
+              editionTitle: Utils.sanitizeText(newsData.hugoEpisode.editionTitle),
+              segments: sanitizedSegments
+            } : null;
+
+            // Group segments into categories
+            const categoryBuckets = {};
+            for (const cat of NewsService.CATEGORIES) {
+              categoryBuckets[cat.name] = [];
             }
 
-            const cleanCategories = (parsed.categories || []).map((cat) => ({
-              name: Utils.sanitizeText(cat.name),
-              items: (cat.items || []).map((it) => ({
-                headline: Utils.sanitizeText(it.headline),
-                summary: Utils.sanitizeText(it.summary)
-              }))
-            }));
+            for (const seg of sanitizedSegments) {
+              const matchedCat = Object.keys(categoryBuckets).find((k) => k.toLowerCase() === seg.category.toLowerCase()) || 'Actualités & Société';
+              if (!categoryBuckets[matchedCat]) {
+                categoryBuckets[matchedCat] = [];
+              }
+              categoryBuckets[matchedCat].push({
+                headline: `[${seg.timestamp}] ${seg.segmentTitle}`,
+                summary: seg.summary
+              });
+            }
+
+            // Fill categories that have no video segments with top Google News headlines
+            const finalCategories = [];
+            for (const [catName, items] of Object.entries(categoryBuckets)) {
+              if (items.length > 0) {
+                finalCategories.push({
+                  name: catName,
+                  items
+                });
+              } else {
+                const fb = (newsData.fallbackCategories || []).find((f) => f.name === catName);
+                if (fb && fb.items && fb.items.length > 0) {
+                  finalCategories.push({
+                    name: catName,
+                    items: fb.items.slice(0, 2)
+                  });
+                }
+              }
+            }
 
             return {
               hugoEdition,
-              categories: cleanCategories.length > 0 ? cleanCategories : newsData.fallbackCategories,
+              categories: finalCategories,
               hugoEpisode: newsData.hugoEpisode || null
             };
           }
         } else {
-          console.warn(`News digest HTTP ${response.getResponseCode()} on ${cleanModel}`);
+          if (statusCode === 429) {
+            markModelExhausted(cleanModel);
+          }
+          console.warn(`News digest HTTP ${statusCode} on ${cleanModel}`);
         }
       } catch (e) {
         console.warn(`Error generating news digest with ${cleanModel}: ${e.message}`);
       }
     }
 
+    // Deterministic fallback
     return {
       hugoEdition: newsData.hugoEpisode ? {
         videoTitle: Utils.sanitizeText(newsData.hugoEpisode.title),
