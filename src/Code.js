@@ -15,6 +15,16 @@
 function runDailyBriefing() {
   console.log('=== Exécution du Briefing Quotidien (Production 06:00) ===');
 
+  // Ronde d’inspection et auto-réparation matinale de l'agent salarié DevOps
+  try {
+    if (typeof DevOpsAgentService !== 'undefined') {
+      DevOpsAgentService.resetSession();
+      DevOpsAgentService.inspectAndSelfHeal();
+    }
+  } catch (agentErr) {
+    console.warn(`DevOpsAgentService pre-flight warning: ${agentErr.message}`);
+  }
+
   let lockAcquired = false;
 
   try {
@@ -86,6 +96,16 @@ function runDailyBriefing() {
  */
 function runBriefingNow() {
   console.log('=== Envoi immédiat du Briefing Quotidien ===');
+
+  // Ronde d’inspection et auto-réparation de l'agent salarié DevOps
+  try {
+    if (typeof DevOpsAgentService !== 'undefined') {
+      DevOpsAgentService.resetSession();
+      DevOpsAgentService.inspectAndSelfHeal();
+    }
+  } catch (agentErr) {
+    console.warn(`DevOpsAgentService pre-flight warning: ${agentErr.message}`);
+  }
 
   const lookbackHours = Config.getTestLookbackHours();
   const lookbackSec = Math.floor(Date.now() / 1000) - lookbackHours * 3600;

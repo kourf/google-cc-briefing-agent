@@ -30,6 +30,18 @@ const GeminiService = (() => {
     const clean = String(modelName).replace(/^models\//, '').trim();
     exhaustedModels.add(clean);
     console.warn(`Modèle ${clean} marqué comme quota-épuisé pour cette session.`);
+
+    try {
+      if (typeof DevOpsAgentService !== 'undefined') {
+        DevOpsAgentService.recordIncident({
+          component: 'Quotas API Gemini',
+          severity: 'WARNING',
+          resolved: true,
+          message: `Le modèle ${clean} a atteint son quota journalier Free Tier.`,
+          solution: 'Mise en quarantaine et bascule automatique sur les modèles relais.'
+        });
+      }
+    } catch {}
   };
 
   /**
@@ -218,6 +230,22 @@ const GeminiService = (() => {
             markModelExhausted(modelToTry);
           }
           console.warn(`Model ${modelToTry} unavailable (${sanitizedMsg}). Cascading to next available model.`);
+
+          try {
+            if (typeof DevOpsAgentService !== 'undefined') {
+              const nextM = modelCascade[cascadeIndex + 1] || 'modèle relais';
+              DevOpsAgentService.recordIncident({
+                component: 'Passerelle IA Gemini',
+                severity: 'WARNING',
+                resolved: true,
+                message: statusCode === 503
+                  ? `Serveurs Google saturés sur ${modelToTry} (HTTP 503 : pic de charge temporaire).`
+                  : `Indisponibilité temporaire (HTTP ${statusCode}) sur ${modelToTry}.`,
+                solution: `Bascule automatique instantanée sur ${nextM} sans interruption.`
+              });
+            }
+          } catch {}
+
           if (cascadeIndex < modelCascade.length - 1) {
             cascadeIndex++;
             attempt--; // Do not consume an attempt when instantly cascading

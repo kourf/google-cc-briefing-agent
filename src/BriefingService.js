@@ -218,6 +218,16 @@ const BriefingService = (() => {
       }
     }
 
+    // Génération du rapport officiel de maintenance par l'agent salarié DevOps
+    let devOpsReport = null;
+    try {
+      if (typeof DevOpsAgentService !== 'undefined') {
+        devOpsReport = DevOpsAgentService.generateEngineerReport();
+      }
+    } catch (e) {
+      console.warn(`DevOpsAgentService report generation warning: ${e.message}`);
+    }
+
     const templateData = {
       dateTitle: formattedDate,
       greeting: temporalGreeting,
@@ -236,7 +246,8 @@ const BriefingService = (() => {
       hasZeroEmails: totalEmails === 0,
       isCalm: totalEmails === 0 && todayEventsCount === 0,
       weatherAdviceHtml,
-      newsDigest
+      newsDigest,
+      devOpsReport
     };
 
     // Executive email subject
@@ -353,6 +364,19 @@ const BriefingService = (() => {
 
     if (data.isCalm) {
       lines.push('Tout est calme aujourd’hui. Aucun e-mail prioritaire ni rendez-vous à signaler.', '');
+    }
+
+    if (data.devOpsReport) {
+      lines.push('=== RAPPORT DE L\'INGÉNIEUR DEVOPS ===');
+      lines.push(`${data.devOpsReport.employeeName} (${data.devOpsReport.statusPill})`);
+      lines.push(`Horaires : ${data.devOpsReport.shiftHours}`);
+      lines.push(data.devOpsReport.engineerNote);
+      if (data.devOpsReport.hasIncidents && data.devOpsReport.status !== 'ALL_CLEAR') {
+        for (const inc of data.devOpsReport.incidents) {
+          lines.push(`• [${inc.component}] ${inc.message} -> ${inc.solution}`);
+        }
+      }
+      lines.push('');
     }
 
     lines.push(data.signoff, `Mon Briefing Quotidien • ${data.recipientEmail}`);
