@@ -36,65 +36,50 @@ const GmailService = (() => {
       const messages = threadsMessages[t] || [];
 
       for (const msg of messages) {
-        const msgId = msg.getId();
-        if (seenMessageIds.has(msgId)) continue;
+        if (!msg.isUnread()) continue;
 
         const msgDate = msg.getDate();
         const msgTimestampSec = Math.floor(msgDate.getTime() / 1000);
+        if (msgTimestampSec < afterTimestampSec) continue;
 
-        if (msg.isUnread() && msgTimestampSec >= afterTimestampSec) {
-          const fromRaw = msg.getFrom() || '';
-          const subjectRaw = msg.getSubject() || '(Sans objet)';
+        const msgId = msg.getId();
+        if (seenMessageIds.has(msgId)) continue;
 
-          // Safety check against residual calendar notifications
-          if (
-            fromRaw.includes('calendar-notification@google.com') ||
-            subjectRaw.toLowerCase().includes('agenda quotidien')
-          ) {
-            continue;
-          }
+        const fromRaw = msg.getFrom() || '';
+        const subjectRaw = msg.getSubject() || '(Sans objet)';
 
-          seenMessageIds.add(msgId);
-
-          let plainBody = '';
-          try {
-            plainBody = msg.getPlainBody() || '';
-          } catch {}
-
-          let rawHtml = '';
-          if (!plainBody || plainBody.trim().length < 25) {
-            try {
-              rawHtml = msg.getBody() || '';
-            } catch {}
-          }
-
-          const cleanedBody = Utils.cleanEmailBody(plainBody, rawHtml);
-          const cleanSubject = Utils.sanitizeText(subjectRaw);
-          const senderName = Utils.cleanSenderName(fromRaw);
-
-          rawMessages.push({
-            id: msgId,
-            threadId,
-            from: fromRaw,
-            senderName,
-            subject: cleanSubject,
-            date: msgDate,
-            timestampSec: msgTimestampSec,
-            timeFormatted: Utils.formatTime(msgDate),
-            dateFormatted: Utils.formatDateFrench(msgDate),
-            body: cleanedBody,
-            hasAttachments: false,
-            attachmentsCount: 0,
-            webUrl: Utils.buildGmailUrl(threadId)
-          });
+        // Safety check against residual calendar notifications
+        if (
+          fromRaw.includes('calendar-notification@google.com') ||
+          subjectRaw.toLowerCase().includes('agenda quotidien')
+        ) {
+          continue;
         }
+
+        seenMessageIds.add(msgId);
+
+        rawMessages.push({
+          id: msgId,
+          threadId,
+          from: fromRaw,
+          senderName: Utils.cleanSenderName(fromRaw),
+          subject: Utils.sanitizeText(subjectRaw),
+          date: msgDate,
+          timestampSec: msgTimestampSec,
+          timeFormatted: Utils.formatTime(msgDate),
+          dateFormatted: Utils.formatDateFrench(msgDate),
+          hasAttachments: false,
+          attachmentsCount: 0,
+          webUrl: Utils.buildGmailUrl(threadId),
+          msgObj: msg
+        });
       }
     }
 
-    // 3. Chronological sorting (most recent first)
+    // 3. Chronological sorting (most recent first) before deduplication so latest email survives
     rawMessages.sort((a, b) => b.timestampSec - a.timestampSec);
 
-    // 4. Strict pre-LLM campaign/promotional deduplication
+    // 4. Strict pre-LLM campaign/promotional deduplication (before heavy getPlainBody RPCs)
     const deduplicated = [];
     const seenIndexByKey = new Map();
 
@@ -131,6 +116,25 @@ const GmailService = (() => {
         seenIndexByKey.set(dedupKey, deduplicated.length);
         deduplicated.push(item);
       }
+    }
+
+    // 5. Extract email bodies ONLY for surviving unique messages (halves slow RPC body calls)
+    for (const item of deduplicated) {
+      const msg = item.msgObj;
+      let plainBody = '';
+      try {
+        plainBody = msg.getPlainBody() || '';
+      } catch {}
+
+      let rawHtml = '';
+      if (!plainBody || plainBody.trim().length < 25) {
+        try {
+          rawHtml = msg.getBody() || '';
+        } catch {}
+      }
+
+      item.body = Utils.cleanEmailBody(plainBody, rawHtml);
+      delete item.msgObj;
     }
 
     console.log(

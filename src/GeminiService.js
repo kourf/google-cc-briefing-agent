@@ -765,8 +765,18 @@ const GeminiService = (() => {
       '   - Phrase 2 : Pourquoi / ce qu’on reproche concrètement à l’origine (en mots simples).',
       '   - Phrase 3 : Conséquence, blocage, réaction ou suite immédiate.',
       '5. DEUX BLOCS ATTENDUS DANS LE JSON :',
-      '   - "segments" : pour CHAQUE segment du sommaire d’HugoDécrypte (ignore Intro et Outro). Précise le minutage exact ("timestamp"), un titre clair ("segmentTitle"), une catégorie strictement choisie parmi ["Tech, IA & Sciences", "Économie, Finance & Entreprises", "Politique & Société (France)", "Géopolitique & International", "Culture, Médias & Sport"], et le résumé factuel complet ("summary").',
-      '   - "categories" : pour chacune des 5 rubriques ["Géopolitique & International", "Économie, Finance & Entreprises", "Politique & Société (France)", "Tech, IA & Sciences", "Culture, Médias & Sport"], sélectionne une actualité marquante DIFFÉRENTE des sujets déjà résumés dans HugoDécrypte (sauf si aucune autre dépêche n’existe dans la rubrique), indique "categoryName", "headline", et "summary" avec la même densité factuelle et vulgarisation.',
+      '   - "segments" : pour CHAQUE segment du sommaire d’HugoDécrypte (ignore Intro et Outro). Précise le minutage exact ("timestamp"), un titre clair ("segmentTitle"), une catégorie strictement choisie parmi ["Politique & Géopolitique", "Économie & Entreprises", "Social & Sociétal", "Tech, IA & Sciences", "Environnement & Écologie", "Justice & Lois", "Culture & Savoir", "Sport", "Faits divers"] (n’utilise JAMAIS le mot vague "Médias"), et le résumé factuel complet ("summary").',
+      '   - "categories" : génère UN objet par rubrique dans CET ORDRE EXACT (PESTEL + Culture + Sport + Faits divers) en utilisant UNIQUEMENT les sources Google Actualités correspondantes fournies dans la section [COMPLÉMENT D’ACTUALITÉS] (et sans répéter les sujets déjà résumés dans HugoDécrypte, sauf absence d’autre dépêche) :',
+      '     1) "P — Politique & Géopolitique" (élections, diplomatie, conflits, gouvernement, parlement — laisse les sujets climat/COP pour la rubrique Environnement)',
+      '     2) "E — Économie, Finance & Entreprises" (entreprises, marchés, impôts, budget, énergie/carburant)',
+      '     3) "S — Social & Sociétal" (pouvoir d’achat, logement, grèves avec leurs revendications précises, éducation, santé publique)',
+      '     4) "T — Technologie, IA & Innovation" (intelligence artificielle, cybersécurité, high-tech, puces)',
+      '     5) "E — Environnement & Écologie" (climat, COP, transition écologique, biodiversité)',
+      '     6) "L — Légal : Justice, Lois & Procès" (procès, décisions judiciaires majeures, projets de loi, condamnations)',
+      '     7) "Culture & Savoir (Cinéma, Livres, Histoire & Sciences)" (découverte scientifique ou historique passionnante, film, livre ou fait culturel pour dormir moins bête — parle de faits concrets, jamais du terme abstrait "médias")',
+      '     8) "Sport" (résultat, transfert, blessure ou événement majeur du sport)',
+      '     9) "Faits divers (Délits, Crimes & Accidents marquants)" (délit, crime, enquête, accident grave ou décès marquant issu des sources Google Actualités)',
+      '     Pour chaque rubrique : "categoryName", "headline" (titre précis), "summary" (2 à 3 phrases claires, niveau 15 ans, zéro formule vague, rôles des personnes et entreprises expliqués). Ne mélange JAMAIS les détails (lieux, dates ou affaires) de deux dépêches distinctes dans un même résumé.',
       '6. ZÉRO ÉMOJI : n’utilise strictement aucun emoji ni symbole dans le texte généré.',
       '7. Réponds UNIQUEMENT en JSON avec la structure spécifiée dans le schéma.'
     ].join('\n');
@@ -810,7 +820,7 @@ const GeminiService = (() => {
 
       const genConfig = {
         temperature: 0.2,
-        maxOutputTokens: 6144,
+        maxOutputTokens: 8192,
         responseMimeType: 'application/json',
         responseSchema
       };
@@ -874,50 +884,64 @@ const GeminiService = (() => {
               segments: sanitizedSegments.length > 0 ? sanitizedSegments : fallbackSegments
             } : null;
 
-            // Catégories complémentaires contextualisées et vulgarisées
-            let finalCategories = [];
+            // Catégories complémentaires ordonnées strictement (PESTEL -> Culture & Savoir -> Sport -> Faits divers)
+            // Uniquement issues des sources Google Actualités.
+            const canonicalCategories = (NewsService.CATEGORIES || []).map((c) => c.name);
+            const bucketByCanonical = {};
+            for (const cName of canonicalCategories) {
+              bucketByCanonical[cName] = [];
+            }
+
             if (Array.isArray(parsed.categories) && parsed.categories.length > 0) {
-              finalCategories = parsed.categories.map((cat) => ({
-                name: Utils.sanitizeText(cat.categoryName),
-                items: [
-                  {
-                    headline: Utils.sanitizeText(cat.headline),
-                    summary: Utils.sanitizeText(cat.summary)
-                  }
-                ]
-              }));
-            } else {
-              // Reconstitution de sécurité si le bloc catégories est manquant
-              const categoryBuckets = {};
-              for (const cat of NewsService.CATEGORIES) {
-                categoryBuckets[cat.name] = [];
-              }
+              for (const rawCat of parsed.categories) {
+                const rawName = Utils.sanitizeText(rawCat.categoryName);
+                const lowerRaw = rawName.toLowerCase();
+                let targetName =
+                  canonicalCategories.find((c) => c.toLowerCase() === lowerRaw) ||
+                  canonicalCategories.find((c) => {
+                    const stem = c.split(/[—:(]/)[0].trim().toLowerCase();
+                    if (stem.length <= 2) {
+                      return c.toLowerCase().includes(lowerRaw) || lowerRaw.includes(c.substring(0, 12).toLowerCase());
+                    }
+                    return lowerRaw.includes(stem);
+                  });
 
-              for (const seg of sanitizedSegments) {
-                const matchedCat = Object.keys(categoryBuckets).find((k) => k.toLowerCase() === seg.category.toLowerCase()) || 'Politique & Société (France)';
-                if (!categoryBuckets[matchedCat]) {
-                  categoryBuckets[matchedCat] = [];
+                // Correspondance fine sur mots-clés si libellé abrégé
+                if (!targetName) {
+                  if (lowerRaw.includes('politique') || lowerRaw.includes('géopolitique')) targetName = canonicalCategories[0];
+                  else if (lowerRaw.includes('économie') || lowerRaw.includes('finance')) targetName = canonicalCategories[1];
+                  else if (lowerRaw.includes('social') || lowerRaw.includes('sociétal')) targetName = canonicalCategories[2];
+                  else if (lowerRaw.includes('tech') || lowerRaw.includes('innovation')) targetName = canonicalCategories[3];
+                  else if (lowerRaw.includes('environnement') || lowerRaw.includes('écologie')) targetName = canonicalCategories[4];
+                  else if (lowerRaw.includes('légal') || lowerRaw.includes('justice') || lowerRaw.includes('loi')) targetName = canonicalCategories[5];
+                  else if (lowerRaw.includes('culture') || lowerRaw.includes('savoir') || lowerRaw.includes('science')) targetName = canonicalCategories[6];
+                  else if (lowerRaw.includes('sport')) targetName = canonicalCategories[7];
+                  else if (lowerRaw.includes('faits divers') || lowerRaw.includes('crime') || lowerRaw.includes('délit')) targetName = canonicalCategories[8];
                 }
-                categoryBuckets[matchedCat].push({
-                  headline: `[${seg.timestamp}] ${seg.segmentTitle}`,
-                  summary: seg.summary
-                });
-              }
 
-              for (const [catName, items] of Object.entries(categoryBuckets)) {
-                if (items.length > 0) {
+                if (targetName && rawCat.headline && rawCat.summary) {
+                  bucketByCanonical[targetName].push({
+                    headline: Utils.sanitizeText(rawCat.headline),
+                    summary: Utils.sanitizeText(rawCat.summary)
+                  });
+                }
+              }
+            }
+
+            const finalCategories = [];
+            for (const catName of canonicalCategories) {
+              if (bucketByCanonical[catName].length > 0) {
+                finalCategories.push({
+                  name: catName,
+                  items: bucketByCanonical[catName]
+                });
+              } else {
+                const fb = (newsData.fallbackCategories || []).find((f) => f.name === catName);
+                if (fb && fb.items && fb.items.length > 0) {
                   finalCategories.push({
                     name: catName,
-                    items
+                    items: fb.items.slice(0, 1)
                   });
-                } else {
-                  const fb = (newsData.fallbackCategories || []).find((f) => f.name === catName);
-                  if (fb && fb.items && fb.items.length > 0) {
-                    finalCategories.push({
-                      name: catName,
-                      items: fb.items.slice(0, 2)
-                    });
-                  }
                 }
               }
             }

@@ -10,34 +10,78 @@ const NewsService = (() => {
   const HUGO_YOUTUBE_FEED = 'https://www.youtube.com/feeds/videos.xml?channel_id=UCAcAnMF0OrCtUep3Y4M-ZPw';
   const HUGO_ACAST_FEED = 'https://feeds.acast.com/public/shows/61365f9fb4ac8f42e6668a5c';
 
+  const buildGoogleSearchRss = (query) =>
+    `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=fr&gl=FR&ceid=FR:fr`;
+
   /**
-   * Catégories officielles disponibles (sans aucun emoji pour éviter tout artefact visuel).
+   * Catégories officielles ordonnées selon le modèle PESTEL, suivi de Culture & Savoir,
+   * Sport et Faits divers (sources 100% issues de Google Actualités France, zéro émoji).
    */
   const CATEGORIES = Object.freeze([
     {
-      id: 'GEOPOLITIQUE',
-      name: 'Géopolitique & International',
-      rssUrl: 'https://news.google.com/rss/headlines/section/topic/WORLD?hl=fr&gl=FR&ceid=FR:fr'
+      id: 'P_POLITIQUE_GEOPOLITIQUE',
+      name: 'P — Politique & Géopolitique',
+      rssUrls: [
+        'https://news.google.com/rss/headlines/section/topic/WORLD?hl=fr&gl=FR&ceid=FR:fr',
+        'https://news.google.com/rss/headlines/section/topic/NATION?hl=fr&gl=FR&ceid=FR:fr'
+      ]
     },
     {
-      id: 'ECONOMIE',
-      name: 'Économie, Finance & Entreprises',
-      rssUrl: 'https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=fr&gl=FR&ceid=FR:fr'
+      id: 'E_ECONOMIE_FINANCE',
+      name: 'E — Économie, Finance & Entreprises',
+      rssUrls: [
+        'https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=fr&gl=FR&ceid=FR:fr'
+      ]
     },
     {
-      id: 'FRANCE_SOCIAL',
-      name: 'Politique & Société (France)',
-      rssUrl: 'https://news.google.com/rss/headlines/section/topic/NATION?hl=fr&gl=FR&ceid=FR:fr'
+      id: 'S_SOCIAL_SOCIETAL',
+      name: 'S — Social & Sociétal',
+      rssUrls: [
+        buildGoogleSearchRss('société OR grève OR "pouvoir d\'achat" OR santé OR éducation France when:2d')
+      ]
     },
     {
-      id: 'TECH_IA',
-      name: 'Tech, IA & Sciences',
-      rssUrl: 'https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=fr&gl=FR&ceid=FR:fr'
+      id: 'T_TECH_IA',
+      name: 'T — Technologie, IA & Innovation',
+      rssUrls: [
+        'https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=fr&gl=FR&ceid=FR:fr'
+      ]
     },
     {
-      id: 'CULTURE_SPORT',
-      name: 'Culture, Médias & Sport',
-      rssUrl: 'https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=fr&gl=FR&ceid=FR:fr'
+      id: 'E_ENVIRONNEMENT',
+      name: 'E — Environnement & Écologie',
+      rssUrls: [
+        buildGoogleSearchRss('environnement OR climat OR écologie OR énergie France monde when:2d')
+      ]
+    },
+    {
+      id: 'L_LEGAL_JUSTICE',
+      name: 'L — Légal : Justice, Lois & Procès',
+      rssUrls: [
+        buildGoogleSearchRss('justice OR procès OR "projet de loi" OR "proposition de loi" OR tribunal France when:2d')
+      ]
+    },
+    {
+      id: 'CULTURE_SAVOIR',
+      name: 'Culture & Savoir (Sciences, Histoire, Cinéma & Livres)',
+      rssUrls: [
+        'https://news.google.com/rss/headlines/section/topic/SCIENCE?hl=fr&gl=FR&ceid=FR:fr',
+        'https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=fr&gl=FR&ceid=FR:fr'
+      ]
+    },
+    {
+      id: 'SPORT',
+      name: 'Sport',
+      rssUrls: [
+        'https://news.google.com/rss/headlines/section/topic/SPORTS?hl=fr&gl=FR&ceid=FR:fr'
+      ]
+    },
+    {
+      id: 'FAITS_DIVERS',
+      name: 'Faits divers (Délits, Crimes & Accidents marquants)',
+      rssUrls: [
+        buildGoogleSearchRss('"faits divers" OR "garde à vue" OR "accident mortel" OR meurtre OR braquage France when:2d')
+      ]
     }
   ]);
 
@@ -139,8 +183,63 @@ const NewsService = (() => {
   };
 
   /**
-   * Enrichit en un seul lot parallèle tous les articles sources ouverts et les recherches
-   * Google Actualités pour chaque segment horodaté du sommaire d'HugoDécrypte.
+   * Exécute un lot de requêtes HTTP en parallèle avec résilience unitaire :
+   * si UrlFetchApp.fetchAll() échoue à cause d'une seule URL inaccessible
+   * (ex: "Adresse non disponible"), repli automatique URL par URL sans perdre le reste du lot.
+   *
+   * @param {Array<Object>} requests - Liste des objets requêtes UrlFetchApp.
+   * @returns {Array<GoogleAppsScript.URL_Fetch.HTTPResponse|null>} Réponses alignées index par index.
+   */
+  const fetchUrlsSafely = (requests) => {
+    if (!requests || requests.length === 0) return [];
+    try {
+      return UrlFetchApp.fetchAll(requests);
+    } catch (batchErr) {
+      console.warn(`fetchUrlsSafely fallback (${requests.length} URLs): ${batchErr.message}`);
+      return requests.map((req) => {
+        try {
+          const { url, ...opts } = req;
+          return UrlFetchApp.fetch(url, { ...opts, validateHttpsCertificates: false });
+        } catch {
+          return null;
+        }
+      });
+    }
+  };
+
+  /**
+   * Extrait les dépêches structurées (<title>, <description>, <link>) d'un flux RSS Google Actualités.
+   *
+   * @param {string} xml - Contenu XML du flux Google Actualités.
+   * @param {number} maxItems - Nombre maximal d'articles à extraire.
+   * @returns {Array<Object>} Dépêches nettoyées.
+   */
+  const parseGoogleNewsItems = (xml, maxItems = 5) => {
+    if (!xml) return [];
+    const results = [];
+    const rssItems = xml.split('<item>').slice(1, maxItems + 1);
+    for (const rItem of rssItems) {
+      const tMatch = rItem.match(/<title>([\s\S]*?)<\/title>/);
+      const lMatch = rItem.match(/<link>([\s\S]*?)<\/link>/);
+      const dMatch = rItem.match(/<description>([\s\S]*?)<\/description>/);
+      const fullTitle = cleanXmlText(tMatch ? tMatch[1] : '');
+      const link = cleanXmlText(lMatch ? lMatch[1] : '');
+      const relatedDesc = cleanXmlText(dMatch ? dMatch[1] : '');
+
+      if (fullTitle) {
+        results.push({
+          title: fullTitle,
+          desc: relatedDesc && relatedDesc !== fullTitle ? relatedDesc.substring(0, 280) : '',
+          url: link
+        });
+      }
+    }
+    return results;
+  };
+
+  /**
+   * Enrichit en parallèle les recherches Google Actualités par segment (isolées des médias tiers)
+   * et les articles sources ouverts de la description YouTube.
    *
    * @param {Array<Object>} parsedSegments - Liste des segments { timestamp, title }.
    * @param {string} liensSection - Section liens de la description YouTube.
@@ -150,10 +249,15 @@ const NewsService = (() => {
     let prioritizedUrls = [];
     if (liensSection) {
       const urlMatches = [...liensSection.matchAll(/https?:\/\/[^\s<>"]+/g)].map((m) => m[0]);
-      const nonSocial = urlMatches.filter(
-        (u) => !/youtube\.com|youtu\.be|instagram\.com|twitter\.com|x\.com|tiktok\.com|acast\.com|hugodecrypte\.com/.test(u)
-      );
-      const uniqueUrls = [...new Set(nonSocial)];
+      // Nettoyage des fragments #anchor (qui provoquent parfois "Adresse non disponible" dans UrlFetchApp)
+      const sanitizedUrls = urlMatches
+        .map((u) => u.split('#')[0].trim())
+        .filter(
+          (u) =>
+            /^https?:\/\/[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(u) &&
+            !/youtube\.com|youtu\.be|instagram\.com|twitter\.com|x\.com|tiktok\.com|acast\.com|hugodecrypte\.com/.test(u)
+        );
+      const uniqueUrls = [...new Set(sanitizedUrls)];
       // Privilégier strictement les médias ouverts avant les paywalls
       prioritizedUrls = [
         ...uniqueUrls.filter((u) => !PAYWALL_REGEX.test(u)),
@@ -162,82 +266,67 @@ const NewsService = (() => {
     }
 
     const segmentsToQuery = (parsedSegments || []).slice(0, 10);
-    const segmentQueryUrls = segmentsToQuery.map((seg) => {
+    const segmentRequests = segmentsToQuery.map((seg) => {
       const cleanQ = seg.title.replace(/:\s*dernières infos/i, '').replace(/[:«»"“”]/g, ' ').trim();
-      return `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQ)}&hl=fr&gl=FR&ceid=FR:fr`;
+      return { url: buildGoogleSearchRss(cleanQ), muteHttpExceptions: true };
     });
 
-    const combinedRequests = [
-      ...prioritizedUrls.map((u) => ({
-        url: u,
-        muteHttpExceptions: true,
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-      })),
-      ...segmentQueryUrls.map((u) => ({ url: u, muteHttpExceptions: true }))
-    ];
+    const articleRequests = prioritizedUrls.map((u) => ({
+      url: u,
+      muteHttpExceptions: true,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    }));
+
+    // Lots séparés : 1 média tiers bloqué ne peut jamais compromettre les recherches Google News
+    const segmentResponses = fetchUrlsSafely(segmentRequests);
+    const articleResponses = fetchUrlsSafely(articleRequests);
 
     const segmentHeadlines = segmentsToQuery.map(() => []);
-    const articleSnippets = [];
-    if (combinedRequests.length === 0) {
-      return { segmentHeadlines, articleSnippets };
+    for (let s = 0; s < segmentsToQuery.length; s++) {
+      const res = segmentResponses[s];
+      if (res && res.getResponseCode() === 200) {
+        const parsed = parseGoogleNewsItems(res.getContentText(), 5);
+        segmentHeadlines[s] = parsed.map((it) => it.title);
+      }
     }
 
-    try {
-      const responses = UrlFetchApp.fetchAll(combinedRequests);
-      const artCount = prioritizedUrls.length;
-
-      for (let k = 0; k < artCount; k++) {
-        const res = responses[k];
-        if (res && res.getResponseCode() === 200) {
-          const facts = extractArticleFacts(res.getContentText());
-          if (facts) {
-            articleSnippets.push(`- ${facts}`);
-          }
+    const articleSnippets = [];
+    for (let k = 0; k < articleResponses.length; k++) {
+      const res = articleResponses[k];
+      if (res && res.getResponseCode() === 200) {
+        const facts = extractArticleFacts(res.getContentText());
+        if (facts) {
+          articleSnippets.push(`- ${facts}`);
         }
       }
-
-      for (let s = 0; s < segmentsToQuery.length; s++) {
-        const res = responses[artCount + s];
-        if (res && res.getResponseCode() === 200) {
-          const xml = res.getContentText();
-          const items = xml.split('<item>').slice(1, 6);
-          for (const it of items) {
-            const gtMatch = it.match(/<title>([\s\S]*?)<\/title>/);
-            const gt = cleanXmlText(gtMatch ? gtMatch[1] : '');
-            if (gt) {
-              segmentHeadlines[s].push(gt);
-            }
-          }
-        }
-      }
-    } catch (enrichErr) {
-      console.warn(`Segment/Article parallel enrichment warning: ${enrichErr.message}`);
     }
 
     return { segmentHeadlines, articleSnippets };
   };
 
   /**
-   * Récupère en parallèle les flux HugoDécrypte et les flux Google Actualités par catégorie.
+   * Récupère en parallèle les flux HugoDécrypte et les flux Google Actualités par catégorie PESTEL.
    * Isole strictement la vraie vidéo quotidienne complète d'HugoDécrypte (exclut tous les Shorts),
    * analyse le sommaire détaillé et enrichit les liens sources des articles de presse.
    *
    * @returns {Object|null} Données structurées pour l'analyse IA.
    */
   const fetchDailyNewsData = () => {
+    const categoryFeedMappings = [];
+    for (let cIdx = 0; cIdx < CATEGORIES.length; cIdx++) {
+      const cat = CATEGORIES[cIdx];
+      for (const rssUrl of cat.rssUrls) {
+        categoryFeedMappings.push({ catIndex: cIdx, url: rssUrl });
+      }
+    }
+
     const initialRequests = [
       { url: HUGO_YOUTUBE_FEED, muteHttpExceptions: true },
       { url: HUGO_ACAST_FEED, muteHttpExceptions: true },
-      ...CATEGORIES.map((c) => ({ url: c.rssUrl, muteHttpExceptions: true }))
+      ...categoryFeedMappings.map((m) => ({ url: m.url, muteHttpExceptions: true }))
     ];
 
-    let responses = [];
-    try {
-      responses = UrlFetchApp.fetchAll(initialRequests);
-    } catch (e) {
-      console.warn(`NewsService fetchAll initial error: ${e.message}`);
-      return null;
-    }
+    const responses = fetchUrlsSafely(initialRequests);
 
     let rawContext = '';
     let hugoEpisode = null;
@@ -449,38 +538,36 @@ const NewsService = (() => {
       rawContext += `=== SOURCE PRIORITAIRE : HUGODÉCRYPTE (ÉDITION DU ${todayDateStr}) ===\nTitre: ${hugoEpisode.title}\nLien: ${hugoEpisode.url}\n[01:00] Synthèse des temps forts de la journée\n\n`;
     }
 
-    // 2. Analyse des flux Google Actualités par catégorie (Complément d'information)
-    rawContext += `=== COMPLÉMENT D'ACTUALITÉS PAR CATÉGORIE (GOOGLE ACTUALITÉS FRANCE) ===\n`;
+    // 2. Analyse des flux Google Actualités par catégorie PESTEL, Culture & Savoir, Sport et Faits divers
+    rawContext += `=== COMPLÉMENT D'ACTUALITÉS PAR CATÉGORIE (SOURCES 100% GOOGLE ACTUALITÉS FRANCE) ===\n`;
 
-    for (let i = 0; i < CATEGORIES.length; i++) {
-      const cat = CATEGORIES[i];
-      const gRes = responses[i + 2];
-      const catItems = [];
+    const groupedCatItems = CATEGORIES.map(() => []);
+    for (let mIdx = 0; mIdx < categoryFeedMappings.length; mIdx++) {
+      const mapping = categoryFeedMappings[mIdx];
+      const gRes = responses[mIdx + 2];
+      const cat = CATEGORIES[mapping.catIndex];
 
       try {
         if (gRes && gRes.getResponseCode() === 200) {
-          const gXml = gRes.getContentText();
-          const rssItems = gXml.split('<item>').slice(1, 6);
-
-          for (const rItem of rssItems) {
-            const tMatch = rItem.match(/<title>([\s\S]*?)<\/title>/);
-            const lMatch = rItem.match(/<link>([\s\S]*?)<\/link>/);
-            const dMatch = rItem.match(/<description>([\s\S]*?)<\/description>/);
-            const fullTitle = cleanXmlText(tMatch ? tMatch[1] : '');
-            const link = cleanXmlText(lMatch ? lMatch[1] : '');
-            const relatedDesc = cleanXmlText(dMatch ? dMatch[1] : '');
-
-            if (fullTitle) {
-              catItems.push({
-                title: fullTitle,
-                desc: relatedDesc && relatedDesc !== fullTitle ? relatedDesc.substring(0, 280) : '',
-                url: link
-              });
-            }
-          }
+          const itemsPerFeed = cat.rssUrls.length > 1 ? 3 : 5;
+          const parsedItems = parseGoogleNewsItems(gRes.getContentText(), itemsPerFeed);
+          groupedCatItems[mapping.catIndex].push(...parsedItems);
         }
       } catch (e) {
         console.warn(`Erreur lecture Google News (${cat.id}) : ${e.message}`);
+      }
+    }
+
+    for (let i = 0; i < CATEGORIES.length; i++) {
+      const cat = CATEGORIES[i];
+      const seenTitles = new Set();
+      const catItems = [];
+      for (const it of groupedCatItems[i]) {
+        const normKey = it.title.toLowerCase().substring(0, 50);
+        if (!seenTitles.has(normKey)) {
+          seenTitles.add(normKey);
+          catItems.push(it);
+        }
       }
 
       if (catItems.length > 0) {
@@ -491,9 +578,9 @@ const NewsService = (() => {
 
         fallbackCategories.push({
           name: cat.name,
-          items: catItems.slice(0, 3).map((it) => {
+          items: catItems.slice(0, 2).map((it) => {
             const parts = it.title.split(' - ');
-            const source = parts.length > 1 ? parts.pop().trim() : 'Actualités';
+            const source = parts.length > 1 ? parts.pop().trim() : 'Google Actualités';
             const headline = parts.join(' - ').trim();
             return {
               headline: Utils.sanitizeText(source),
