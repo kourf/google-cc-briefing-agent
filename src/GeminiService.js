@@ -60,12 +60,14 @@ const GeminiService = (() => {
       'gemini-3.1-flash-lite',
       'gemini-3.5-flash-lite',
       'gemini-3.6-flash',
-      'gemini-3.8-flash',
-      'gemini-3.5-flash'
+      'gemini-3.5-flash',
+      'gemini-2.5-flash-lite',
+      'gemini-2.5-flash',
+      'gemini-3.8-flash'
     ];
 
     const available = allModels.filter((m) => !exhaustedModels.has(m));
-    const models = available.length > 0 ? available : ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite'];
+    const models = available.length > 0 ? available : ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-2.5-flash-lite'];
 
     if (activeWorkingModel && models.includes(activeWorkingModel) && !exhaustedModels.has(activeWorkingModel)) {
       return [activeWorkingModel, ...models.filter((m) => m !== activeWorkingModel)];
@@ -741,26 +743,30 @@ const GeminiService = (() => {
     const modelCascade = getModelCascade();
 
     const systemPrompt = [
-      'Tu es un journaliste vulgarisateur et pédagogue de premier plan pour un briefing quotidien.',
-      'Ton rôle : expliquer l’actualité avec un maximum de clarté, de pédagogie et de fluidité, comme si tu t’adressais à un jeune de 15 ans très curieux.',
+      'Tu es un journaliste vulgarisateur d’élite pour un briefing exécutif matinal.',
+      'Ton rôle : rendre le lecteur capable de comprendre chaque sujet en profondeur et d’en discuter avec des collègues dès le matin, en phrases courtes, simples (niveau 15 ans) mais ultra-denses en faits concrets.',
       '',
       'DIRECTIVES MAJEURES (STRICTES ET OBLIGATOIRES) :',
-      '1. NIVEAU 15 ANS ET PHRASES COURTES :',
-      '   - Rédige en phrases courtes, simples et percutantes (Sujet + Verbe + Complément).',
-      '   - Évite tout jargon technique, juridique ou économique abstrait sans l’expliquer immédiatement en mots simples.',
+      '1. ZÉRO FORMULE VAGUE OU CREUSE :',
+      '   - Interdiction absolue d’écrire des phrases vagues comme "accusations graves", "domaines sensibles", "certains cas", "situation personnelle difficile", "plusieurs raisons" ou "divergences".',
+      '   - DONNE TOUJOURS LES FAITS CONCRETS tirés des sources :',
+      '     • Procédure / accusation : précise les actes exacts, victimes ou chiffres reprochés tirés des sources (ex : mener des opérations militaires sans accord du parlement, tel bombardement ou tel chiffre de victimes) ET l’issue actuelle.',
+      '     • Interdiction / loi : précise les cas ou publics visés exactement (ex : protéger la santé mentale et le cerveau des enfants, tels produits ou usages).',
+      '     • Pétition / grève / mobilisation : précise OBLIGATOIREMENT ce qui est concrètement reproché à l’origine (pourquoi des citoyens ont signé la pétition ou manifesté : critiques de la ligne éditoriale ou manquements au pluralisme pour un média, revendications salariales ou suppressions de postes pour une grève) ET la décision finale. Même si les sources du jour ne parlent que du vote final, rappelle toujours brièvement ce motif d’origine reconnu.',
+      '     • Personne peu connue ou drame : explique exactement QUI est la personne (métier, club, fonction) ET ce qui lui est arrivé concrètement.',
       '2. CONTEXTUALISATION SYSTÉMATIQUE DES PERSONNES CITÉES :',
-      '   - Dès qu’une personne est mentionnée, indique TOUJOURS son rôle, son métier ou sa fonction (entre parenthèses ou naturellement dans la phrase) pour qu’on sache exactement qui c’est.',
-      '   - Exemples : "Michel Zecler (un producteur de musique)", "Michel Barnier (le Premier ministre français)", "Donald Trump (le président élu des États-Unis)", "Jerome Powell (le patron de la banque centrale américaine)".',
-      '3. CONTEXTUALISATION SYSTÉMATIQUE DES ENTREPRISES ET MARQUES :',
-      '   - Dès qu’une entreprise, marque ou institution est mentionnée, explique TOUJOURS en quelques mots simples ce qu’elle fabrique ou son domaine d’activité.',
-      '   - Exemples : "Nvidia (le géant américain qui fabrique les puces d’intelligence artificielle)", "OpenAI (l’entreprise qui a inventé ChatGPT)", "Boeing (l’un des plus grands constructeurs d’avions de ligne au monde)", "Stellantis (le groupe automobile qui possède Peugeot, Citroën et Fiat)".',
-      '4. STRUCTURE PÉDAGOGIQUE EN 2 À 3 PHRASES MAXIMUM PAR SUJET :',
-      '   - Phrase 1 : Que s’est-il passé ? (Le fait concret avec le rôle précis des personnes et des entreprises).',
-      '   - Phrase 2 : Pourquoi cela arrive ? (Le contexte ou la cause de façon très simple).',
-      '   - Phrase 3 : Qu’est-ce que ça change ? (L’enjeu concret ou ce qui va se passer ensuite).',
+      '   - Pour CHAQUE personne mentionnée, indique immédiatement son rôle, métier ou fonction entre parenthèses ou naturellement dans la phrase.',
+      '   - Exemples : "Jerome Powell (le patron de la banque centrale américaine)", "Michel Barnier (le Premier ministre français)".',
+      '3. CONTEXTUALISATION SYSTÉMATIQUE DES ENTREPRISES, MÉDIAS ET INSTITUTIONS :',
+      '   - Explique toujours ce que fait chaque entreprise, marque ou institution citée.',
+      '   - Exemples : "Nvidia (le géant américain qui fabrique les puces d’intelligence artificielle)", "l’Arcom (le régulateur français de l’audiovisuel)", "OpenAI (l’entreprise qui a inventé ChatGPT)".',
+      '4. LONGUEUR MAÎTRISÉE (COMPLET MAIS PAS LONG — 2 À 3 PHRASES DENSES PAR SUJET) :',
+      '   - Phrase 1 : Qui a fait quoi concrètement (avec les faits, actes, victimes ou chiffres clés les plus précis trouvés dans les sources).',
+      '   - Phrase 2 : Pourquoi / ce qu’on reproche concrètement à l’origine (en mots simples).',
+      '   - Phrase 3 : Conséquence, blocage, réaction ou suite immédiate.',
       '5. DEUX BLOCS ATTENDUS DANS LE JSON :',
-      '   - "segments" : pour chaque segment du sommaire d’HugoDécrypte (ignore Intro et Outro). Précise le minutage exact ("timestamp"), le titre clair ("segmentTitle"), la catégorie ("category" parmi ["Tech, IA & Sciences", "Économie, Finance & Entreprises", "Politique & Société (France)", "Géopolitique & International", "Culture, Médias & Sport"]) et le résumé vulgarisé ("summary").',
-      '   - "categories" : pour chacune des 5 grandes rubriques ["Géopolitique & International", "Économie, Finance & Entreprises", "Politique & Société (France)", "Tech, IA & Sciences", "Culture, Médias & Sport"], sélectionne l’actualité la plus marquante issue des flux Google News fournis, indique la rubrique ("categoryName"), un titre percutant ("headline") et explique l’actualité dans "summary" avec le même niveau de contexte vulgarisé (rôle des personnes, activité des entreprises, faits et pourquoi).',
+      '   - "segments" : pour CHAQUE segment du sommaire d’HugoDécrypte (ignore Intro et Outro). Précise le minutage exact ("timestamp"), un titre clair ("segmentTitle"), une catégorie strictement choisie parmi ["Tech, IA & Sciences", "Économie, Finance & Entreprises", "Politique & Société (France)", "Géopolitique & International", "Culture, Médias & Sport"], et le résumé factuel complet ("summary").',
+      '   - "categories" : pour chacune des 5 rubriques ["Géopolitique & International", "Économie, Finance & Entreprises", "Politique & Société (France)", "Tech, IA & Sciences", "Culture, Médias & Sport"], sélectionne une actualité marquante DIFFÉRENTE des sujets déjà résumés dans HugoDécrypte (sauf si aucune autre dépêche n’existe dans la rubrique), indique "categoryName", "headline", et "summary" avec la même densité factuelle et vulgarisation.',
       '6. ZÉRO ÉMOJI : n’utilise strictement aucun emoji ni symbole dans le texte généré.',
       '7. Réponds UNIQUEMENT en JSON avec la structure spécifiée dans le schéma.'
     ].join('\n');
@@ -804,7 +810,7 @@ const GeminiService = (() => {
 
       const genConfig = {
         temperature: 0.2,
-        maxOutputTokens: 4096,
+        maxOutputTokens: 6144,
         responseMimeType: 'application/json',
         responseSchema
       };
@@ -818,7 +824,7 @@ const GeminiService = (() => {
             role: 'user',
             parts: [
               {
-                text: `${systemPrompt}\n\nSOURCES DU JOUR :\n${newsData.rawContext.substring(0, 5000)}`
+                text: `${systemPrompt}\n\nSOURCES DU JOUR :\n${newsData.rawContext.substring(0, 35000)}`
               }
             ]
           }

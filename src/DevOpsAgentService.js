@@ -42,11 +42,16 @@ const DevOpsAgentService = (() => {
    * @param {string} incident.solution - Action corrective appliquée en mots simples
    */
   const recordIncident = (incident) => {
+    const comp = incident.component || 'Système';
+    const msg = incident.message || 'Ajustement nécessaire';
+    const isDuplicate = recordedIncidents.some((i) => i.component === comp && i.message === msg);
+    if (isDuplicate) return;
+
     recordedIncidents.push({
-      component: incident.component || 'Système',
+      component: comp,
       severity: incident.severity || 'WARNING',
       resolved: incident.resolved !== false,
-      message: incident.message || 'Ajustement nécessaire',
+      message: msg,
       solution: incident.solution || 'Ajustement appliqué avec succès'
     });
   };

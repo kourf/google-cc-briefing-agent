@@ -183,10 +183,13 @@ const Config = (() => {
     let model = getScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, DEFAULTS.GEMINI_MODEL);
     if (
       !model ||
-      model.includes('2.0') ||
       model.includes('1.5') ||
+      model.includes('2.0') ||
       model.includes('2.5') ||
-      model.includes('lite')
+      model.includes('3.6') ||
+      model.includes('3.7') ||
+      model.includes('3.8') ||
+      model.includes('latest')
     ) {
       model = DEFAULTS.GEMINI_MODEL;
       setScriptProperty(SCRIPT_PROP_KEYS.GEMINI_MODEL, model);

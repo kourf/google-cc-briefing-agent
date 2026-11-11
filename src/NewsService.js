@@ -41,24 +41,180 @@ const NewsService = (() => {
     }
   ]);
 
+  const PAYWALL_REGEX = /lemonde\.fr|liberation\.fr|mediapart\.fr|lesechos\.fr|lexpress\.fr|lepoint\.fr|telerama\.fr|humanite\.fr|courrierinternational\.com/;
+
+  const NAMED_ENTITIES = Object.freeze({
+    quot: '"', amp: '&', lt: '<', gt: '>', apos: "'", nbsp: ' ',
+    rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“', laquo: '«', raquo: '»',
+    ndash: '–', mdash: '—', hellip: '…', oelig: 'œ', OElig: 'Œ',
+    eacute: 'é', egrave: 'è', ecirc: 'ê', euml: 'ë',
+    agrave: 'à', acirc: 'â', auml: 'ä', ccedil: 'ç',
+    icirc: 'î', iuml: 'ï', ocirc: 'ô', ouml: 'ö',
+    ucirc: 'û', ugrave: 'ù', uuml: 'ü',
+    Eacute: 'É', Egrave: 'È', Ecirc: 'Ê', Agrave: 'À', Ccedil: 'Ç'
+  });
+
   /**
-   * Nettoie les entités XML/HTML basiques d'un texte ou titre.
+   * Nettoie les entités XML/HTML (y compris accents français et entités numériques) d'un texte.
    *
    * @param {string} str - Texte brut.
-   * @returns {string} Texte XML nettoyé.
+   * @returns {string} Texte nettoyé.
    */
   const cleanXmlText = (str) => {
     if (!str) return '';
     return String(str)
       .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;|&apos;/g, "'")
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+      .replace(/&([a-zA-Z]+);/g, (m, k) => (NAMED_ENTITIES[k] !== undefined ? NAMED_ENTITIES[k] : m))
       .replace(/<[^>]+>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+  };
+
+  /**
+   * Extrait le titre, la méta-description et le corps factuel d'un article de presse HTML.
+   * Privilégie le JSON-LD `articleBody` puis les paragraphes de l'article en filtrant le bruit.
+   *
+   * @param {string} html - Code HTML brut de l'article.
+   * @returns {string} Extrait factuel structuré (vide si page bloquée/paywall).
+   */
+  const extractArticleFacts = (html) => {
+    if (!html) return '';
+    const tMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const title = cleanXmlText(tMatch ? tMatch[1] : '');
+    if (
+      /accès restreint|403 forbidden|access denied|just a moment|cloudflare/i.test(title) ||
+      title.toLowerCase() === 'liberation.fr'
+    ) {
+      return '';
+    }
+
+    const dMatch =
+      html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([\s\S]*?)["']/i) ||
+      html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([\s\S]*?)["']/i);
+    const ogDesc = cleanXmlText(dMatch ? dMatch[1] : '');
+
+    let articleBody = '';
+    const ldMatches = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+    for (const m of ldMatches) {
+      try {
+        const obj = JSON.parse(m[1]);
+        const stack = Array.isArray(obj) ? [...obj] : [obj];
+        while (stack.length > 0) {
+          const node = stack.shift();
+          if (!node || typeof node !== 'object') continue;
+          if (typeof node.articleBody === 'string' && node.articleBody.length > 80) {
+            articleBody = cleanXmlText(node.articleBody);
+            break;
+          }
+          if (Array.isArray(node['@graph'])) {
+            stack.push(...node['@graph']);
+          }
+        }
+        if (articleBody) break;
+      } catch {}
+    }
+
+    let bodyParas = '';
+    if (!articleBody) {
+      const artMatch = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
+      const artBlock = artMatch ? artMatch[1] : html;
+      const paras = [...artBlock.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
+        .map((m) => cleanXmlText(m[1]))
+        .filter(
+          (p) =>
+            p.length > 65 &&
+            !/cookie|abonner|newsletter|confidentialité|connecter|publicité|lire aussi|sur le même sujet|pour pouvoir enregistrer|activez les notifications|partenaire autorisé/i.test(
+              p
+            )
+        )
+        .slice(0, 5);
+      bodyParas = paras.join(' ');
+    }
+
+    const bestBody = articleBody || bodyParas;
+    const parts = [title, ogDesc && ogDesc !== title ? ogDesc : '', bestBody].filter(Boolean);
+    return parts.join(' | ').substring(0, 1500);
+  };
+
+  /**
+   * Enrichit en un seul lot parallèle tous les articles sources ouverts et les recherches
+   * Google Actualités pour chaque segment horodaté du sommaire d'HugoDécrypte.
+   *
+   * @param {Array<Object>} parsedSegments - Liste des segments { timestamp, title }.
+   * @param {string} liensSection - Section liens de la description YouTube.
+   * @returns {Object} { segmentHeadlines: Array<Array<string>>, articleSnippets: Array<string> }
+   */
+  const enrichHugoSegmentsAndArticles = (parsedSegments, liensSection) => {
+    let prioritizedUrls = [];
+    if (liensSection) {
+      const urlMatches = [...liensSection.matchAll(/https?:\/\/[^\s<>"]+/g)].map((m) => m[0]);
+      const nonSocial = urlMatches.filter(
+        (u) => !/youtube\.com|youtu\.be|instagram\.com|twitter\.com|x\.com|tiktok\.com|acast\.com|hugodecrypte\.com/.test(u)
+      );
+      const uniqueUrls = [...new Set(nonSocial)];
+      // Privilégier strictement les médias ouverts avant les paywalls
+      prioritizedUrls = [
+        ...uniqueUrls.filter((u) => !PAYWALL_REGEX.test(u)),
+        ...uniqueUrls.filter((u) => PAYWALL_REGEX.test(u))
+      ].slice(0, 12);
+    }
+
+    const segmentsToQuery = (parsedSegments || []).slice(0, 10);
+    const segmentQueryUrls = segmentsToQuery.map((seg) => {
+      const cleanQ = seg.title.replace(/:\s*dernières infos/i, '').replace(/[:«»"“”]/g, ' ').trim();
+      return `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQ)}&hl=fr&gl=FR&ceid=FR:fr`;
+    });
+
+    const combinedRequests = [
+      ...prioritizedUrls.map((u) => ({
+        url: u,
+        muteHttpExceptions: true,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+      })),
+      ...segmentQueryUrls.map((u) => ({ url: u, muteHttpExceptions: true }))
+    ];
+
+    const segmentHeadlines = segmentsToQuery.map(() => []);
+    const articleSnippets = [];
+    if (combinedRequests.length === 0) {
+      return { segmentHeadlines, articleSnippets };
+    }
+
+    try {
+      const responses = UrlFetchApp.fetchAll(combinedRequests);
+      const artCount = prioritizedUrls.length;
+
+      for (let k = 0; k < artCount; k++) {
+        const res = responses[k];
+        if (res && res.getResponseCode() === 200) {
+          const facts = extractArticleFacts(res.getContentText());
+          if (facts) {
+            articleSnippets.push(`- ${facts}`);
+          }
+        }
+      }
+
+      for (let s = 0; s < segmentsToQuery.length; s++) {
+        const res = responses[artCount + s];
+        if (res && res.getResponseCode() === 200) {
+          const xml = res.getContentText();
+          const items = xml.split('<item>').slice(1, 6);
+          for (const it of items) {
+            const gtMatch = it.match(/<title>([\s\S]*?)<\/title>/);
+            const gt = cleanXmlText(gtMatch ? gtMatch[1] : '');
+            if (gt) {
+              segmentHeadlines[s].push(gt);
+            }
+          }
+        }
+      }
+    } catch (enrichErr) {
+      console.warn(`Segment/Article parallel enrichment warning: ${enrichErr.message}`);
+    }
+
+    return { segmentHeadlines, articleSnippets };
   };
 
   /**
@@ -173,54 +329,8 @@ const NewsService = (() => {
             }
           }
 
-          // Extraction et enrichissement parallèle des articles de presse sources
-          const articleSnippets = [];
-          if (liensSection) {
-            const urlMatches = [...liensSection.matchAll(/https?:\/\/[^\s<>"]+/g)].map((m) => m[0]);
-            const filteredUrls = urlMatches
-              .filter(
-                (u) =>
-                  !u.includes('youtube.com') &&
-                  !u.includes('youtu.be') &&
-                  !u.includes('instagram.com') &&
-                  !u.includes('twitter.com') &&
-                  !u.includes('x.com') &&
-                  !u.includes('tiktok.com') &&
-                  !u.includes('acast.com')
-              )
-              .slice(0, 3);
-
-            if (filteredUrls.length > 0) {
-              try {
-                const articleRequests = filteredUrls.map((u) => ({
-                  url: u,
-                  muteHttpExceptions: true,
-                  headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-                }));
-                const articleResponses = UrlFetchApp.fetchAll(articleRequests);
-
-                for (let k = 0; k < articleResponses.length; k++) {
-                  const aRes = articleResponses[k];
-                  const aUrl = filteredUrls[k];
-                  if (aRes && aRes.getResponseCode() === 200) {
-                    const html = aRes.getContentText();
-                    const tMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-                    const dMatch =
-                      html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i) ||
-                      html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
-
-                    const aTitle = cleanXmlText(tMatch ? tMatch[1] : '');
-                    const aDesc = cleanXmlText(dMatch ? dMatch[1] : '');
-                    if (aTitle || aDesc) {
-                      articleSnippets.push(`- Source (${aUrl}) : Titre="${aTitle}" | Résumé="${aDesc}"`);
-                    }
-                  }
-                }
-              } catch (enrichErr) {
-                console.warn(`Article enrichment warning: ${enrichErr.message}`);
-              }
-            }
-          }
+          // Enrichissement parallèle simultané : articles ouverts de la description + Google News par segment
+          const { segmentHeadlines, articleSnippets } = enrichHugoSegmentsAndArticles(parsedSegments, liensSection);
 
           hugoEpisode = {
             title,
@@ -237,15 +347,20 @@ const NewsService = (() => {
           rawContext += `Date de publication : ${publishedDateFormatted} (${pubIso})\n\n`;
 
           if (parsedSegments.length > 0) {
-            rawContext += `SOMMAIRE DÉTAILLÉ DE LA VIDÉO :\n`;
-            for (const seg of parsedSegments) {
+            rawContext += `SOMMAIRE DÉTAILLÉ DE LA VIDÉO ET FAITS DE PRESSE PAR SEGMENT :\n`;
+            for (let s = 0; s < parsedSegments.length; s++) {
+              const seg = parsedSegments[s];
               rawContext += `[${seg.timestamp}] ${seg.title}\n`;
+              const headlines = segmentHeadlines[s] || [];
+              for (const hl of headlines) {
+                rawContext += `  • Presse : ${hl}\n`;
+              }
             }
             rawContext += `\n`;
           }
 
           if (articleSnippets.length > 0) {
-            rawContext += `DÉTAILS ET FAITS CLÉS ISSUS DES ARTICLES SOURCES DE LA VIDÉO :\n`;
+            rawContext += `DÉTAILS COMPLETS ISSUS DES ARTICLES SOURCES DE LA VIDÉO :\n`;
             rawContext += `${articleSnippets.join('\n')}\n\n`;
           } else if (liensSection) {
             rawContext += `LIENS SOURCES :\n${cleanXmlText(liensSection.substring(0, 1500))}\n\n`;
@@ -350,12 +465,15 @@ const NewsService = (() => {
           for (const rItem of rssItems) {
             const tMatch = rItem.match(/<title>([\s\S]*?)<\/title>/);
             const lMatch = rItem.match(/<link>([\s\S]*?)<\/link>/);
+            const dMatch = rItem.match(/<description>([\s\S]*?)<\/description>/);
             const fullTitle = cleanXmlText(tMatch ? tMatch[1] : '');
             const link = cleanXmlText(lMatch ? lMatch[1] : '');
+            const relatedDesc = cleanXmlText(dMatch ? dMatch[1] : '');
 
             if (fullTitle) {
               catItems.push({
                 title: fullTitle,
+                desc: relatedDesc && relatedDesc !== fullTitle ? relatedDesc.substring(0, 280) : '',
                 url: link
               });
             }
@@ -368,7 +486,7 @@ const NewsService = (() => {
       if (catItems.length > 0) {
         rawContext += `\n[${cat.name}]\n`;
         for (const it of catItems) {
-          rawContext += `- ${it.title}\n`;
+          rawContext += it.desc ? `- ${it.title} (${it.desc})\n` : `- ${it.title}\n`;
         }
 
         fallbackCategories.push({

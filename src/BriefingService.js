@@ -376,7 +376,7 @@ const BriefingService = (() => {
     }
 
     if (data.devOpsReport) {
-      lines.push('=== RAPPORT DE L\'INGÉNIEUR DEVOPS ===');
+      lines.push('=== RAPPORT DE SUPERVISION & BON FONCTIONNEMENT ===');
       lines.push(`${data.devOpsReport.employeeName} (${data.devOpsReport.statusPill})`);
       lines.push(`Horaires : ${data.devOpsReport.shiftHours}`);
       lines.push(data.devOpsReport.engineerNote);
