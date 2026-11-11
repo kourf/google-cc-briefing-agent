@@ -207,7 +207,7 @@
     </div>
     <? } ?>
 
-    <!-- 6. RAPPORT DE MAINTENANCE & SANTÉ SYSTÈME (VOTRE SALARIÉ VIRTUEL / INGÉNIEUR DEVOPS) -->
+    <!-- 6. RAPPORT DE SUPERVISION & BON FONCTIONNEMENT (AGENT DE CONTRÔLE ET STABILITÉ) -->
     <? if (data.devOpsReport) { 
          var rep = data.devOpsReport;
     ?>
@@ -237,7 +237,7 @@
       <? if (rep.hasIncidents && rep.status !== 'ALL_CLEAR') { ?>
       <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed <?= rep.statusBorderColor ?>;">
         <div style="font-size: 12px; font-weight: 700; color: #374151; margin-bottom: 4px;">
-          Journal des interventions et auto-réparations :
+          Suivi du bon fonctionnement et ajustements automatiques :
         </div>
         <ul style="margin: 0; padding-left: 18px; font-size: 12px; color: #4B5563; line-height: 1.4;">
           <? for (var inc = 0; inc < rep.incidents.length; inc++) {

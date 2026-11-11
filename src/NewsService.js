@@ -104,19 +104,9 @@ const NewsService = (() => {
         });
 
         if (fullVideos.length > 0) {
-          // 1. Recherche de la vidéo complète la plus récente d'Hugo (Actus du jour)
+          // Dernière vidéo publique complète sur https://www.youtube.com/@hugodecrypteactus/videos
           // fullVideos est ordonné par YouTube du plus récent au plus ancien.
-          // Priorité 1 : La vidéo la plus récente dont le titre contient "actu" ou "actualité"
-          let targetEntry = fullVideos.find((e) => {
-            const tMatch = e.match(/<title>([\s\S]*?)<\/title>/i);
-            const t = tMatch ? tMatch[1].toLowerCase() : '';
-            return t.includes('actu') || t.includes('actualité');
-          });
-
-          // Priorité 2 : Si aucun titre n'a "actu", prendre tout simplement la première vidéo (la plus récente absolue)
-          if (!targetEntry) {
-            targetEntry = fullVideos[0];
-          }
+          const targetEntry = fullVideos[0];
 
           const titleMatch = targetEntry.match(/<title>([\s\S]*?)<\/title>/);
           const linkMatch = targetEntry.match(/<link[^>]*href="([^"]+)"/);
@@ -124,7 +114,7 @@ const NewsService = (() => {
           const descMatch = targetEntry.match(/<media:description>([\s\S]*?)<\/media:description>/);
 
           const title = cleanXmlText(titleMatch ? titleMatch[1] : '');
-          const link = linkMatch ? linkMatch[1] : 'https://www.youtube.com/@HugoDecrypte';
+          const link = linkMatch ? linkMatch[1] : 'https://www.youtube.com/@hugodecrypteactus/videos';
           const pubIso = pubMatch ? pubMatch[1] : '';
           const desc = descMatch ? descMatch[1] : '';
 
@@ -285,7 +275,7 @@ const NewsService = (() => {
             const pMatch = targetItem.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
 
             const title = cleanXmlText(tMatch ? tMatch[1] : 'Les Actus du Jour');
-            const link = cleanXmlText(lMatch ? lMatch[1] : 'https://www.youtube.com/@HugoDecrypte');
+            const link = cleanXmlText(lMatch ? lMatch[1] : 'https://www.youtube.com/@hugodecrypteactus/videos');
             const pubIso = pMatch ? pMatch[1] : '';
 
             let publishedDateFormatted = '';
@@ -333,7 +323,7 @@ const NewsService = (() => {
       const todayDateStr = Utils.formatDateFrench(new Date());
       hugoEpisode = {
         title: "Les Actus du Jour — Synthèse Quotidienne",
-        url: 'https://www.youtube.com/@HugoDecrypte',
+        url: 'https://www.youtube.com/@hugodecrypteactus/videos',
         publishedDate: todayDateStr,
         publishedIso: new Date().toISOString(),
         editionTitle: `Les Actus du Jour du ${todayDateStr}`,

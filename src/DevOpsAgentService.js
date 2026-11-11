@@ -15,9 +15,9 @@
  */
 
 const DevOpsAgentService = (() => {
-  const EMPLOYEE_NAME = 'Alexandre (Ingénieur DevOps & SRE Dédié)';
-  const EMPLOYEE_ROLE = 'Tech Lead & Maintenance Système';
-  const SHIFT_HOURS = 'Ronde quotidienne : 05h45 – 07h15 (Supervision 24h/24)';
+  const EMPLOYEE_NAME = 'Agent de Contrôle & Bon Fonctionnement';
+  const EMPLOYEE_ROLE = 'Supervision et bon fonctionnement de votre assistant';
+  const SHIFT_HOURS = 'Vérification quotidienne avant chaque envoi';
 
   // Registre en mémoire des événements de la session active
   let recordedIncidents = [];
@@ -35,19 +35,19 @@ const DevOpsAgentService = (() => {
    * Enregistre un incident technique détecté et son statut de résolution.
    *
    * @param {Object} incident
-   * @param {string} incident.component - Composant concerné ('Gemini API', 'Gmail', 'Calendar', etc.)
+   * @param {string} incident.component - Composant concerné ('Gestion des e-mails', 'Intelligence artificielle', etc.)
    * @param {string} incident.severity - 'INFO', 'WARNING', ou 'CRITICAL'
    * @param {boolean} incident.resolved - Si l'incident a été auto-réparé avec succès
-   * @param {string} incident.message - Explication humaine de l'anomalie
-   * @param {string} incident.solution - Action corrective appliquée
+   * @param {string} incident.message - Explication simple et humaine (sans jargon technique)
+   * @param {string} incident.solution - Action corrective appliquée en mots simples
    */
   const recordIncident = (incident) => {
     recordedIncidents.push({
       component: incident.component || 'Système',
       severity: incident.severity || 'WARNING',
       resolved: incident.resolved !== false,
-      message: incident.message || 'Anomalie détectée',
-      solution: incident.solution || 'Auto-réparation appliquée'
+      message: incident.message || 'Ajustement nécessaire',
+      solution: incident.solution || 'Ajustement appliqué avec succès'
     });
   };
 
@@ -73,32 +73,32 @@ const DevOpsAgentService = (() => {
         const safeStartSec = nowSec - (24 * 3600);
         StateService.resetCheckpointTo(safeStartSec);
         recordIncident({
-          component: 'Checkpoint Système',
+          component: 'Gestion des e-mails',
           severity: 'INFO',
           resolved: true,
-          message: 'Premier démarrage ou checkpoint absent.',
-          solution: 'Initialisation propre sur les dernières 24h.'
+          message: 'Premier démarrage de votre assistant.',
+          solution: 'Configuration propre pour ne traiter que les e-mails des dernières 24 heures.'
         });
       } else if ((nowSec - lastCp) > (48 * 3600)) {
         const safeStartSec = nowSec - (24 * 3600);
         StateService.resetCheckpointTo(safeStartSec);
         recordIncident({
-          component: 'Checkpoint Système',
+          component: 'Gestion des e-mails',
           severity: 'WARNING',
           resolved: true,
-          message: `Dernier checkpoint trop ancien (${Math.round((nowSec - lastCp) / 3600)}h d’accumulation).`,
-          solution: 'Recalibrage automatique sur 24h pour éviter tout dépassement de temps d’exécution.'
+          message: `L'outil n'avait pas tourné depuis plusieurs jours (${Math.round((nowSec - lastCp) / 3600)}h d’accumulation).`,
+          solution: 'Recentrage automatique sur les dernières 24h pour vous livrer un briefing rapide et sans surcharge.'
         });
       } else {
-        recordMaintenanceAction('Checkpoint horaire vérifié et conforme.');
+        recordMaintenanceAction('Suivi des e-mails vérifié et conforme.');
       }
     } catch (e) {
       recordIncident({
-        component: 'État Système',
+        component: 'Gestion des e-mails',
         severity: 'WARNING',
         resolved: false,
-        message: `Erreur vérification checkpoint : ${e.message}`,
-        solution: 'Poursuite de l’exécution en mode sécurisé.'
+        message: 'Léger contretemps sur l’historique des e-mails.',
+        solution: 'Poursuite normale de l’envoi de votre briefing.'
       });
     }
 
@@ -111,22 +111,22 @@ const DevOpsAgentService = (() => {
       if (!hasMain || !hasWatchdog) {
         TriggerService.setupAllTriggers();
         recordIncident({
-          component: 'Déclencheurs Google',
+          component: 'Horloge d’envoi automatique',
           severity: 'WARNING',
           resolved: true,
-          message: 'Déclencheur principal ou de sécurité manquant.',
-          solution: 'Réinstallation immédiate des programmations 06h00 pile et 07h00.'
+          message: 'L’horloge d’envoi automatique n’était pas active.',
+          solution: 'Réglage et verrouillage immédiat pour un envoi chaque matin à 06h00 pile.'
         });
       } else {
-        recordMaintenanceAction('Architecture double de déclencheurs (06:00 + 07:00) active.');
+        recordMaintenanceAction('Horloge automatique active et programmée à 06h00.');
       }
     } catch (e) {
       recordIncident({
-        component: 'Déclencheurs Google',
+        component: 'Horloge d’envoi automatique',
         severity: 'WARNING',
         resolved: false,
-        message: `Erreur audit déclencheurs : ${e.message}`,
-        solution: 'Vérification programmée lors du cycle Watchdog.'
+        message: 'Impossible de vérifier l’horloge automatique.',
+        solution: 'Une seconde vérification automatique aura lieu dans l’heure.'
       });
     }
 
@@ -135,28 +135,28 @@ const DevOpsAgentService = (() => {
       const apiKey = Config.getGeminiApiKey();
       if (!apiKey || apiKey.length < 10) {
         recordIncident({
-          component: 'Clé API Gemini',
+          component: 'Connexion de l’assistant',
           severity: 'CRITICAL',
           resolved: false,
-          message: 'Clé API absente ou non configurée dans Script Properties.',
-          solution: 'Bascule immédiate en mode de repli déterministe (zéro IA).'
+          message: 'Clé d’accès manquante dans les paramètres.',
+          solution: 'Bascule automatique en mode autonome pour préparer votre briefing.'
         });
       } else {
-        recordMaintenanceAction(`Clé API opérationnelle (Modèle cible : ${Config.getGeminiModel()}).`);
+        recordMaintenanceAction('Connexion au service d’intelligence artificielle opérationnelle.');
       }
     } catch (e) {
       recordIncident({
-        component: 'Configuration',
+        component: 'Connexion de l’assistant',
         severity: 'WARNING',
         resolved: true,
-        message: `Erreur lecture clé API : ${e.message}`,
-        solution: 'Utilisation de la clé par défaut pré-embarquée.'
+        message: 'Ajustement de la clé de connexion.',
+        solution: 'Utilisation de la configuration de secours.'
       });
     }
   };
 
   /**
-   * Compile le rapport officiel de l'ingénieur DevOps pour insertion dans le briefing.
+   * Compile le rapport officiel de l'agent pour insertion dans le briefing.
    *
    * @returns {Object} Rapport structuré prêt pour le template HTML.
    */
@@ -165,7 +165,7 @@ const DevOpsAgentService = (() => {
     const hasAutoRepaired = recordedIncidents.some((i) => i.resolved && (i.severity === 'WARNING' || i.severity === 'INFO'));
 
     let status = 'ALL_CLEAR';
-    let statusPill = 'Systèmes 100% nominaux';
+    let statusPill = 'Systèmes 100% opérationnels';
     let statusBadgeColor = '#10B981'; // Émeraude
     let statusBgColor = '#ECFDF5';
     let statusBorderColor = '#A7F3D0';
@@ -177,21 +177,21 @@ const DevOpsAgentService = (() => {
       statusBadgeColor = '#EF4444'; // Rouge
       statusBgColor = '#FEF2F2';
       statusBorderColor = '#FECACA';
-      engineerNote = 'Attention Kouroufia : une anomalie externe nécessite une action manuelle.';
+      engineerNote = 'Attention Kouroufia : une vérification externe nécessite une action manuelle.';
     } else if (hasAutoRepaired) {
       status = 'AUTO_REPAIRED';
-      statusPill = 'Incidents interceptés & auto-réparés';
+      statusPill = 'Ajustements appliqués avec succès';
       statusBadgeColor = '#D97706'; // Ambre soutenu
       statusBgColor = '#FFFBEB';
       statusBorderColor = '#FDE68A';
-      engineerNote = 'Bonjour Kouroufia, anomalies externes corrigées avec succès : votre briefing a été intégralement préservé.';
+      engineerNote = 'Bonjour Kouroufia, les systèmes ont été vérifiés et automatiquement ajustés : votre briefing est prêt et complet.';
     } else {
       status = 'ALL_CLEAR';
-      statusPill = 'Systèmes 100% nominaux';
+      statusPill = 'Systèmes 100% opérationnels';
       statusBadgeColor = '#10B981';
       statusBgColor = '#ECFDF5';
       statusBorderColor = '#A7F3D0';
-      engineerNote = 'Bonjour Kouroufia, tous les systèmes sont au vert et tournent parfaitement ce matin !';
+      engineerNote = 'Bonjour Kouroufia, tous les systèmes fonctionnent parfaitement ce matin pour préparer votre journée !';
     }
 
     return {

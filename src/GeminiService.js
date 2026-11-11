@@ -34,11 +34,11 @@ const GeminiService = (() => {
     try {
       if (typeof DevOpsAgentService !== 'undefined') {
         DevOpsAgentService.recordIncident({
-          component: 'Quotas API Gemini',
-          severity: 'WARNING',
+          component: 'Serveur d’analyse IA',
+          severity: 'INFO',
           resolved: true,
-          message: `Le modèle ${clean} a atteint son quota journalier Free Tier.`,
-          solution: 'Mise en quarantaine et bascule automatique sur les modèles relais.'
+          message: 'Le serveur principal était momentanément saturé.',
+          solution: 'Passage automatique et transparent sur un serveur de secours pour résumer vos e-mails.'
         });
       }
     } catch {}
@@ -95,12 +95,15 @@ const GeminiService = (() => {
 
     const systemPrompt = 
       "Tu es un assistant pratique et direct.\n" +
-      "Rédige un bulletin météo très court (1 paragraphe en tout) pour la ville détectée, détaillant la situation le matin (9h), l'après-midi (15h) et le soir (21h).\n" +
-      "IMPORTANT : Tu DOIS commencer ta réponse en annonçant clairement la ville, par exemple : 'Pour [Ville], ...'\n" +
+      "Rédige un bulletin météo très court pour la ville détectée, en allant systématiquement à la ligne pour chaque moment de la journée : le matin (9h), l'après-midi (15h) et le soir (21h).\n" +
+      "IMPORTANT : Tu DOIS commencer ta réponse en annonçant clairement la ville sur sa propre ligne : '**Pour [Ville] :**'\n" +
       "Donne les températures, les risques de pluie et des conseils vestimentaires simples (t-shirt, veste, parapluie).\n" +
       "N'utilise STRICTEMENT AUCUN emoji, pictogramme ou caractère spécial.\n" +
-      "INSPIRE-TOI EXACTEMENT DE CE FORMAT/TON (ne fais pas plus long) :\n" +
-      "**Pour Annemasse :** Matin (9h) : Il fera assez frais (10°C), prévoyez une petite veste pour partir. Après-midi (15h) : Le soleil s'installe avec 22°C, vous pourrez largement rester en t-shirt. Soir (21h) : Attention, le ciel se couvre (80% de chance d'averses) et la température redescend à 14°C. Pensez à prendre une veste imperméable ou un parapluie si vous sortez.";
+      "RESPECTE SCRUPULEUSEMENT CE FORMAT AVEC RETOURS À LA LIGNE POUR CHAQUE MOMENT :\n" +
+      "**Pour Annemasse :**\n" +
+      "• **Matin (9h) :** Il fera assez frais (10°C), prévoyez une petite veste pour partir.\n" +
+      "• **Après-midi (15h) :** Le soleil s'installe avec 22°C, vous pourrez largement rester en t-shirt.\n" +
+      "• **Soir (21h) :** Attention, le ciel se couvre (80% de chance d'averses) et la température redescend à 14°C. Pensez à prendre une veste imperméable ou un parapluie si vous sortez.";
 
     for (let model of modelCascade) {
       if (!model) continue;
@@ -191,11 +194,11 @@ const GeminiService = (() => {
         try {
           if (typeof DevOpsAgentService !== 'undefined') {
             DevOpsAgentService.recordIncident({
-              component: 'Budget Temps Exécution',
-              severity: 'WARNING',
+              component: 'Vitesse de traitement des e-mails',
+              severity: 'INFO',
               resolved: true,
-              message: 'Temps d’analyse IA approchant le seuil de sécurité.',
-              solution: 'Bascule automatique en mode repli rapide pour garantir la livraison sans timeout.'
+              message: 'Grand nombre d’e-mails reçus nécessitant une analyse plus longue.',
+              solution: 'Accélération immédiate de l’analyse pour vous livrer votre briefing complet à l’heure.'
             });
           }
         } catch {}
@@ -263,15 +266,14 @@ const GeminiService = (() => {
 
           try {
             if (typeof DevOpsAgentService !== 'undefined') {
-              const nextM = modelCascade[cascadeIndex + 1] || 'modèle relais';
               DevOpsAgentService.recordIncident({
-                component: 'Passerelle IA Gemini',
-                severity: 'WARNING',
+                component: 'Serveur d’analyse IA',
+                severity: 'INFO',
                 resolved: true,
                 message: statusCode === 503
-                  ? `Serveurs Google saturés sur ${modelToTry} (HTTP 503 : pic de charge temporaire).`
-                  : `Indisponibilité temporaire (HTTP ${statusCode}) sur ${modelToTry}.`,
-                solution: `Bascule automatique instantanée sur ${nextM} sans interruption.`
+                  ? 'Pic d’affluence temporaire sur les serveurs d’analyse.'
+                  : 'Léger ralentissement détecté sur le serveur principal.',
+                solution: 'Relais automatique immédiat sur un serveur de secours sans aucune coupure.'
               });
             }
           } catch {}

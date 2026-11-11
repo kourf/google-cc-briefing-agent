@@ -202,8 +202,17 @@ const BriefingService = (() => {
         console.log('Generating AI weather advice...');
         let advice = GeminiService.generateWeatherAdvice(rawWeather);
         if (advice) {
-           advice = advice.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-           weatherAdviceHtml = advice;
+          let formattedAdvice = advice.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+          // Formatage systématique à la ligne pour le Matin, l'Après-midi et le Soir
+          formattedAdvice = formattedAdvice
+            .replace(/(?:<br\s*\/?>|\r?\n)?\s*(?:[•\-*]\s*)?(?:<strong>)?(Matin(?:\s*\([^)]+\))?\s*:)(?:<\/strong>)?\s*/gi, '<br>&bull; <strong>$1</strong> ')
+            .replace(/(?:<br\s*\/?>|\r?\n)?\s*(?:[•\-*]\s*)?(?:<strong>)?((?:Après-midi|Apres-midi)(?:\s*\([^)]+\))?\s*:)(?:<\/strong>)?\s*/gi, '<br>&bull; <strong>$1</strong> ')
+            .replace(/(?:<br\s*\/?>|\r?\n)?\s*(?:[•\-*]\s*)?(?:<strong>)?(Soir(?:\s*\([^)]+\))?\s*:)(?:<\/strong>)?\s*/gi, '<br>&bull; <strong>$1</strong> ')
+            .replace(/\r?\n/g, '<br>')
+            .replace(/(?:<br\s*\/?>){2,}/g, '<br>')
+            .replace(/^(?:<br\s*\/?>)+/, '')
+            .trim();
+          weatherAdviceHtml = formattedAdvice;
         }
       }
     }
