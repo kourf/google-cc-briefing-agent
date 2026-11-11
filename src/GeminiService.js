@@ -52,21 +52,19 @@ const GeminiService = (() => {
    * @returns {Array<string>} Ordered list of models to try.
    */
   const getModelCascade = () => {
-    const primary = Config.getGeminiModel() || 'gemini-3.8-flash';
-    const fallback = Config.DEFAULTS.GEMINI_FALLBACK_MODEL || 'gemini-3.6-flash';
+    const primary = Config.getGeminiModel() || 'gemini-3.6-flash';
+    const fallback = Config.DEFAULTS.GEMINI_FALLBACK_MODEL || 'gemini-flash-lite-latest';
     const allModels = [
       primary,
       fallback,
-      'gemini-3.5-flash',
-      'gemini-3.5-flash-lite',
       'gemini-3.1-flash-lite',
-      'gemini-2.5-flash',
-      'gemini-2.0-flash',
-      'gemini-1.5-flash'
+      'gemini-3.5-flash-lite',
+      'gemini-3.5-flash',
+      'gemini-3.8-flash'
     ];
 
     const available = allModels.filter((m) => !exhaustedModels.has(m));
-    const models = available.length > 0 ? available : ['gemini-3.5-flash-lite', 'gemini-2.5-flash', 'gemini-1.5-flash'];
+    const models = available.length > 0 ? available : ['gemini-flash-lite-latest', 'gemini-3.1-flash-lite', 'gemini-3.5-flash-lite'];
 
     if (activeWorkingModel && models.includes(activeWorkingModel) && !exhaustedModels.has(activeWorkingModel)) {
       return [activeWorkingModel, ...models.filter((m) => m !== activeWorkingModel)];
@@ -180,10 +178,32 @@ const GeminiService = (() => {
       return emailsList.map(msg => Object.assign({}, msg, getFallbackAiData(msg)));
     }
 
-    const batchSize = Config.DEFAULTS.BATCH_SIZE || 25;
+    const batchSize = Config.DEFAULTS.BATCH_SIZE || 12;
     const enrichedResults = [];
+    const analysisStartTime = Date.now();
+    const MAX_ANALYSIS_MS = 140000; // 2 minutes 20s max pour l'ensemble des e-mails (garantie anti-timeout 6 min)
 
     for (let i = 0; i < emailsList.length; i += batchSize) {
+      // Garde-fou temporel strict : empêche tout blocage Apps Script à 6 minutes
+      if (Date.now() - analysisStartTime > MAX_ANALYSIS_MS) {
+        console.warn(`Budget temps d'analyse (140s) atteint. Activation du repli déterministe immédiat pour les ${emailsList.length - i} e-mail(s) restant(s).`);
+        try {
+          if (typeof DevOpsAgentService !== 'undefined') {
+            DevOpsAgentService.recordIncident({
+              component: 'Budget Temps Exécution',
+              severity: 'WARNING',
+              resolved: true,
+              message: 'Temps d’analyse IA approchant le seuil de sécurité.',
+              solution: 'Bascule automatique en mode repli rapide pour garantir la livraison sans timeout.'
+            });
+          }
+        } catch {}
+        for (let j = i; j < emailsList.length; j++) {
+          enrichedResults.push(Object.assign({}, emailsList[j], getFallbackAiData(emailsList[j])));
+        }
+        break;
+      }
+
       const batch = emailsList.slice(i, i + batchSize);
       const batchIndex = Math.floor(i / batchSize) + 1;
       const totalBatches = Math.ceil(emailsList.length / batchSize);
@@ -200,7 +220,7 @@ const GeminiService = (() => {
       }
 
       if (i + batchSize < emailsList.length) {
-        Utilities.sleep(2000);
+        Utilities.sleep(1000);
       }
     }
 
@@ -795,7 +815,7 @@ const GeminiService = (() => {
             role: 'user',
             parts: [
               {
-                text: `${systemPrompt}\n\nSOURCES DU JOUR :\n${newsData.rawContext.substring(0, 7000)}`
+                text: `${systemPrompt}\n\nSOURCES DU JOUR :\n${newsData.rawContext.substring(0, 5000)}`
               }
             ]
           }
