@@ -100,12 +100,12 @@ const GeminiService = (() => {
       "Rédige un bulletin météo très court pour la ville détectée, en allant systématiquement à la ligne pour chaque moment de la journée : le matin (9h), l'après-midi (15h) et le soir (21h).\n" +
       "IMPORTANT : Tu DOIS commencer ta réponse en annonçant clairement la ville sur sa propre ligne : '**Pour [Ville] :**'\n" +
       "Donne les températures, les risques de pluie et des conseils vestimentaires simples (t-shirt, veste, parapluie).\n" +
-      "N'utilise STRICTEMENT AUCUN emoji, pictogramme ou caractère spécial.\n" +
+      "FORMAT DES CHIFFRES OBLIGATOIRE : écris TOUJOURS les températures avec le symbole '°C' (ex : '10 °C') et les risques de pluie avec '%' collé au chiffre (ex : '29%'). N'écris JAMAIS 'degrés' ni 'pour cent' en toutes lettres. N'utilise aucun emoji ni pictogramme.\n" +
       "RESPECTE SCRUPULEUSEMENT CE FORMAT AVEC RETOURS À LA LIGNE POUR CHAQUE MOMENT :\n" +
       "**Pour Annemasse :**\n" +
-      "• **Matin (9h) :** Il fera assez frais (10°C), prévoyez une petite veste pour partir.\n" +
-      "• **Après-midi (15h) :** Le soleil s'installe avec 22°C, vous pourrez largement rester en t-shirt.\n" +
-      "• **Soir (21h) :** Attention, le ciel se couvre (80% de chance d'averses) et la température redescend à 14°C. Pensez à prendre une veste imperméable ou un parapluie si vous sortez.";
+      "• **Matin (9h) :** Il fera 10 °C avec 29% de risque de pluie, prévoyez une petite veste pour partir.\n" +
+      "• **Après-midi (15h) :** Le soleil s'installe avec 22 °C et 5% de risque de pluie, vous pourrez largement rester en t-shirt.\n" +
+      "• **Soir (21h) :** Attention, le ciel se couvre (80% de risque d'averses) et il fera 14 °C. Prenez un parapluie si vous sortez.";
 
     for (let model of modelCascade) {
       if (!model) continue;
@@ -744,39 +744,37 @@ const GeminiService = (() => {
 
     const systemPrompt = [
       'Tu es un journaliste vulgarisateur d’élite pour un briefing exécutif matinal.',
-      'Ton rôle : rendre le lecteur capable de comprendre chaque sujet en profondeur et d’en discuter avec des collègues dès le matin, en phrases courtes, simples (niveau 15 ans) mais ultra-denses en faits concrets.',
+      'Ton rôle : résumer l’actualité comme si tu parlais à un jeune curieux de 15 ans, tout en livrant 100 % des faits concrets (qui, quoi, ville précise, pourquoi la polémique, impact/suite) en phrases courtes et directes pour qu’on puisse en discuter avec des collègues sans devoir chercher ailleurs.',
       '',
-      'DIRECTIVES MAJEURES (STRICTES ET OBLIGATOIRES) :',
-      '1. ZÉRO FORMULE VAGUE OU CREUSE :',
-      '   - Interdiction absolue d’écrire des phrases vagues comme "accusations graves", "domaines sensibles", "certains cas", "situation personnelle difficile", "plusieurs raisons" ou "divergences".',
-      '   - DONNE TOUJOURS LES FAITS CONCRETS tirés des sources :',
-      '     • Procédure / accusation : précise les actes exacts, victimes ou chiffres reprochés tirés des sources (ex : mener des opérations militaires sans accord du parlement, tel bombardement ou tel chiffre de victimes) ET l’issue actuelle.',
-      '     • Interdiction / loi : précise les cas ou publics visés exactement (ex : protéger la santé mentale et le cerveau des enfants, tels produits ou usages).',
-      '     • Pétition / grève / mobilisation : précise OBLIGATOIREMENT ce qui est concrètement reproché à l’origine (pourquoi des citoyens ont signé la pétition ou manifesté : critiques de la ligne éditoriale ou manquements au pluralisme pour un média, revendications salariales ou suppressions de postes pour une grève) ET la décision finale. Même si les sources du jour ne parlent que du vote final, rappelle toujours brièvement ce motif d’origine reconnu.',
-      '     • Personne peu connue ou drame : explique exactement QUI est la personne (métier, club, fonction) ET ce qui lui est arrivé concrètement.',
-      '2. CONTEXTUALISATION SYSTÉMATIQUE DES PERSONNES CITÉES :',
-      '   - Pour CHAQUE personne mentionnée, indique immédiatement son rôle, métier ou fonction entre parenthèses ou naturellement dans la phrase.',
-      '   - Exemples : "Jerome Powell (le patron de la banque centrale américaine)", "Michel Barnier (le Premier ministre français)".',
-      '3. CONTEXTUALISATION SYSTÉMATIQUE DES ENTREPRISES, MÉDIAS ET INSTITUTIONS :',
-      '   - Explique toujours ce que fait chaque entreprise, marque ou institution citée.',
-      '   - Exemples : "Nvidia (le géant américain qui fabrique les puces d’intelligence artificielle)", "l’Arcom (le régulateur français de l’audiovisuel)", "OpenAI (l’entreprise qui a inventé ChatGPT)".',
-      '4. LONGUEUR MAÎTRISÉE (COMPLET MAIS PAS LONG — 2 À 3 PHRASES DENSES PAR SUJET) :',
-      '   - Phrase 1 : Qui a fait quoi concrètement (avec les faits, actes, victimes ou chiffres clés les plus précis trouvés dans les sources).',
-      '   - Phrase 2 : Pourquoi / ce qu’on reproche concrètement à l’origine (en mots simples).',
-      '   - Phrase 3 : Conséquence, blocage, réaction ou suite immédiate.',
+      'DIRECTIVES MAJEURES (STRICTES ET OBLIGATOIRES — TEST DE L’ADO DE 15 ANS) :',
+      '1. ZÉRO MOT, SIGLE OU NOM NON EXPLIQUÉ :',
+      '   - N’emploie JAMAIS un sigle, événement, unité ou terme technique sans l’expliquer immédiatement entre parenthèses en mots très simples.',
+      '   - Exemples : "la COP31 (la grande conférence mondiale annuelle de l’ONU sur le climat)", "Shahid Kaveh (une unité secrète de hackers militaires iraniens liée aux Gardiens de la Révolution)", "l’Arcom (le régulateur français qui surveille la télévision et la radio)", "une OPA (offre pour racheter une entreprise en Bourse)".',
+      '2. CONTEXTUALISATION PRÉCISE DE CHAQUE PERSONNE, SPORTIF ET ENTREPRISE :',
+      '   - Pour CHAQUE personne : précise TOUJOURS qui elle est et sa fonction/rôle exact (ex : "Thomas Massie (un député républicain américain)", "Antonio Guterres (le secrétaire général de l’ONU)").',
+      '   - Pour CHAQUE sportif : indique TOUJOURS son club/équipe ET son poste exact sur le terrain (ex : "Senny Mayulu (le jeune milieu de terrain du PSG)", "Kylian Mbappé (l’attaquant de l’équipe de France et du Real Madrid)").',
+      '   - Pour CHAQUE entreprise, marque, parti ou organisation : précise ce qu’elle fait ou vend (ex : "Coopérative U (l’enseigne française de supermarchés)", "OpenAI (l’entreprise qui a créé ChatGPT)").',
+      '3. ZÉRO RÉSUMÉ À 60 % — PRÉCISION GÉOGRAPHIQUE ET FACTUELLE MAXIMALE :',
+      '   - Interdiction absolue des formules vagues ("dans les Yvelines" sans la ville, "accusations graves", "domaines sensibles", "certains cas", "situation difficile").',
+      '   - Donne TOUJOURS la VILLE exacte si elle apparaît dans les sources ou la corroboration (ex : "à Trappes, dans les Yvelines"), le NOM exact des suspects/acteurs cités, les CHIFFRES marquants, la RAISON/POLÉMIQUE d’origine (pourquoi les gens manifestent, signent une pétition ou attaquent) ET la CONSÉQUENCE / IMPACT.',
+      '   - Pour une pétition, grève, procès ou destitution : explique toujours en mots simples POURQUOI l’affaire a commencé (ex : reproches de manque de pluralisme contre une chaîne, revendications de salaires/postes, actes illégaux reprochés) ET ce que ça change ensuite.',
+      '4. FORMAT COURT MAIS COMPLET (2 À 3 PHRASES DENSES ET LISIBLES PAR SUJET) :',
+      '   - Phrase 1 (QUI + QUOI + OÙ) : L’événement concret avec ville exacte, explication des sigles/entreprises et rôle/poste précis des personnes.',
+      '   - Phrase 2 (POURQUOI / POLÉMIQUE) : Le motif d’origine ou l’enjeu expliqué simplement.',
+      '   - Phrase 3 (IMPACT / SUITE) : La décision prise, la réaction ou ce qui va se passer ensuite.',
       '5. DEUX BLOCS ATTENDUS DANS LE JSON :',
       '   - "segments" : pour CHAQUE segment du sommaire d’HugoDécrypte (ignore Intro et Outro). Précise le minutage exact ("timestamp"), un titre clair ("segmentTitle"), une catégorie strictement choisie parmi ["Politique & Géopolitique", "Économie & Entreprises", "Social & Sociétal", "Tech, IA & Sciences", "Environnement & Écologie", "Justice & Lois", "Culture & Savoir", "Sport", "Faits divers"] (n’utilise JAMAIS le mot vague "Médias"), et le résumé factuel complet ("summary").',
-      '   - "categories" : génère UN objet par rubrique dans CET ORDRE EXACT (PESTEL + Culture + Sport + Faits divers) en utilisant UNIQUEMENT les sources Google Actualités correspondantes fournies dans la section [COMPLÉMENT D’ACTUALITÉS] (et sans répéter les sujets déjà résumés dans HugoDécrypte, sauf absence d’autre dépêche) :',
+      '   - "categories" : génère UN objet par rubrique dans CET ORDRE EXACT (PESTEL + Culture + Sport + Faits divers) en utilisant UNIQUEMENT les sources Google Actualités correspondantes fournies dans [COMPLÉMENT D’ACTUALITÉS] (avec leur corroboration presse pour être 100 % précis, et sans répéter les sujets déjà résumés dans HugoDécrypte sauf absence d’autre dépêche) :',
       '     1) "P — Politique & Géopolitique" (élections, diplomatie, conflits, gouvernement, parlement — laisse les sujets climat/COP pour la rubrique Environnement)',
       '     2) "E — Économie, Finance & Entreprises" (entreprises, marchés, impôts, budget, énergie/carburant)',
       '     3) "S — Social & Sociétal" (pouvoir d’achat, logement, grèves avec leurs revendications précises, éducation, santé publique)',
       '     4) "T — Technologie, IA & Innovation" (intelligence artificielle, cybersécurité, high-tech, puces)',
       '     5) "E — Environnement & Écologie" (climat, COP, transition écologique, biodiversité)',
       '     6) "L — Légal : Justice, Lois & Procès" (procès, décisions judiciaires majeures, projets de loi, condamnations)',
-      '     7) "Culture & Savoir (Cinéma, Livres, Histoire & Sciences)" (découverte scientifique ou historique passionnante, film, livre ou fait culturel pour dormir moins bête — parle de faits concrets, jamais du terme abstrait "médias")',
-      '     8) "Sport" (résultat, transfert, blessure ou événement majeur du sport)',
-      '     9) "Faits divers (Délits, Crimes & Accidents marquants)" (délit, crime, enquête, accident grave ou décès marquant issu des sources Google Actualités)',
-      '     Pour chaque rubrique : "categoryName", "headline" (titre précis), "summary" (2 à 3 phrases claires, niveau 15 ans, zéro formule vague, rôles des personnes et entreprises expliqués). Ne mélange JAMAIS les détails (lieux, dates ou affaires) de deux dépêches distinctes dans un même résumé.',
+      '     7) "Culture & Savoir (Cinéma, Livres, Histoire & Sciences)" (découverte scientifique ou historique passionnante, film, livre ou fait culturel pour dormir moins bête — explique concrètement de quoi il s’agit, jamais du terme abstrait "médias")',
+      '     8) "Sport" (résultat, transfert, blessure ou événement majeur du sport avec poste exact des joueurs)',
+      '     9) "Faits divers (Délits, Crimes & Accidents marquants)" (délit, crime, enquête, accident grave ou décès marquant avec ville exacte et motif)',
+      '     Pour chaque rubrique : "categoryName", "headline" (titre précis), "summary" (2 à 3 phrases claires, complètes et pédagogiques). Ne mélange JAMAIS les détails (lieux, dates ou affaires) de deux dépêches distinctes dans un même résumé.',
       '6. ZÉRO ÉMOJI : n’utilise strictement aucun emoji ni symbole dans le texte généré.',
       '7. Réponds UNIQUEMENT en JSON avec la structure spécifiée dans le schéma.'
     ].join('\n');
@@ -834,7 +832,7 @@ const GeminiService = (() => {
             role: 'user',
             parts: [
               {
-                text: `${systemPrompt}\n\nSOURCES DU JOUR :\n${newsData.rawContext.substring(0, 35000)}`
+                text: `${systemPrompt}\n\nSOURCES DU JOUR :\n${newsData.rawContext.substring(0, 48000)}`
               }
             ]
           }

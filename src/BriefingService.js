@@ -203,6 +203,12 @@ const BriefingService = (() => {
         let advice = GeminiService.generateWeatherAdvice(rawWeather);
         if (advice) {
           let formattedAdvice = advice.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+          // Normalisation stricte des températures en "°C" et probabilités en "%"
+          formattedAdvice = formattedAdvice
+            .replace(/(-?\d+(?:[.,]\d+)?)\s*(?:degrés?(?:\s*celsius)?|°\s*C)\b/gi, '$1 °C')
+            .replace(/(-?\d+(?:[.,]\d+)?)\s*°(?=\s|$|[.,;:])/g, '$1 °C')
+            .replace(/(\d+(?:[.,]\d+)?)\s*pour\s*cent\b/gi, '$1%')
+            .replace(/(\d+(?:[.,]\d+)?)\s+%/g, '$1%');
           // Formatage systématique à la ligne pour le Matin, l'Après-midi et le Soir
           formattedAdvice = formattedAdvice
             .replace(/(?:<br\s*\/?>|\r?\n)?\s*(?:[•\-*]\s*)?(?:<strong>)?(Matin(?:\s*\([^)]+\))?\s*:)(?:<\/strong>)?\s*/gi, '<br>&bull; <strong>$1</strong> ')
@@ -360,7 +366,7 @@ const BriefingService = (() => {
       }
 
       if (data.newsDigest.categories && data.newsDigest.categories.length > 0) {
-        lines.push('=== COMPLÉMENT D\'ACTUALITÉS PAR CATÉGORIE ===');
+        lines.push('=== COMPLÉMENT D\'ACTUALITÉS ISSU DE GOOGLE ACTUALITÉS ===');
         for (const cat of data.newsDigest.categories) {
           lines.push(`• ${cat.name} :`);
           for (const item of cat.items || []) {

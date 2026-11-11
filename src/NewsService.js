@@ -305,6 +305,31 @@ const NewsService = (() => {
   };
 
   /**
+   * Extrait 5 mots-clés porteurs d'un titre de presse pour rechercher des dépêches
+   * complémentaires Google Actualités (ville exacte, motif, acteurs).
+   *
+   * @param {string} rawTitle - Titre brut d'une dépêche.
+   * @returns {string} Requête optimisée pour Google News RSS.
+   */
+  const buildCorroborationQuery = (rawTitle) => {
+    if (!rawTitle) return '';
+    const noSource = rawTitle.replace(/\s+-\s+[^-]+$/, '');
+    const noPrefix = noSource.replace(/^(?:EN\s+DIRECT|DIRECT|INFO\s+[A-Z-]+|VIDEO|CARTE|ÉDITO)\s*[-:.]\s*/i, '');
+    const stopWords = new Set([
+      'les', 'des', 'une', 'est', 'sont', 'pour', 'par', 'sur', 'dans', 'avec',
+      'qui', 'que', 'dit', 'fait', 'avoir', 'être', 'aux', 'ses', 'son', 'cette',
+      'tout', 'tous', 'plus', 'après', 'avant', 'entre', 'contre', 'vers', 'chez',
+      'lors', 'sous', 'selon', 'veut', 'peut', 'aussi', 'mais'
+    ]);
+    const words = noPrefix
+      .replace(/['’«»"“”:,.;?!()\[\]]/g, ' ')
+      .split(/\s+/)
+      .map((w) => w.trim())
+      .filter((w) => w.length >= 3 && !stopWords.has(w.toLowerCase()));
+    return words.slice(0, 5).join(' ');
+  };
+
+  /**
    * Récupère en parallèle les flux HugoDécrypte et les flux Google Actualités par catégorie PESTEL.
    * Isole strictement la vraie vidéo quotidienne complète d'HugoDécrypte (exclut tous les Shorts),
    * analyse le sommaire détaillé et enrichit les liens sources des articles de presse.
@@ -558,8 +583,10 @@ const NewsService = (() => {
       }
     }
 
+    const dedupedByCat = [];
+    const corrobJobs = [];
+
     for (let i = 0; i < CATEGORIES.length; i++) {
-      const cat = CATEGORIES[i];
       const seenTitles = new Set();
       const catItems = [];
       for (const it of groupedCatItems[i]) {
@@ -569,11 +596,52 @@ const NewsService = (() => {
           catItems.push(it);
         }
       }
+      dedupedByCat.push(catItems);
+
+      // Corroboration multi-journaux Google Actualités sur les 2 titres principaux de chaque rubrique
+      for (const topIt of catItems.slice(0, 2)) {
+        const q = buildCorroborationQuery(topIt.title);
+        if (q) {
+          corrobJobs.push({
+            catIdx: i,
+            req: { url: buildGoogleSearchRss(q), muteHttpExceptions: true }
+          });
+        }
+      }
+    }
+
+    const corrobResponses = fetchUrlsSafely(corrobJobs.map((j) => j.req));
+    const corrobByCat = CATEGORIES.map(() => []);
+    for (let j = 0; j < corrobJobs.length; j++) {
+      const res = corrobResponses[j];
+      if (res && res.getResponseCode() === 200) {
+        const extra = parseGoogleNewsItems(res.getContentText(), 4);
+        corrobByCat[corrobJobs[j].catIdx].push(...extra.map((e) => e.title));
+      }
+    }
+
+    for (let i = 0; i < CATEGORIES.length; i++) {
+      const cat = CATEGORIES[i];
+      const catItems = dedupedByCat[i];
 
       if (catItems.length > 0) {
         rawContext += `\n[${cat.name}]\n`;
+        const seenContextLines = new Set();
         for (const it of catItems) {
+          seenContextLines.add(it.title.toLowerCase().substring(0, 45));
           rawContext += it.desc ? `- ${it.title} (${it.desc})\n` : `- ${it.title}\n`;
+        }
+        const extraLines = [];
+        for (const extraTitle of corrobByCat[i]) {
+          const normKey = extraTitle.toLowerCase().substring(0, 45);
+          if (!seenContextLines.has(normKey)) {
+            seenContextLines.add(normKey);
+            extraLines.push(extraTitle);
+            if (extraLines.length >= 4) break;
+          }
+        }
+        for (const ext of extraLines) {
+          rawContext += `  • Corroboration presse : ${ext}\n`;
         }
 
         fallbackCategories.push({
