@@ -165,7 +165,7 @@ const DevOpsAgentService = (() => {
     const hasAutoRepaired = recordedIncidents.some((i) => i.resolved && (i.severity === 'WARNING' || i.severity === 'INFO'));
 
     let status = 'ALL_CLEAR';
-    let statusPill = '🟢 Tous les systèmes sont au vert';
+    let statusPill = 'Systèmes 100% nominaux';
     let statusBadgeColor = '#10B981'; // Émeraude
     let statusBgColor = '#ECFDF5';
     let statusBorderColor = '#A7F3D0';
@@ -173,21 +173,21 @@ const DevOpsAgentService = (() => {
 
     if (hasUnresolved) {
       status = 'ALERT';
-      statusPill = '🔴 Action manuelle requise';
+      statusPill = 'Action requise';
       statusBadgeColor = '#EF4444'; // Rouge
       statusBgColor = '#FEF2F2';
       statusBorderColor = '#FECACA';
       engineerNote = 'Attention Kouroufia : une anomalie externe nécessite une action manuelle.';
     } else if (hasAutoRepaired) {
       status = 'AUTO_REPAIRED';
-      statusPill = '🟡 Incidents interceptés & auto-réparés';
-      statusBadgeColor = '#F59E0B'; // Ambre
+      statusPill = 'Incidents interceptés & auto-réparés';
+      statusBadgeColor = '#D97706'; // Ambre soutenu
       statusBgColor = '#FFFBEB';
       statusBorderColor = '#FDE68A';
-      engineerNote = 'Bonjour Kouroufia, j’ai intercepté et corrigé automatiquement des anomalies sur les serveurs externes : votre briefing a été intégralement préservé.';
+      engineerNote = 'Bonjour Kouroufia, anomalies externes corrigées avec succès : votre briefing a été intégralement préservé.';
     } else {
       status = 'ALL_CLEAR';
-      statusPill = '🟢 Systèmes 100% nominaux';
+      statusPill = 'Systèmes 100% nominaux';
       statusBadgeColor = '#10B981';
       statusBgColor = '#ECFDF5';
       statusBorderColor = '#A7F3D0';

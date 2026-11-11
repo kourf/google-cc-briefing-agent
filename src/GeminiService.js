@@ -52,19 +52,20 @@ const GeminiService = (() => {
    * @returns {Array<string>} Ordered list of models to try.
    */
   const getModelCascade = () => {
-    const primary = Config.getGeminiModel() || 'gemini-3.6-flash';
-    const fallback = Config.DEFAULTS.GEMINI_FALLBACK_MODEL || 'gemini-flash-lite-latest';
+    const primary = Config.getGeminiModel() || 'gemini-3.1-flash-lite';
+    const fallback = Config.DEFAULTS.GEMINI_FALLBACK_MODEL || 'gemini-3.5-flash-lite';
     const allModels = [
       primary,
       fallback,
       'gemini-3.1-flash-lite',
       'gemini-3.5-flash-lite',
-      'gemini-3.5-flash',
-      'gemini-3.8-flash'
+      'gemini-3.6-flash',
+      'gemini-3.8-flash',
+      'gemini-3.5-flash'
     ];
 
     const available = allModels.filter((m) => !exhaustedModels.has(m));
-    const models = available.length > 0 ? available : ['gemini-flash-lite-latest', 'gemini-3.1-flash-lite', 'gemini-3.5-flash-lite'];
+    const models = available.length > 0 ? available : ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite'];
 
     if (activeWorkingModel && models.includes(activeWorkingModel) && !exhaustedModels.has(activeWorkingModel)) {
       return [activeWorkingModel, ...models.filter((m) => m !== activeWorkingModel)];
@@ -801,7 +802,7 @@ const GeminiService = (() => {
 
       const genConfig = {
         temperature: 0.2,
-        maxOutputTokens: 2048,
+        maxOutputTokens: 4096,
         responseMimeType: 'application/json',
         responseSchema
       };
@@ -849,13 +850,20 @@ const GeminiService = (() => {
               summary: Utils.sanitizeText(seg.summary)
             }));
 
-            // Structure Hugo Edition
+            // Structure Hugo Edition (avec repli systématique sur les segments natifs si Gemini en omettait)
+            const fallbackSegments = (newsData.hugoEpisode?.segments || []).map((seg) => ({
+              timestamp: Utils.sanitizeText(seg.timestamp || '01:00'),
+              segmentTitle: Utils.sanitizeText(seg.title || seg.segmentTitle),
+              category: 'Actualités',
+              summary: Utils.sanitizeText(seg.title || seg.segmentTitle)
+            }));
+
             const hugoEdition = newsData.hugoEpisode ? {
               videoTitle: Utils.sanitizeText(newsData.hugoEpisode.title),
               videoUrl: newsData.hugoEpisode.url,
               publishedDate: Utils.sanitizeText(newsData.hugoEpisode.publishedDate),
               editionTitle: Utils.sanitizeText(newsData.hugoEpisode.editionTitle),
-              segments: sanitizedSegments
+              segments: sanitizedSegments.length > 0 ? sanitizedSegments : fallbackSegments
             } : null;
 
             // Catégories complémentaires contextualisées et vulgarisées
@@ -933,10 +941,10 @@ const GeminiService = (() => {
         publishedDate: Utils.sanitizeText(newsData.hugoEpisode.publishedDate),
         editionTitle: Utils.sanitizeText(newsData.hugoEpisode.editionTitle),
         segments: (newsData.hugoEpisode.segments || []).map((seg) => ({
-          timestamp: Utils.sanitizeText(seg.timestamp),
-          segmentTitle: Utils.sanitizeText(seg.title),
+          timestamp: Utils.sanitizeText(seg.timestamp || '01:00'),
+          segmentTitle: Utils.sanitizeText(seg.title || seg.segmentTitle || 'Actualité'),
           category: 'Actualités',
-          summary: Utils.sanitizeText(seg.title)
+          summary: Utils.sanitizeText(seg.summary || seg.title || seg.segmentTitle || 'Sujet du jour')
         }))
       } : null,
       categories: newsData.fallbackCategories || [],

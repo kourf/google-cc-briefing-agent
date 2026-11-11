@@ -216,7 +216,7 @@
       <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 6px;">
         <tr>
           <td align="left" style="font-size: 13px; font-weight: 700; color: #111827;">
-            🧑‍💻 <?= rep.employeeName ?>
+            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background-color: <?= rep.statusBadgeColor ?>; margin-right: 6px; vertical-align: middle;"></span><strong><?= rep.employeeName ?></strong>
           </td>
           <td align="right" style="font-size: 11px; font-weight: 600; color: #FFFFFF;">
             <span style="display: inline-block; background-color: <?= rep.statusBadgeColor ?>; padding: 2px 8px; border-radius: 10px;">
@@ -244,7 +244,7 @@
                var item = rep.incidents[inc];
           ?>
           <li style="margin-bottom: 4px;">
-            <strong>[<?= item.component ?>]</strong> <?= item.message ?> ➔ <em><?= item.solution ?></em>
+            <strong>[<?= item.component ?>]</strong> <?= item.message ?> &rarr; <em><?= item.solution ?></em>
           </li>
           <? } ?>
         </ul>

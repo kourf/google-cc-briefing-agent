@@ -266,6 +266,84 @@ const NewsService = (() => {
       console.warn(`Erreur lecture flux YouTube HugoDécrypte : ${e.message}`);
     }
 
+    // 1b. Repli robuste sur le flux audio Acast officiel d'HugoDécrypte si YouTube est indisponible
+    if (!hugoEpisode) {
+      try {
+        const acastRes = responses[1];
+        if (acastRes && acastRes.getResponseCode() === 200) {
+          const acastXml = acastRes.getContentText();
+          const items = acastXml.split('<item>').slice(1);
+          const targetItem = items.find((it) => {
+            const tMatch = it.match(/<title>([\s\S]*?)<\/title>/i);
+            const t = tMatch ? tMatch[1].toLowerCase() : '';
+            return !t.includes('pop') && !t.includes('grands formats');
+          }) || items[0];
+
+          if (targetItem) {
+            const tMatch = targetItem.match(/<title>([\s\S]*?)<\/title>/);
+            const lMatch = targetItem.match(/<link>([\s\S]*?)<\/link>/);
+            const pMatch = targetItem.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
+
+            const title = cleanXmlText(tMatch ? tMatch[1] : 'Les Actus du Jour');
+            const link = cleanXmlText(lMatch ? lMatch[1] : 'https://www.youtube.com/@HugoDecrypte');
+            const pubIso = pMatch ? pMatch[1] : '';
+
+            let publishedDateFormatted = '';
+            if (pubIso) {
+              try {
+                publishedDateFormatted = Utils.formatDateFrench(new Date(pubIso));
+              } catch {
+                publishedDateFormatted = Utils.formatDateFrench(new Date());
+              }
+            } else {
+              publishedDateFormatted = Utils.formatDateFrench(new Date());
+            }
+
+            const fallbackSegments = [
+              { timestamp: '01:00', title: title }
+            ];
+
+            hugoEpisode = {
+              title,
+              url: link,
+              publishedDate: publishedDateFormatted,
+              publishedIso: pubIso,
+              editionTitle: `Les Actus du Jour du ${publishedDateFormatted}`,
+              segments: fallbackSegments
+            };
+
+            rawContext += `=== SOURCE PRIORITAIRE : HUGODÉCRYPTE (ÉDITION QUOTIDIENNE DU ${publishedDateFormatted}) ===\n`;
+            rawContext += `Titre de l'édition : "${title}"\n`;
+            rawContext += `Lien de l'épisode : ${link}\n`;
+            rawContext += `Date de publication : ${publishedDateFormatted}\n\n`;
+            rawContext += `SOMMAIRE DÉTAILLÉ DE LA VIDÉO :\n[01:00] ${title}\n\n`;
+          }
+        }
+      } catch (acastErr) {
+        console.warn(`Erreur repli Acast HugoDécrypte : ${acastErr.message}`);
+      }
+    }
+
+    // 1c. Garantie absolue d'existence de hugoEpisode et de segments non-vides
+    if (hugoEpisode) {
+      if (!hugoEpisode.segments || hugoEpisode.segments.length === 0) {
+        hugoEpisode.segments = [{ timestamp: '01:00', title: hugoEpisode.title }];
+      }
+    } else {
+      const todayDateStr = Utils.formatDateFrench(new Date());
+      hugoEpisode = {
+        title: "Les Actus du Jour — Synthèse Quotidienne",
+        url: 'https://www.youtube.com/@HugoDecrypte',
+        publishedDate: todayDateStr,
+        publishedIso: new Date().toISOString(),
+        editionTitle: `Les Actus du Jour du ${todayDateStr}`,
+        segments: [
+          { timestamp: '01:00', title: "Actualités marquantes en France et à l'international" }
+        ]
+      };
+      rawContext += `=== SOURCE PRIORITAIRE : HUGODÉCRYPTE (ÉDITION DU ${todayDateStr}) ===\nTitre: ${hugoEpisode.title}\nLien: ${hugoEpisode.url}\n[01:00] Synthèse des temps forts de la journée\n\n`;
+    }
+
     // 2. Analyse des flux Google Actualités par catégorie (Complément d'information)
     rawContext += `=== COMPLÉMENT D'ACTUALITÉS PAR CATÉGORIE (GOOGLE ACTUALITÉS FRANCE) ===\n`;
 
