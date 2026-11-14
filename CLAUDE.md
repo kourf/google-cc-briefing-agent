@@ -33,7 +33,7 @@ Le système est un **agent exécutif autonome serverless** hébergé sur **Googl
 2. **Récapitulatif catégorisé des e-mails non lus** (avec désambiguïsation stricte LinkedIn, emploi, administration, banque, santé, etc.).
 3. **Planning du jour (Google Calendar)** avec extraction automatique des liens de visioconférence (Google Meet, Zoom, Microsoft Teams) et détection de la ville de déplacement.
 4. **Météo dynamique & Conseil vestimentaire** (basée sur la ville de l'agenda ou par défaut `Annemasse` via `wttr.in`), structurée en Matin (9h) / Après-midi (15h) / Soir (21h).
-5. **Les Actus du Jour — Synthèse HugoDécrypte** (extraction de la dernière vidéo longue YouTube, chapitrage horodaté, enrichissement par les articles de presse en description et repli RSS Acast).
+5. **Les Actus du Jour — Synthèse HugoDécrypte** (extraction de la dernière vidéo longue YouTube, chapitrage horodaté, enrichissement par les articles de presse en description ; source unique YouTube @hugodecrypteactus, sans Acast depuis le 14/11/2026).
 6. **Complément d'actualités issu de Google Actualités** structuré selon **9 rubriques PESTEL+ normalisées**, avec corroboration multi-sources pour garantir une précision journalistique maximale (villes exactes, fonctions des personnes, explication des sigles).
 7. **Rapport de l'Agent de Contrôle & Bon Fonctionnement** (`DevOpsAgentService`), un ingénieur SRE/DevOps virtuel déterministe qui audite et auto-répare les checkpoints, les verrous et les déclencheurs avant chaque exécution.
 
@@ -82,7 +82,7 @@ flowchart TB
         CAL_API[("Google Calendar\nAgenda Principal")]
         WTTR[("API Météo wttr.in\n(JSON format=j1)")]
         YT_HUGO[("YouTube XML Feed\n@hugodecrypteactus")]
-        ACAST_HUGO[("Acast RSS Feed\nHugoDécrypte Audio")]
+        YT_PAGE[("YouTube page Vidéos\n@hugodecrypteactus/videos")]
         GNEWS[("Google Actualités RSS\n9 Flux PESTEL+ & Corroboration")]
         PRESS[("Sites de Presse Tiers\n(Extraction JSON-LD / HTML)")]
         GEMINI_API[["Google Gemini API (v1beta)\nCascade: 3.1-flash-lite -> 3.5-flash-lite -> ..."]]
@@ -108,7 +108,7 @@ flowchart TB
     CAL_S <-->|"CalendarApp"| CAL_API
     WEATHER_S <-->|"UrlFetchApp"| WTTR
     NEWS_S <-->|"fetchUrlsSafely"| YT_HUGO
-    NEWS_S <-->|"Fallback RSS"| ACAST_HUGO
+    NEWS_S <-->|"Dernière vidéo longue + chapitres"| YT_PAGE
     NEWS_S <-->|"fetchUrlsSafely"| GNEWS
     NEWS_S <-->|"Scraping Résilient"| PRESS
     GEMINI_S <-->|"JSON Schema / Cascade"| GEMINI_API
@@ -174,7 +174,7 @@ git push origin main
 2. **Les Actus du Jour — Synthèse HugoDécrypte** :
    - Source : dernière vidéo longue publique de `https://www.youtube.com/@hugodecrypteactus/videos` (`channel_id=UCAcAnMF0OrCtUep3Y4M-ZPw`).
    - Exclure impérativement les Shorts (`/shorts/` ou `#shorts`).
-   - Repli automatique sur le flux RSS Acast officiel (`https://feeds.acast.com/public/shows/61365f9fb4ac8f42e6668a5c`) si YouTube est indisponible.
+   - Source unique YouTube (décision du 14/11/2026) : la page « Vidéos » désigne la dernière vidéo longue, le flux RSS ou la page de la vidéo fournit les chapitres. Ne jamais utiliser Acast. Si YouTube est injoignable, afficher un lien vers la chaîne sans inventer de résumé.
    - **Règles Anti-Vague** :
      - **Lieux précis** : Toujours nommer la ville ou commune exacte (ex. "Trappes" et non "en banlieue parisienne").
      - **Identités et fonctions** : Toujours donner le prénom, le nom ET la fonction ou le poste exact (ex. "Senny Mayulu (le jeune milieu de terrain du PSG)").

@@ -1,8 +1,8 @@
 /**
  * Google CC Briefing Agent
  * NewsService.js — Collecte des actualités du jour :
- * 1. HugoDécrypte « Les Actus du Jour » : dernière vidéo longue YouTube (Shorts exclus),
- *    repli sur le flux audio Acast officiel, chapitrage horodaté et articles sources de la description ;
+ * 1. HugoDécrypte « Les Actus du Jour » : dernière vidéo longue de la chaîne YouTube
+ *    @hugodecrypteactus (Shorts exclus), chapitrage horodaté et articles sources de la description ;
  * 2. Complément Google Actualités en 9 rubriques PESTEL+ avec corroboration multi-sources.
  *
  * Toutes les requêtes passent par Utils.fetchUrlsSafely (parallèle, résilient, budget temps borné).
@@ -180,28 +180,89 @@ const NewsService = (() => {
   };
 
   /**
-   * Sélectionne la dernière vidéo longue publique de la chaîne :
-   * exclusion stricte des Shorts, puis préférence pour une vidéo chapitrée publiée
-   * dans les 30 h suivant la plus récente (l'édition quotidienne comporte toujours un sommaire).
-   *
-   * @param {string} feedXml - Flux YouTube Atom.
-   * @returns {Object|null} { title, url, published, description }
+   * En-têtes « navigateur » pour les pages YouTube (langue française + consentement cookies
+   * pré-accepté, sinon YouTube peut renvoyer sa page de consentement au lieu de la chaîne).
    */
-  const selectLatestLongVideo = (feedXml) => {
-    const videos = String(feedXml || '')
+  const YOUTUBE_HEADERS = Object.freeze({
+    'User-Agent': BROWSER_HEADERS['User-Agent'],
+    'Accept-Language': 'fr-FR,fr;q=0.9',
+    Cookie: 'CONSENT=YES+1; SOCS=CAI'
+  });
+
+  const watchUrl = (id) => `https://www.youtube.com/watch?v=${id}`;
+
+  /**
+   * Vidéos longues du flux RSS de la chaîne (Shorts exclus), de la plus récente à la plus ancienne.
+   * @param {string} feedXml - Flux YouTube Atom.
+   * @returns {Array<{id: string, title: string, url: string, published: string, description: string}>}
+   */
+  const parseFeedVideos = (feedXml) =>
+    String(feedXml || '')
       .split('<entry>')
       .slice(1)
       .map((entry) => {
         const linkMatch = entry.match(/<link[^>]*rel="alternate"[^>]*href="([^"]+)"/) || entry.match(/<link[^>]*href="([^"]+)"/);
+        const url = linkMatch ? linkMatch[1] : '';
         return {
+          id: readTag(entry, 'yt:videoId') || (url.match(/[?&]v=([\w-]{11})/) || [])[1] || '',
           title: Utils.stripMarkup(readTag(entry, 'title')),
-          url: linkMatch ? linkMatch[1] : '',
+          url,
           published: readTag(entry, 'published'),
           description: Utils.decodeHtmlEntities(readTag(entry, 'media:description'))
         };
       })
       .filter((v) => v.url && !v.url.includes('/shorts/') && !/#shorts?\b/i.test(`${v.title} ${v.description}`));
 
+  /**
+   * Identifiant de la première vidéo de l'onglet « Vidéos » de la chaîne
+   * (https://www.youtube.com/@hugodecrypteactus/videos) : cet onglet ne contient que les
+   * vidéos longues, de la plus récente à la plus ancienne (les Shorts ont leur propre onglet).
+   * @param {string} html
+   * @returns {string} Identifiant (11 caractères) ou chaîne vide.
+   */
+  const firstVideoIdFromChannelPage = (html) => {
+    const m = String(html || '').match(/"videoId":"([\w-]{11})"/);
+    return m ? m[1] : '';
+  };
+
+  /**
+   * Détails d'une vidéo lus sur sa page YouTube (titre, description complète avec chapitres, date).
+   * @param {string} id - Identifiant de la vidéo.
+   * @returns {Object|null} { id, title, url, published, description }
+   */
+  const fetchWatchDetails = (id) => {
+    const [res] = Utils.fetchUrlsSafely([{ url: `${watchUrl(id)}&hl=fr`, headers: YOUTUBE_HEADERS }]);
+    const html = Utils.okText(res);
+    if (!html) return null;
+    const jsonString = (re) => {
+      const m = html.match(re);
+      if (!m) return '';
+      try {
+        return JSON.parse(`"${m[1]}"`);
+      } catch {
+        return '';
+      }
+    };
+    const title =
+      jsonString(/"videoDetails":\{[^}]*?"title":"((?:[^"\\]|\\.)*)"/) ||
+      Utils.stripMarkup((html.match(/<meta\s+name="title"\s+content="([^"]*)"/) || [])[1]);
+    if (!title) return null;
+    return {
+      id,
+      title,
+      url: watchUrl(id),
+      published: jsonString(/"publishDate":"([^"]+)"/) || jsonString(/"uploadDate":"([^"]+)"/),
+      description: jsonString(/"shortDescription":"((?:[^"\\]|\\.)*)"/)
+    };
+  };
+
+  /**
+   * Repli sur le seul flux RSS : préférence pour une vidéo chapitrée publiée dans les 30 h
+   * suivant la plus récente (l'édition quotidienne comporte toujours un sommaire).
+   * @param {Array<Object>} videos
+   * @returns {Object|null}
+   */
+  const selectFromFeed = (videos) => {
     if (videos.length === 0) return null;
     const newestTime = new Date(videos[0].published).getTime() || 0;
     const chaptered = videos.find(
@@ -211,22 +272,40 @@ const NewsService = (() => {
   };
 
   /**
-   * Sélectionne le dernier épisode quotidien du flux Acast (hors formats « Pop » et grands formats).
-   * @param {string} feedXml
+   * Dernière vidéo longue publique de la chaîne YouTube HugoDécrypte (source unique, jamais de Short) :
+   * 1. la page « Vidéos » de la chaîne désigne la dernière vidéo longue (source de vérité) ;
+   * 2. son sommaire est lu dans le flux RSS, sinon directement sur la page de la vidéo ;
+   * 3. si la page de la chaîne est illisible, le flux RSS seul est utilisé.
+   * Le flux RSS YouTube renvoie parfois des erreurs 404 passagères : une seconde tentative
+   * est faite si les deux sources ont échoué.
+   *
+   * @param {string} feedXml - Flux RSS déjà téléchargé.
+   * @param {string} pageHtml - Page « Vidéos » déjà téléchargée.
    * @returns {Object|null} { title, url, published, description }
    */
-  const selectLatestAcastEpisode = (feedXml) => {
-    const items = String(feedXml || '').split('<item>').slice(1);
-    if (items.length === 0) return null;
-    const target = items.find((it) => !/\bpop\b|grands?\s+formats?/i.test(Utils.stripMarkup(readTag(it, 'title')))) || items[0];
-    const enclosure = target.match(/<enclosure[^>]*url="([^"]+)"/);
-    return {
-      title: Utils.stripMarkup(readTag(target, 'title')) || 'Les Actus du Jour',
-      url: Utils.stripMarkup(readTag(target, 'link')) || (enclosure ? enclosure[1] : Config.NEWS_SOURCES.HUGO_CHANNEL_VIDEOS_URL),
-      published: readTag(target, 'pubDate'),
-      description: Utils.decodeHtmlEntities(readTag(target, 'description') || readTag(target, 'itunes:summary'))
-        .replace(/<br\s*\/?>|<\/p>/gi, '\n')
-    };
+  const resolveLatestVideo = (feedXml, pageHtml) => {
+    let feedVideos = parseFeedVideos(feedXml);
+    let pageId = firstVideoIdFromChannelPage(pageHtml);
+
+    if (feedVideos.length === 0 && !pageId) {
+      console.warn('HugoDécrypte : YouTube n’a pas répondu, nouvelle tentative.');
+      Utilities.sleep(1500);
+      const [feedRes, pageRes] = Utils.fetchUrlsSafely([
+        { url: Config.NEWS_SOURCES.HUGO_YOUTUBE_FEED },
+        { url: Config.NEWS_SOURCES.HUGO_CHANNEL_VIDEOS_URL, headers: YOUTUBE_HEADERS }
+      ]);
+      feedVideos = parseFeedVideos(Utils.okText(feedRes));
+      pageId = firstVideoIdFromChannelPage(Utils.okText(pageRes));
+    }
+
+    if (pageId) {
+      const inFeed = feedVideos.find((v) => v.id === pageId);
+      if (inFeed && parseSegments(inFeed.description).length > 0) return inFeed;
+      const details = fetchWatchDetails(pageId);
+      if (details) return details;
+      if (inFeed) return inFeed;
+    }
+    return selectFromFeed(feedVideos);
   };
 
   /**
@@ -266,35 +345,37 @@ const NewsService = (() => {
   };
 
   /**
-   * Construit l'épisode HugoDécrypte du jour (YouTube, sinon Acast, sinon indisponible)
-   * et le contexte texte correspondant pour l'IA.
-   *
-   * @param {string} youtubeXml
-   * @param {string} acastXml
+   * Édition « indisponible » : lien vers la chaîne YouTube, aucun contenu inventé.
    * @returns {{episode: Object, context: string}}
    */
-  const buildHugoEpisode = (youtubeXml, acastXml) => {
-    const youtube = selectLatestLongVideo(youtubeXml);
-    const acast = youtube ? null : selectLatestAcastEpisode(acastXml);
-    const pick = youtube || acast;
+  const buildUnavailableHugo = () => ({
+    episode: {
+      available: false,
+      source: 'none',
+      sourceLabel: 'Voir les vidéos de la chaîne HugoDécrypte sur YouTube',
+      title: 'Les Actus du Jour',
+      url: Config.NEWS_SOURCES.HUGO_CHANNEL_VIDEOS_URL,
+      publishedDate: Utils.formatDateFrench(new Date()),
+      segments: []
+    },
+    context: '=== HUGODÉCRYPTE : AUCUNE VIDÉO YOUTUBE DISPONIBLE CE MATIN (ne génère aucun segment) ===\n\n'
+  });
 
+  /**
+   * Construit l'édition HugoDécrypte du jour (dernière vidéo longue YouTube uniquement)
+   * et le contexte texte correspondant pour l'IA.
+   *
+   * @param {string} feedXml - Flux RSS de la chaîne.
+   * @param {string} pageHtml - Page « Vidéos » de la chaîne.
+   * @returns {{episode: Object, context: string}}
+   */
+  const buildHugoEpisode = (feedXml, pageHtml) => {
+    const pick = resolveLatestVideo(feedXml, pageHtml);
     if (!pick) {
-      console.warn('HugoDécrypte : ni YouTube ni Acast disponibles ce matin.');
-      return {
-        episode: {
-          available: false,
-          source: 'none',
-          sourceLabel: 'Voir les vidéos de la chaîne HugoDécrypte',
-          title: 'Les Actus du Jour',
-          url: Config.NEWS_SOURCES.HUGO_CHANNEL_VIDEOS_URL,
-          publishedDate: Utils.formatDateFrench(new Date()),
-          segments: []
-        },
-        context: '=== HUGODÉCRYPTE : AUCUNE ÉDITION DISPONIBLE CE MATIN (ne génère aucun segment) ===\n\n'
-      };
+      console.warn('HugoDécrypte : chaîne YouTube indisponible ce matin.');
+      return buildUnavailableHugo();
     }
 
-    const source = youtube ? 'youtube' : 'acast';
     const publishedDate = formatPublished(pick.published);
     const segments = parseSegments(pick.description);
     const articleUrls = extractArticleUrls(pick.description);
@@ -306,7 +387,7 @@ const NewsService = (() => {
       console.warn('HugoDécrypte : enrichissement presse ignoré (budget temps).');
     }
 
-    let context = `=== SOURCE PRIORITAIRE : HUGODÉCRYPTE (${source === 'youtube' ? 'VIDÉO' : 'ÉPISODE AUDIO'} DU ${publishedDate}) ===\n`;
+    let context = `=== SOURCE PRIORITAIRE : HUGODÉCRYPTE (VIDÉO YOUTUBE DU ${publishedDate}) ===\n`;
     context += `Titre de l'édition : "${pick.title}"\nLien : ${pick.url}\n\n`;
     if (segments.length > 0) {
       context += 'SOMMAIRE DÉTAILLÉ ET FAITS DE PRESSE PAR SEGMENT :\n';
@@ -327,8 +408,8 @@ const NewsService = (() => {
     return {
       episode: {
         available: true,
-        source,
-        sourceLabel: source === 'youtube' ? 'Regarder la vidéo complète sur YouTube' : 'Écouter l’épisode complet (Acast)',
+        source: 'youtube',
+        sourceLabel: 'Regarder la vidéo complète sur YouTube',
         title: pick.title,
         url: pick.url,
         publishedDate,
@@ -453,7 +534,7 @@ const NewsService = (() => {
 
     const responses = Utils.fetchUrlsSafely([
       { url: Config.NEWS_SOURCES.HUGO_YOUTUBE_FEED },
-      { url: Config.NEWS_SOURCES.HUGO_ACAST_FEED },
+      { url: Config.NEWS_SOURCES.HUGO_CHANNEL_VIDEOS_URL, headers: YOUTUBE_HEADERS },
       ...feedMappings.map((m) => ({ url: m.url }))
     ]);
 
@@ -462,7 +543,7 @@ const NewsService = (() => {
       hugo = buildHugoEpisode(Utils.okText(responses[0]), Utils.okText(responses[1]));
     } catch (e) {
       console.warn(`HugoDécrypte : erreur de lecture — ${e.message}`);
-      hugo = buildHugoEpisode('', '');
+      hugo = buildUnavailableHugo();
     }
 
     let complement = { context: '', fallbackCategories: [] };
@@ -480,19 +561,22 @@ const NewsService = (() => {
   };
 
   /**
-   * Vérification rapide de la disponibilité des flux HugoDécrypte (diagnostic).
-   * @returns {{youtube: boolean, acast: boolean, latestTitle: string}}
+   * Vérification rapide de la chaîne YouTube HugoDécrypte (diagnostic).
+   * @returns {{rss: boolean, page: boolean, latestTitle: string, latestUrl: string}}
    */
   const checkHugoFeeds = () => {
-    const [yt, acast] = Utils.fetchUrlsSafely([
+    const [feedRes, pageRes] = Utils.fetchUrlsSafely([
       { url: Config.NEWS_SOURCES.HUGO_YOUTUBE_FEED },
-      { url: Config.NEWS_SOURCES.HUGO_ACAST_FEED }
+      { url: Config.NEWS_SOURCES.HUGO_CHANNEL_VIDEOS_URL, headers: YOUTUBE_HEADERS }
     ]);
-    const video = selectLatestLongVideo(Utils.okText(yt));
+    const feedXml = Utils.okText(feedRes);
+    const pageHtml = Utils.okText(pageRes);
+    const video = resolveLatestVideo(feedXml, pageHtml);
     return {
-      youtube: Boolean(video),
-      acast: Boolean(Utils.okText(acast)),
-      latestTitle: video ? video.title : ''
+      rss: parseFeedVideos(feedXml).length > 0,
+      page: Boolean(firstVideoIdFromChannelPage(pageHtml)),
+      latestTitle: video ? video.title : '',
+      latestUrl: video ? video.url : ''
     };
   };
 

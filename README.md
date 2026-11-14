@@ -13,7 +13,7 @@ Vos e-mails restent intacts : aucun message n'est marqué comme lu, archivé ou 
 2. **Récapitulatif des e-mails non lus** classés en 11 catégories canoniques (Emploi & Carrière, Démarches & Administration, Banque & Finances, Santé & Soins, Commandes & Livraisons, Sécurité & Accès, Tech & Outils Numériques, Voyages & Loisirs, Achats & Offres, Réseaux Sociaux, Actualités & Newsletters). Les e-mails reçus sur le **Compte Pro** ou l'**Ancien Perso** portent un badge de provenance.
 3. **Planning du jour** (Google Calendar) avec liens de visioconférence, plus une rubrique compacte **À anticiper demain**. Les liens Google Meet ajoutés directement dans l'agenda sont lus via le service avancé Calendar (activé dans `appsscript.json`, sans autorisation supplémentaire). Les liens Zoom et Microsoft Teams écrits dans le lieu ou la description sont également détectés.
 4. **Météo & conseil vestimentaire** pour la ville détectée dans l'agenda (sinon Annemasse) : en-tête `Pour [Ville] :`, puis `Matin (9h)`, `Après-midi (15h)`, `Soir (21h)` sur des lignes séparées, températures au format `10 °C` et pluie au format `29%`.
-5. **Les Actus du Jour — Synthèse HugoDécrypte** : dernière vidéo longue de [@hugodecrypteactus](https://www.youtube.com/@hugodecrypteactus/videos) (Shorts exclus), résumée segment par segment, avec repli automatique sur le flux audio Acast. Règles anti-vague : villes exactes, prénom + nom + fonction, sigles expliqués.
+5. **Les Actus du Jour — Synthèse HugoDécrypte** : dernière vidéo longue de [@hugodecrypteactus](https://www.youtube.com/@hugodecrypteactus/videos) (Shorts exclus), résumée segment par segment. YouTube est la seule source : la page « Vidéos » de la chaîne désigne la dernière vidéo longue, et ses chapitres sont lus dans le flux RSS ou sur la page de la vidéo (le flux RSS YouTube renvoie parfois des erreurs 404 passagères). Règles anti-vague : villes exactes, prénom + nom + fonction, sigles expliqués.
 6. **Complément d'actualités issu de Google Actualités** en 9 rubriques PESTEL+ (Politique, Économie, Social, Technologie, Environnement, Légal, Culture & Savoir, Sport, Faits divers), avec corroboration multi-sources.
 7. **Agent de Contrôle & Bon Fonctionnement** : vérifie et répare automatiquement le suivi des e-mails, l'horloge d'envoi et la connexion au service de résumé, puis rend compte en français clair, sans jargon ni emoji.
 
@@ -31,7 +31,7 @@ Vos e-mails restent intacts : aucun message n'est marqué comme lu, archivé ou 
 | `CalendarService.js` | Agenda du jour et du lendemain, liens de visioconférence (Meet natif via le service avancé Calendar, repli sur le texte). |
 | `GeminiService.js` | Accès unique à Gemini : cascade de modèles, budget temps, sortie JSON (e-mails, météo, actualités). |
 | `WeatherService.js` | Données wttr.in, bulletin IA ou déterministe, mise en forme stricte. |
-| `NewsService.js` | HugoDécrypte (YouTube puis Acast) et Google Actualités PESTEL+. |
+| `NewsService.js` | HugoDécrypte (YouTube uniquement) et Google Actualités PESTEL+. |
 | `BriefingService.js` | Assemblage, rendu HTML et texte, envoi. |
 | `DevOpsAgentService.js` | Agent de Contrôle & Bon Fonctionnement. |
 | `StateService.js` | Verrou d'exécution, checkpoint des e-mails, anti-double envoi. |
@@ -47,7 +47,7 @@ Vos e-mails restent intacts : aucun message n'est marqué comme lu, archivé ou 
 
 ### Résilience
 - Sans Gemini (quota, panne ou clé absente), le briefing part quand même : e-mails classés par `EmailClassifier`, météo rédigée de façon déterministe, actualités présentées avec leurs sources. Aucune information n'est inventée.
-- Si HugoDécrypte est indisponible sur YouTube et sur Acast, l'e-mail propose un lien vers la chaîne au lieu de résumer un contenu inexistant.
+- Si la chaîne YouTube HugoDécrypte reste injoignable après une nouvelle tentative, l'e-mail propose un lien vers la chaîne au lieu de résumer un contenu inexistant.
 
 ---
 

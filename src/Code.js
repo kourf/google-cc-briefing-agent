@@ -192,13 +192,15 @@ function diagnostiquerBriefing() {
     logStep(weather ? 'OK' : 'ATTENTION', 'Météo', weather ? `Données reçues pour ${weather.city}.` : 'Service indisponible (section omise).');
   });
 
-  check('HugoDécrypte', () => {
-    const feeds = NewsService.checkHugoFeeds();
-    const ok = feeds.youtube || feeds.acast;
+  check('HugoDécrypte (YouTube)', () => {
+    const yt = NewsService.checkHugoFeeds();
+    const sources = `page Vidéos ${yt.page ? 'OK' : 'indisponible'}, flux RSS ${yt.rss ? 'OK' : 'indisponible'}`;
     logStep(
-      ok ? 'OK' : 'ATTENTION',
-      'HugoDécrypte',
-      feeds.youtube ? `Dernière vidéo longue : « ${feeds.latestTitle} ».` : feeds.acast ? 'YouTube indisponible, repli Acast opérationnel.' : 'YouTube et Acast indisponibles.'
+      yt.latestTitle ? 'OK' : 'ATTENTION',
+      'HugoDécrypte (YouTube)',
+      yt.latestTitle
+        ? `Dernière vidéo longue : « ${yt.latestTitle} » (${yt.latestUrl}) — ${sources}.`
+        : `Chaîne YouTube injoignable — ${sources}.`
     );
   });
 

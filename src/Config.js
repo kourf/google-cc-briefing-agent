@@ -93,14 +93,14 @@ const Config = (() => {
   const DEPRECATED_MODEL_PATTERNS = Object.freeze(['1.5', '2.0', '2.5', '3.6', '3.7', '3.8', 'latest']);
 
   /**
-   * Sources officielles des Actus du Jour (HugoDécrypte).
+   * Source unique des Actus du Jour : la chaîne YouTube https://www.youtube.com/@hugodecrypteactus
+   * (identifiant UCAcAnMF0OrCtUep3Y4M-ZPw). Aucune source audio (Acast) n'est utilisée.
    * @type {Readonly<Object>}
    */
   const NEWS_SOURCES = Object.freeze({
     HUGO_CHANNEL_ID: 'UCAcAnMF0OrCtUep3Y4M-ZPw',
     HUGO_CHANNEL_VIDEOS_URL: 'https://www.youtube.com/@hugodecrypteactus/videos',
-    HUGO_YOUTUBE_FEED: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCAcAnMF0OrCtUep3Y4M-ZPw',
-    HUGO_ACAST_FEED: 'https://feeds.acast.com/public/shows/61365f9fb4ac8f42e6668a5c'
+    HUGO_YOUTUBE_FEED: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCAcAnMF0OrCtUep3Y4M-ZPw'
   });
 
   /**
