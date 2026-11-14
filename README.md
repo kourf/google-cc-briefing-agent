@@ -11,7 +11,7 @@ Vos e-mails restent intacts : aucun message n'est marqué comme lu, archivé ou 
 
 1. **Actions prioritaires** : e-mails demandant une action humaine, avec temps estimé, échéance et lien direct vers Gmail.
 2. **Récapitulatif des e-mails non lus** classés en 11 catégories canoniques (Emploi & Carrière, Démarches & Administration, Banque & Finances, Santé & Soins, Commandes & Livraisons, Sécurité & Accès, Tech & Outils Numériques, Voyages & Loisirs, Achats & Offres, Réseaux Sociaux, Actualités & Newsletters). Les e-mails reçus sur le **Compte Pro** ou l'**Ancien Perso** portent un badge de provenance.
-3. **Planning du jour** (Google Calendar) avec liens Google Meet, Zoom et Microsoft Teams, plus une rubrique compacte **À anticiper demain**.
+3. **Planning du jour** (Google Calendar) avec liens de visioconférence, plus une rubrique compacte **À anticiper demain**. Les liens Google Meet ajoutés directement dans l'agenda sont lus via le service avancé Calendar (activé dans `appsscript.json`, sans autorisation supplémentaire). Les liens Zoom et Microsoft Teams écrits dans le lieu ou la description sont également détectés.
 4. **Météo & conseil vestimentaire** pour la ville détectée dans l'agenda (sinon Annemasse) : en-tête `Pour [Ville] :`, puis `Matin (9h)`, `Après-midi (15h)`, `Soir (21h)` sur des lignes séparées, températures au format `10 °C` et pluie au format `29%`.
 5. **Les Actus du Jour — Synthèse HugoDécrypte** : dernière vidéo longue de [@hugodecrypteactus](https://www.youtube.com/@hugodecrypteactus/videos) (Shorts exclus), résumée segment par segment, avec repli automatique sur le flux audio Acast. Règles anti-vague : villes exactes, prénom + nom + fonction, sigles expliqués.
 6. **Complément d'actualités issu de Google Actualités** en 9 rubriques PESTEL+ (Politique, Économie, Social, Technologie, Environnement, Légal, Culture & Savoir, Sport, Faits divers), avec corroboration multi-sources.
@@ -28,7 +28,7 @@ Vos e-mails restent intacts : aucun message n'est marqué comme lu, archivé ou 
 | `Utils.js` | Budget temps global, décodeur HTML unifié, nettoyage de texte, `fetchUrlsSafely`, dates et URLs. |
 | `EmailClassifier.js` | Règles déterministes de classement (désambiguïsation LinkedIn, emploi, administration…) et analyse de repli sans IA. |
 | `GmailService.js` | Lecture des non-lus, déduplication pré-IA, détection du compte de destination. |
-| `CalendarService.js` | Agenda du jour et du lendemain, liens de visioconférence. |
+| `CalendarService.js` | Agenda du jour et du lendemain, liens de visioconférence (Meet natif via le service avancé Calendar, repli sur le texte). |
 | `GeminiService.js` | Accès unique à Gemini : cascade de modèles, budget temps, sortie JSON (e-mails, météo, actualités). |
 | `WeatherService.js` | Données wttr.in, bulletin IA ou déterministe, mise en forme stricte. |
 | `NewsService.js` | HugoDécrypte (YouTube puis Acast) et Google Actualités PESTEL+. |
