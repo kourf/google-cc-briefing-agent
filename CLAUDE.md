@@ -174,7 +174,7 @@ git push origin main
 2. **Les Actus du Jour — Synthèse HugoDécrypte** :
    - Source : dernière vidéo longue publique de `https://www.youtube.com/@hugodecrypteactus/videos` (`channel_id=UCAcAnMF0OrCtUep3Y4M-ZPw`).
    - Exclure impérativement les Shorts (`/shorts/` ou `#shorts`).
-   - Source unique YouTube (décision du 14/11/2026) : la page « Vidéos » désigne la dernière vidéo longue, le flux RSS ou la page de la vidéo fournit les chapitres. Ne jamais utiliser Acast. Si YouTube est injoignable, afficher un lien vers la chaîne sans inventer de résumé.
+   - Source unique YouTube (décision du 14/11/2026) : la page « Vidéos » désigne la dernière vidéo longue, le flux RSS ou la page de la vidéo fournit les chapitres. Ne jamais utiliser Acast ni renvoyer vers la chaîne. Chaque sujet de la vidéo est analysé et classé par rubrique PESTEL+, au même format que le Complément Google Actualités.
    - **Règles Anti-Vague** :
      - **Lieux précis** : Toujours nommer la ville ou commune exacte (ex. "Trappes" et non "en banlieue parisienne").
      - **Identités et fonctions** : Toujours donner le prénom, le nom ET la fonction ou le poste exact (ex. "Senny Mayulu (le jeune milieu de terrain du PSG)").

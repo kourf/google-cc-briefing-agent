@@ -26,7 +26,8 @@ Ce document constitue la mémoire permanente et les règles directrices strictes
 - **Source Vidéo Longue YouTube** :
   - Analyser impérativement la dernière vidéo publique issue de `https://www.youtube.com/@hugodecrypteactus/videos`.
   - Exclure rigoureusement les formats courts (Shorts YouTube).
-  - Source UNIQUE : la chaîne YouTube https://www.youtube.com/@hugodecrypteactus (la page « Vidéos » désigne la dernière vidéo longue ; flux RSS et page de la vidéo pour le chapitrage). Ne JAMAIS utiliser Acast ni aucune source audio (décision du propriétaire du 14/11/2026). Si YouTube est injoignable, afficher un lien vers la chaîne sans inventer de résumé.
+  - Source UNIQUE : la chaîne YouTube https://www.youtube.com/@hugodecrypteactus (la page « Vidéos » désigne la dernière vidéo longue ; flux RSS et page de la vidéo pour le chapitrage). Ne JAMAIS utiliser Acast ni aucune source audio (décision du propriétaire du 14/11/2026). Ne JAMAIS renvoyer vers la chaîne : le briefing analyse toujours la dernière vidéo (plusieurs tentatives si YouTube ne répond pas) ; en dernier recours, une phrase sans lien et sans résumé inventé.
+- **Format d'analyse de la vidéo (identique au Complément Google Actualités)** : chaque sujet cité dans le sommaire de la vidéo est classé dans l'une des 9 rubriques PESTEL+, avec un titre précis et un résumé de 2 à 3 phrases (règles anti-vague, corroboration presse) ; le minutage renvoie au moment exact de la vidéo. Aucun sujet du sommaire ne doit être omis.
 - **Règles Anti-Vague (Haute précision journalistique)** :
   - **Lieux précis** : Toujours nommer la ville ou commune exacte (ex. "Trappes" au lieu de "en banlieue parisienne").
   - **Identités et fonctions** : Toujours donner le prénom, le nom ET la fonction ou le poste (ex. "Senny Mayulu, milieu de terrain du PSG", "Marc Ferracci, ministre chargé de l'Industrie").

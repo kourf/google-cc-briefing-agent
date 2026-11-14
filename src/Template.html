@@ -168,37 +168,37 @@
       <? if (data.newsDigest.hugoEdition) { 
            var he = data.newsDigest.hugoEdition;
       ?>
-      <!-- BANDEAU ÉDITION HUGODÉCRYPTE -->
-      <div style="margin-bottom: 14px; padding: 12px 16px; background-color: #FFF5F5; border: 1px solid #FED7D7; border-radius: 8px;">
-        <? if (he.available) { ?>
-        <div style="font-size: 13px; font-weight: 700; color: #9B2C2C; margin-bottom: 4px;">
-          Édition vidéo du <?= he.publishedDate ?> : &laquo; <?= he.videoTitle ?> &raquo;
-        </div>
-        <div style="font-size: 12px; color: #742A2A; margin-bottom: 8px;">
-          Synthèse détaillée segment par segment (tous les faits clés sans avoir à regarder la vidéo) :
-        </div>
-        <? } else { ?>
-        <div style="font-size: 13px; font-weight: 700; color: #9B2C2C; margin-bottom: 8px;">
-          L’édition du jour n’a pas encore pu être récupérée ce matin.
-        </div>
-        <? } ?>
-        <div>
-          <a href="<?= he.videoUrl ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 6px 12px; background-color: #E53E3E; color: #FFFFFF; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: 600;"><?= he.sourceLabel ?></a>
-        </div>
+      <? if (he.available) { ?>
+      <!-- DERNIÈRE VIDÉO HUGODÉCRYPTE : SUJETS ANALYSÉS PAR RUBRIQUE (MÊME FORMAT QUE LE COMPLÉMENT) -->
+      <div style="font-size: 13.5px; font-weight: 700; color: #374151; margin: 0 0 10px 0;">
+        Analyse de la dernière vidéo (<?= he.publishedDate ?>) :
+        <a href="<?= he.videoUrl ?>" target="_blank" rel="noopener noreferrer" style="color: #B91C1C; text-decoration: none;">&laquo; <?= he.videoTitle ?> &raquo;</a>
       </div>
-
-      <!-- SEGMENTS DÉTAILLÉS DE LA VIDÉO -->
-      <? if (he.segments && he.segments.length > 0) { ?>
+      <? if (he.categories && he.categories.length > 0) { ?>
       <ul style="margin: 0 0 16px 0; padding-left: 20px; list-style-type: disc;">
-        <? for (var s = 0; s < he.segments.length; s++) { 
-             var seg = he.segments[s];
+        <? for (var hc = 0; hc < he.categories.length; hc++) {
+             var hCat = he.categories[hc];
         ?>
-        <li style="margin-bottom: 10px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
-          <? if (seg.category) { ?><span style="display: inline-block; font-size: 11px; font-weight: 700; color: #4B5563; background-color: #EDF2F7; padding: 2px 6px; border-radius: 4px; margin-right: 6px;"><?= seg.category ?></span><? } ?>
-          <strong>[<?= seg.timestamp ?>] <?= seg.segmentTitle ?><? if (seg.summary) { ?> :<? } ?></strong> <?!= Utils.formatSummaryHtml(seg.summary) ?>
+        <li style="margin-bottom: 12px; font-size: 13.5px; line-height: 1.5; color: #111827;">
+          <strong><?= hCat.name ?> :</strong>
+          <ul style="margin: 4px 0 2px 0; padding-left: 20px; list-style-type: circle;">
+            <? for (var hi = 0; hi < hCat.items.length; hi++) {
+                 var hItem = hCat.items[hi];
+            ?>
+            <li style="margin-bottom: 6px; font-size: 13px; line-height: 1.5; color: #4B5563;">
+              <a href="<?= hItem.timeUrl ?>" target="_blank" rel="noopener noreferrer" style="color: #6B7280; font-size: 11.5px; text-decoration: none;">[<?= hItem.timestamp ?>]</a>
+              <strong><?!= Utils.formatSummaryHtml(hItem.headline) ?><? if (hItem.summary) { ?> :<? } ?></strong> <?!= Utils.formatSummaryHtml(hItem.summary) ?>
+            </li>
+            <? } ?>
+          </ul>
         </li>
         <? } ?>
       </ul>
+      <? } ?>
+      <? } else { ?>
+      <div style="margin-bottom: 14px; font-size: 13px; color: #6B7280;">
+        La dernière vidéo HugoDécrypte n’a pas pu être analysée ce matin : YouTube n’a pas répondu malgré plusieurs tentatives.
+      </div>
       <? } ?>
       <? } ?>
 

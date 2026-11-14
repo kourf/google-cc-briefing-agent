@@ -430,10 +430,6 @@ const GeminiService = (() => {
    */
   const buildNewsPrompt = (hasHugoSource) => {
     const categoryLines = Config.NEWS_CATEGORIES.map((c, idx) => `     ${idx + 1}) "${c.name}"`).join('\n');
-    // Libellés courts pour les badges de segments (ex. "Politique & Géopolitique", "Culture & Savoir")
-    const segmentCategories = Config.NEWS_CATEGORIES
-      .map((c) => c.name.replace(/^[A-Z] — /, '').replace(/\s*\(.*\)$/, ''))
-      .join('", "');
     return [
       'Tu es un journaliste vulgarisateur d’élite pour un briefing exécutif matinal.',
       'Résume l’actualité comme pour un jeune curieux de 15 ans, en livrant 100 % des faits concrets (qui, quoi, ville précise, pourquoi, impact) en phrases courtes, pour pouvoir en discuter sans chercher ailleurs.',
@@ -449,13 +445,22 @@ const GeminiService = (() => {
       '5. FIDÉLITÉ : n’invente AUCUN fait absent des sources. Ne mélange jamais les détails de deux dépêches distinctes.',
       '6. ZÉRO EMOJI.',
       '',
+      'LES 9 RUBRIQUES PESTEL+ (libellés EXACTS, dans cet ordre) :',
+      categoryLines,
+      '',
       'STRUCTURE JSON ATTENDUE :',
       hasHugoSource
-        ? `- "segments" : un objet par segment du sommaire HugoDécrypte (hors intro et outro) avec "timestamp" (minutage exact), "segmentTitle", "category" (parmi "${segmentCategories}") et "summary".`
-        : '- "segments" : renvoie un tableau VIDE (aucune édition HugoDécrypte disponible ce matin, n’invente rien).',
-      '- "categories" : un objet par rubrique, dans CET ORDRE EXACT, uniquement à partir des dépêches de la section [COMPLÉMENT D’ACTUALITÉS] et de leur corroboration presse, sans répéter un sujet déjà traité par HugoDécrypte sauf absence d’autre dépêche :',
-      categoryLines,
-      '  Champs : "categoryName" (libellé exact ci-dessus), "headline" (titre précis), "summary" (2 à 3 phrases).',
+        ? [
+            '- "segments" : la dernière vidéo HugoDécrypte analysée sujet par sujet, EXACTEMENT comme une dépêche du complément.',
+            '  Un objet pour CHAQUE sujet du sommaire (hors intro et outro), sans en oublier aucun :',
+            '  "timestamp" (minutage exact du sommaire), "category" (UNE des 9 rubriques, libellé exact),',
+            '  "headline" (titre précis et factuel du sujet, jamais le titre accrocheur de la vidéo),',
+            '  "summary" (2 à 3 phrases appliquant toutes les règles anti-vague, appuyées sur les faits de presse',
+            '  listés sous le segment et sur les articles sources de la vidéo).'
+          ].join('\n')
+        : '- "segments" : renvoie un tableau VIDE (aucune vidéo HugoDécrypte disponible ce matin, n’invente rien).',
+      '- "categories" : un objet par rubrique, dans l’ordre ci-dessus, uniquement à partir des dépêches de la section [COMPLÉMENT D’ACTUALITÉS] et de leur corroboration presse, sans répéter un sujet déjà traité par HugoDécrypte sauf absence d’autre dépêche.',
+      '  Champs : "categoryName" (libellé exact), "headline" (titre précis), "summary" (2 à 3 phrases).',
       '  Rubrique Culture & Savoir : une découverte scientifique ou historique, un film ou un livre expliqué concrètement (jamais le terme abstrait "médias").',
       '  Rubrique Faits divers : délit, crime, enquête ou accident marquant avec ville exacte et motif.'
     ].join('\n');
@@ -471,11 +476,11 @@ const GeminiService = (() => {
           type: 'OBJECT',
           properties: {
             timestamp: { type: 'STRING' },
-            segmentTitle: { type: 'STRING' },
-            category: { type: 'STRING' },
+            category: { type: 'STRING', enum: Config.NEWS_CATEGORIES.map((c) => c.name) },
+            headline: { type: 'STRING' },
             summary: { type: 'STRING' }
           },
-          required: ['timestamp', 'segmentTitle', 'category', 'summary']
+          required: ['timestamp', 'category', 'headline', 'summary']
         }
       },
       categories: {
@@ -494,28 +499,81 @@ const GeminiService = (() => {
     required: ['segments', 'categories']
   });
 
+  /** Rubrique des sujets HugoDécrypte non classés (mode sans IA ou libellé inconnu). */
+  const HUGO_UNCLASSIFIED = 'Sujets de l’édition';
+
   /**
-   * Bloc « édition HugoDécrypte » destiné au template.
-   * @param {Object|null} episode - Épisode issu de NewsService.
-   * @param {Array<Object>} aiSegments - Segments résumés par l'IA (peut être vide).
-   * @returns {Object|null}
+   * Convertit un minutage ("04:43", "1:02:03") en secondes.
+   * @param {string} timestamp
+   * @returns {number}
+   */
+  const timestampToSeconds = (timestamp) =>
+    String(timestamp || '')
+      .split(':')
+      .map((n) => parseInt(n, 10) || 0)
+      .reduce((total, n) => total * 60 + n, 0);
+
+  /**
+   * Lien vers le moment précis du sujet dans la vidéo.
+   * @param {string} videoUrl
+   * @param {string} timestamp
+   * @returns {string}
+   */
+  const momentUrl = (videoUrl, timestamp) => {
+    const sec = timestampToSeconds(timestamp);
+    if (!videoUrl || !sec) return videoUrl;
+    return `${videoUrl}${videoUrl.includes('?') ? '&' : '?'}t=${sec}s`;
+  };
+
+  /**
+   * Bloc « édition HugoDécrypte » destiné au template : les sujets de la vidéo sont classés
+   * dans les 9 rubriques PESTEL+, au même format que le complément Google Actualités.
+   *
+   * @param {Object|null} episode - Édition issue de NewsService.
+   * @param {Array<Object>} aiSegments - Sujets analysés par l'IA (vide en mode de repli).
+   * @returns {Object|null} { available, videoTitle, videoUrl, publishedDate, categories }
    */
   const buildHugoEdition = (episode, aiSegments) => {
     if (!episode) return null;
-    const nativeSegments = (episode.segments || []).map((seg) => ({
-      timestamp: Utils.sanitizeText(seg.timestamp),
-      segmentTitle: Utils.sanitizeText(seg.title),
-      category: '',
-      summary: ''
-    }));
+
+    // Sujets analysés par l'IA, complétés par tout chapitre oublié (titre + premier titre de presse) :
+    // chaque sujet cité dans la vidéo apparaît dans le briefing.
+    const analysed = aiSegments || [];
+    const covered = new Set(analysed.map((s) => timestampToSeconds(s.timestamp)));
+    const missing = (episode.segments || [])
+      .filter((seg) => !covered.has(timestampToSeconds(seg.timestamp)))
+      .map((seg) => ({
+        timestamp: seg.timestamp,
+        category: '',
+        headline: seg.title,
+        summary: seg.pressHeadlines && seg.pressHeadlines[0] ? `Selon la presse : ${seg.pressHeadlines[0]}.` : ''
+      }));
+    const items = [...analysed, ...missing];
+
+    const buckets = new Map();
+    [...Config.NEWS_CATEGORIES.map((c) => c.name), HUGO_UNCLASSIFIED].forEach((name) => buckets.set(name, []));
+    for (const it of items) {
+      const target = Config.resolveNewsCategoryName(it.category) || HUGO_UNCLASSIFIED;
+      buckets.get(target).push({
+        timestamp: Utils.sanitizeText(it.timestamp),
+        timeUrl: momentUrl(episode.url, it.timestamp),
+        headline: Utils.sanitizeText(it.headline),
+        summary: Utils.sanitizeText(it.summary)
+      });
+    }
+    const categories = [...buckets.entries()]
+      .filter(([, list]) => list.length > 0)
+      .map(([name, list]) => ({
+        name,
+        items: list.sort((a, b) => timestampToSeconds(a.timestamp) - timestampToSeconds(b.timestamp))
+      }));
+
     return {
       available: Boolean(episode.available),
-      source: episode.source,
-      sourceLabel: episode.sourceLabel,
       videoTitle: Utils.sanitizeText(episode.title),
       videoUrl: episode.url,
       publishedDate: Utils.sanitizeText(episode.publishedDate),
-      segments: aiSegments && aiSegments.length > 0 ? aiSegments : nativeSegments
+      categories
     };
   };
 
@@ -568,11 +626,11 @@ const GeminiService = (() => {
       ? parsed.segments
           .map((seg) => ({
             timestamp: Utils.sanitizeText(seg.timestamp),
-            segmentTitle: Utils.sanitizeText(seg.segmentTitle),
             category: Utils.sanitizeText(seg.category),
+            headline: Utils.sanitizeText(seg.headline),
             summary: Utils.sanitizeText(seg.summary)
           }))
-          .filter((seg) => seg.segmentTitle && seg.summary)
+          .filter((seg) => seg.headline && seg.summary)
       : [];
 
     // Rubriques ordonnées strictement selon Config.NEWS_CATEGORIES

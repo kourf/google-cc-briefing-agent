@@ -41,6 +41,8 @@ const NewsService = (() => {
   /** Budgets minimaux (temps global restant) pour lancer les étapes facultatives. */
   const MIN_REMAINING_FOR_HUGO_ENRICHMENT_MS = 150000;
   const MIN_REMAINING_FOR_CORROBORATION_MS = 120000;
+  /** Délais des nouvelles tentatives si YouTube ne répond pas (erreurs 404 passagères du flux RSS). */
+  const YOUTUBE_RETRY_DELAYS_MS = Object.freeze([2000, 4000, 8000]);
 
   /**
    * Rubriques PESTEL+ avec leurs flux RSS.
@@ -276,8 +278,8 @@ const NewsService = (() => {
    * 1. la page « Vidéos » de la chaîne désigne la dernière vidéo longue (source de vérité) ;
    * 2. son sommaire est lu dans le flux RSS, sinon directement sur la page de la vidéo ;
    * 3. si la page de la chaîne est illisible, le flux RSS seul est utilisé.
-   * Le flux RSS YouTube renvoie parfois des erreurs 404 passagères : une seconde tentative
-   * est faite si les deux sources ont échoué.
+   * YouTube renvoie parfois des erreurs passagères (404 sur le flux RSS) : jusqu'à
+   * YOUTUBE_RETRY_DELAYS_MS.length nouvelles tentatives espacées, dans la limite du budget temps.
    *
    * @param {string} feedXml - Flux RSS déjà téléchargé.
    * @param {string} pageHtml - Page « Vidéos » déjà téléchargée.
@@ -287,9 +289,12 @@ const NewsService = (() => {
     let feedVideos = parseFeedVideos(feedXml);
     let pageId = firstVideoIdFromChannelPage(pageHtml);
 
-    if (feedVideos.length === 0 && !pageId) {
-      console.warn('HugoDécrypte : YouTube n’a pas répondu, nouvelle tentative.');
-      Utilities.sleep(1500);
+    for (const delay of YOUTUBE_RETRY_DELAYS_MS) {
+      // Dès que la page « Vidéos » ou le flux RSS répond, inutile d'insister.
+      if (pageId || feedVideos.length > 0) break;
+      if (!Utils.hasTimeFor(MIN_REMAINING_FOR_HUGO_ENRICHMENT_MS)) break;
+      console.warn(`HugoDécrypte : YouTube n’a pas répondu, nouvelle tentative dans ${delay / 1000} s.`);
+      Utilities.sleep(delay);
       const [feedRes, pageRes] = Utils.fetchUrlsSafely([
         { url: Config.NEWS_SOURCES.HUGO_YOUTUBE_FEED },
         { url: Config.NEWS_SOURCES.HUGO_CHANNEL_VIDEOS_URL, headers: YOUTUBE_HEADERS }
@@ -301,7 +306,7 @@ const NewsService = (() => {
     if (pageId) {
       const inFeed = feedVideos.find((v) => v.id === pageId);
       if (inFeed && parseSegments(inFeed.description).length > 0) return inFeed;
-      const details = fetchWatchDetails(pageId);
+      const details = fetchWatchDetails(pageId) || (Utilities.sleep(2000), fetchWatchDetails(pageId));
       if (details) return details;
       if (inFeed) return inFeed;
     }
@@ -345,16 +350,15 @@ const NewsService = (() => {
   };
 
   /**
-   * Édition « indisponible » : lien vers la chaîne YouTube, aucun contenu inventé.
+   * Édition « indisponible » (YouTube injoignable après toutes les tentatives) :
+   * aucun contenu inventé et aucun renvoi vers la chaîne.
    * @returns {{episode: Object, context: string}}
    */
   const buildUnavailableHugo = () => ({
     episode: {
       available: false,
-      source: 'none',
-      sourceLabel: 'Voir les vidéos de la chaîne HugoDécrypte sur YouTube',
       title: 'Les Actus du Jour',
-      url: Config.NEWS_SOURCES.HUGO_CHANNEL_VIDEOS_URL,
+      url: '',
       publishedDate: Utils.formatDateFrench(new Date()),
       segments: []
     },
@@ -405,11 +409,14 @@ const NewsService = (() => {
       context += `LIENS SOURCES :\n${articleUrls.join('\n')}\n\n`;
     }
 
+    // Titres de presse rattachés à chaque sujet (utilisés si l'IA ne peut pas rédiger l'analyse)
+    segments.forEach((seg, s) => {
+      seg.pressHeadlines = enrichment.segmentHeadlines[s] || [];
+    });
+
     return {
       episode: {
         available: true,
-        source: 'youtube',
-        sourceLabel: 'Regarder la vidéo complète sur YouTube',
         title: pick.title,
         url: pick.url,
         publishedDate,

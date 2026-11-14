@@ -114,8 +114,8 @@ const BriefingService = (() => {
             component: 'Actualités du jour',
             severity: 'INFO',
             resolved: true,
-            message: 'L’édition HugoDécrypte du jour n’était pas encore disponible.',
-            solution: 'Un lien direct vers la chaîne vous est proposé, et le complément Google Actualités reste complet.'
+            message: 'La vidéo HugoDécrypte n’a pas pu être récupérée : YouTube n’a pas répondu malgré plusieurs tentatives.',
+            solution: 'Le complément Google Actualités reste complet ; la vidéo sera de nouveau analysée au prochain briefing.'
           });
         }
       }
@@ -284,14 +284,15 @@ const BriefingService = (() => {
       if (he) {
         lines.push('=== LES ACTUS DU JOUR — SYNTHÈSE HUGODÉCRYPTE ===');
         if (he.available) {
-          lines.push(`Édition du ${he.publishedDate} : « ${he.videoTitle} »`);
+          lines.push(`Analyse de la dernière vidéo (${he.publishedDate}) : « ${he.videoTitle} » — ${he.videoUrl}`);
+          for (const cat of he.categories || []) {
+            lines.push(`• ${cat.name} :`);
+            for (const item of cat.items) {
+              lines.push(`  - [${item.timestamp}] ${md(item.headline)}${item.summary ? ` : ${md(item.summary)}` : ''}`);
+            }
+          }
         } else {
-          lines.push('L’édition du jour n’a pas encore pu être récupérée.');
-        }
-        lines.push(`${he.sourceLabel} : ${he.videoUrl}`);
-        for (const seg of he.segments || []) {
-          const cat = seg.category ? ` (${seg.category})` : '';
-          lines.push(`• [${seg.timestamp}] ${seg.segmentTitle}${cat}${seg.summary ? ` : ${md(seg.summary)}` : ''}`);
+          lines.push('La dernière vidéo HugoDécrypte n’a pas pu être analysée ce matin : YouTube n’a pas répondu malgré plusieurs tentatives.');
         }
         lines.push('');
       }
