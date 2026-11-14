@@ -1,323 +1,240 @@
 /**
  * Google CC Briefing Agent
- * Code.js — Points d'entrée officiels de l'application
+ * Code.js — Points d'entrée officiels (visibles dans l'éditeur Apps Script) :
+ *   1. runDailyBriefing        : exécution automatique de production à 06:00:00 pile.
+ *   2. runBriefingNow          : envoi immédiat sur demande (dernières 24 h).
+ *   3. watchdogSafetyCheck     : filet de sécurité quotidien de 07h00.
+ *   4. reparerEtActiverBriefing: réparation et réactivation complète en un clic.
+ *   5. diagnostiquerBriefing   : diagnostic de santé avec rapport par e-mail.
  *
  * @author Kouroufia
- * @version 2.1.0
+ * @version 3.0.0
  */
 
 /**
- * 1. EXÉCUTION AUTOMATIQUE DE PRODUCTION (06:00:00 PILE)
- * Fonction appelée automatiquement par Google chaque matin à 06:00:00.
- * Analyse les nouveaux e-mails, l'agenda, la météo, génère le résumé IA et l'envoie par e-mail.
- * S'auto-reprogramme automatiquement pour le lendemain matin à 06:00:00 pile.
+ * Ronde de contrôle de l'Agent de Contrôle & Bon Fonctionnement (jamais bloquante).
  */
-function runDailyBriefing() {
-  console.log('=== Exécution du Briefing Quotidien (Production 06:00) ===');
-
-  // Ronde d’inspection et auto-réparation matinale de l'agent salarié DevOps
+function runPreflightChecks_() {
   try {
-    if (typeof DevOpsAgentService !== 'undefined') {
-      DevOpsAgentService.resetSession();
-      DevOpsAgentService.inspectAndSelfHeal();
-    }
-  } catch (agentErr) {
-    console.warn(`DevOpsAgentService pre-flight warning: ${agentErr.message}`);
+    DevOpsAgentService.resetSession();
+    DevOpsAgentService.inspectAndSelfHeal();
+  } catch (error) {
+    console.warn(`Contrôle préalable : ${error.message}`);
+  }
+}
+
+/**
+ * Chaîne complète : e-mails -> agenda -> analyse IA -> assemblage et envoi.
+ * @param {number} sinceSec - Début de la période analysée (secondes UNIX).
+ * @returns {Object} Résultat de BriefingService.buildAndSendBriefing.
+ */
+function executeBriefingPipeline_(sinceSec) {
+  console.log(`Période analysée depuis : ${new Date(sinceSec * 1000).toISOString()}`);
+
+  const rawEmails = GmailService.fetchUnreadEmails(sinceSec);
+
+  let agenda = { todayEvents: [], tomorrowEvents: [] };
+  try {
+    agenda = CalendarService.getAgenda();
+  } catch (error) {
+    console.warn(`Agenda : ${error.message}`);
+    DevOpsAgentService.recordIncident({
+      component: 'Agenda',
+      severity: 'WARNING',
+      resolved: true,
+      message: 'Votre agenda n’a pas pu être lu ce matin.',
+      solution: 'Le briefing est envoyé sans la section planning ; elle reviendra automatiquement demain.'
+    });
   }
 
-  let lockAcquired = false;
+  const enrichedEmails = GeminiService.analyzeEmails(rawEmails);
+  return BriefingService.buildAndSendBriefing({
+    emails: enrichedEmails,
+    agenda,
+    recipientEmail: Config.getRecipientEmail()
+  });
+}
 
+/**
+ * 1. EXÉCUTION AUTOMATIQUE DE PRODUCTION (06:00:00 PILE)
+ * Analyse les nouveaux e-mails, l'agenda, la météo et les actualités, envoie le briefing,
+ * puis se reprogramme pour le lendemain à 06:00:00 (même en cas d'erreur).
+ */
+function runDailyBriefing() {
+  console.log('=== Briefing quotidien (production 06:00) ===');
+  runPreflightChecks_();
+
+  let lockAcquired = false;
   try {
-    // 1. Verrouillage concurrentiel strict
     lockAcquired = StateService.acquireLock();
     if (!lockAcquired) {
-      console.warn('Exécution annulée : impossible d’acquérir le verrou ScriptLock.');
+      console.warn('Exécution annulée : une autre exécution est déjà en cours.');
       return;
     }
-
-    // 2. Vérification d'exclusion du week-end
     if (!Config.isWeekendEnabled() && TriggerService.isWeekendNow()) {
-      console.log('Briefing ignoré aujourd’hui (week-end désactivé).');
+      console.log('Briefing non envoyé aujourd’hui (week-end désactivé).');
       return;
     }
-
-    // 3. Protection anti-double envoi
     if (StateService.hasRunToday()) {
-      console.log('Un briefing a déjà été envoyé aujourd’hui. Exécution terminée.');
+      console.log('Le briefing a déjà été envoyé aujourd’hui.');
       return;
     }
 
-    // 4. Récupération du checkpoint horaire (sécurisé contre les accumulations historiques)
-    const checkpointSec = StateService.initCheckpointIfMissing();
-    const runStartTimeSec = Math.floor(Date.now() / 1000);
-
-    console.log(`Période analysée depuis : ${new Date(checkpointSec * 1000).toISOString()}`);
-
-    // 5. Extraction des données
-    const rawEmails = GmailService.fetchUnreadEmails(checkpointSec);
-    const agenda = CalendarService.getAgenda();
-
-    // 6. Analyse par Gemini 2.0 Flash (avec repli automatique propre)
-    const enrichedEmails = GeminiService.analyzeEmails(rawEmails);
-
-    // 7. Assemblage et livraison de l'e-mail
-    const result = BriefingService.buildAndSendBriefing({
-      emails: enrichedEmails,
-      agenda,
-      recipientEmail: Config.getRecipientEmail()
-    });
-
-    // 8. Avancement du checkpoint après succès
-    StateService.recordSuccessfulRun(runStartTimeSec);
-    console.log('=== Briefing quotidien envoyé avec succès ! ===', result.stats);
-
+    const runStartSec = Math.floor(Date.now() / 1000);
+    const result = executeBriefingPipeline_(StateService.initCheckpointIfMissing());
+    StateService.recordSuccessfulRun(runStartSec);
+    console.log('=== Briefing quotidien envoyé avec succès ===', result.stats);
   } catch (error) {
-    console.error(`Erreur critique lors du briefing : ${error.stack || error.message}`);
+    console.error(`Erreur critique du briefing : ${Utils.redactSensitive(error.stack || error.message)}`);
   } finally {
-    if (lockAcquired) {
-      StateService.releaseLock();
-    }
-
-    // 9. Auto-reprogrammation exacte pour le lendemain matin à 06:00:00 pile
-    // TOUJOURS exécutée, garantissant que la chaîne de déclencheurs ne s'arrête jamais
+    if (lockAcquired) StateService.releaseLock();
+    // Reprogrammation systématique : la chaîne quotidienne ne s'interrompt jamais.
     try {
-      console.log('Auto-reprogrammation pour le prochain matin à 06:00:00...');
       TriggerService.setupDailyTrigger();
     } catch (triggerError) {
-      console.error(`Erreur d’auto-reprogrammation : ${triggerError.message}`);
+      console.error(`Reprogrammation impossible : ${triggerError.message}`);
     }
   }
 }
 
 /**
  * 2. ENVOI IMMÉDIAT DU BRIEFING (SUR DEMANDE)
- * Analyse les e-mails non lus des dernières 24h et envoie immédiatement votre briefing officiel.
- * Utile pour forcer un envoi en journée sans attendre 06:00.
+ * Analyse les e-mails non lus des dernières TEST_LOOKBACK_HOURS heures (24 h par défaut)
+ * sans modifier le checkpoint de production.
+ * @returns {Object} Résultat de l'envoi.
  */
 function runBriefingNow() {
-  console.log('=== Envoi immédiat du Briefing Quotidien ===');
-
-  // Ronde d’inspection et auto-réparation de l'agent salarié DevOps
+  console.log('=== Envoi immédiat du briefing ===');
+  runPreflightChecks_();
+  const sinceSec = Math.floor(Date.now() / 1000) - Config.getTestLookbackHours() * 3600;
   try {
-    if (typeof DevOpsAgentService !== 'undefined') {
-      DevOpsAgentService.resetSession();
-      DevOpsAgentService.inspectAndSelfHeal();
-    }
-  } catch (agentErr) {
-    console.warn(`DevOpsAgentService pre-flight warning: ${agentErr.message}`);
-  }
-
-  const lookbackHours = Config.getTestLookbackHours();
-  const lookbackSec = Math.floor(Date.now() / 1000) - lookbackHours * 3600;
-
-  try {
-    const rawEmails = GmailService.fetchUnreadEmails(lookbackSec);
-    const agenda = CalendarService.getAgenda();
-    const enrichedEmails = GeminiService.analyzeEmails(rawEmails);
-
-    const result = BriefingService.buildAndSendBriefing({
-      emails: enrichedEmails,
-      agenda,
-      recipientEmail: Config.getRecipientEmail()
-    });
-
-    console.log(`=== Briefing envoyé avec succès à ${result.recipient} ===`, result.stats);
+    const result = executeBriefingPipeline_(sinceSec);
+    console.log(`=== Briefing envoyé à ${result.recipient} ===`, result.stats);
     return result;
   } catch (error) {
-    console.error(`Erreur lors de l’envoi immédiat : ${error.stack || error.message}`);
+    console.error(`Erreur lors de l’envoi immédiat : ${Utils.redactSensitive(error.stack || error.message)}`);
     throw error;
   }
 }
 
 /**
  * 3. FILET DE SÉCURITÉ AUTOMATIQUE (WATCHDOG 07:00)
- * Déclencheur récurrent quotidien (07h00) :
- * Vérifie si le briefing de 06h00 a bien été envoyé ce matin.
- * En cas de coupure réseau Google ou de déclencheur manquant, il envoie le briefing
- * et réinstalle automatiquement la programmation de 06h00 pour le lendemain !
+ * Si le briefing de 06:00 n'est pas parti (panne Google, déclencheur perdu), il est envoyé
+ * immédiatement ; dans tous les cas, le déclencheur du lendemain est vérifié.
  */
 function watchdogSafetyCheck() {
-  console.log('=== Vérification Watchdog de sécurité (Filet anti-panne 07h00) ===');
-
+  console.log('=== Watchdog de sécurité (07h00) ===');
   if (StateService.hasRunToday()) {
-    console.log('✓ Le briefing a déjà été envoyé aujourd’hui. Vérification du déclencheur de demain...');
+    console.log('Briefing déjà envoyé aujourd’hui. Vérification du déclencheur de demain.');
     TriggerService.setupDailyTrigger();
     return;
   }
-
-  console.warn('⚠️ Aucun briefing envoyé ce matin. Rattrapage automatique immédiat...');
+  console.warn('Aucun briefing envoyé ce matin : rattrapage immédiat.');
   runDailyBriefing();
 }
 
 /**
  * 4. RÉPARATION ET RÉACTIVATION COMPLÈTE EN 1 CLIC
- * À exécuter manuellement depuis l'éditeur pour réactiver et vérifier l'ensemble du système :
- * - Recalibre le checkpoint sur les dernières 24h (évite tout bug d'accumulation historique).
- * - Nettoie et réinstalle le déclencheur précis de 06:00:00.
- * - Installe le Watchdog récurrent de sécurité (protection anti-arrêt permanent).
- * - Envoie immédiatement un briefing de test officiel pour confirmer la réception.
+ * - Recalibre le checkpoint sur les dernières 24 h.
+ * - Réinstalle le déclencheur exact de 06:00:00 et le watchdog de 07h00.
+ * - Envoie immédiatement un briefing pour confirmer la réception.
+ * @returns {Object} Résultat de l'envoi.
  */
 function reparerEtActiverBriefing() {
-  console.log('=== RÉPARATION ET RÉACTIVATION COMPLÈTE DU BRIEFING QUOTIDIEN ===');
-
-  // 1. Recalibrage propre du checkpoint sur 24h
-  const nowSec = Math.floor(Date.now() / 1000);
-  const lookbackSec = nowSec - (24 * 3600);
-  StateService.resetCheckpointTo(lookbackSec);
-  console.log('✓ Checkpoint recalibré avec succès sur les dernières 24h.');
-
-  // 2. Installation de l'architecture double de déclencheurs
+  console.log('=== Réparation et réactivation complète ===');
+  StateService.resetCheckpointTo(Math.floor(Date.now() / 1000) - 24 * 3600);
   TriggerService.setupAllTriggers();
-  console.log('✓ Déclencheur 06:00:00 pile ET Watchdog de sécurité installés avec succès.');
-
-  // 3. Envoi immédiat pour confirmation visuelle
-  console.log('Envoi immédiat du briefing pour confirmer la réception dans votre boîte...');
+  console.log('Checkpoint recalibré et déclencheurs réinstallés. Envoi de confirmation...');
   const result = runBriefingNow();
-
-  console.log('=== SYSTÈME RÉPARÉ ET PARFAITEMENT OPÉRATIONNEL ! ===');
+  console.log('=== Système réparé et opérationnel ===');
   return result;
 }
 
 /**
- * 5. DIAGNOSTIC COMPLET DU SYSTÈME (SANTÉ & CONNECTIVITÉ)
- * Teste exhaustivement chaque composant, vérifie les autorisations et déclencheurs,
- * auto-répare les programmations et envoie un rapport détaillé par e-mail.
+ * 5. DIAGNOSTIC COMPLET DU SYSTÈME
+ * Teste chaque composant, réinstalle les déclencheurs, envoie un rapport par e-mail,
+ * puis envoie le vrai briefing.
+ * @returns {string} Rapport texte.
  */
 function diagnostiquerBriefing() {
-  console.log('=== DIAGNOSTIC COMPLET DU SYSTÈME EN COURS ===');
+  console.log('=== Diagnostic complet ===');
   const report = [];
-  const logStep = (emoji, title, details) => {
-    const line = `${emoji} ${title}: ${details}`;
+  const logStep = (status, title, details) => {
+    const line = `[${status}] ${title} : ${details}`;
     console.log(line);
-    report.push(line);
+    report.push({ status, line });
+  };
+  const check = (title, fn) => {
+    try {
+      fn();
+    } catch (e) {
+      logStep('ERREUR', title, Utils.redactSensitive(e.message));
+    }
   };
 
-  // 1. Test des Script Properties et de la clé Gemini
-  try {
-    const key = Config.getGeminiApiKey();
-    const maskedKey = key ? `${key.substring(0, 6)}...${key.substring(key.length - 4)}` : 'AUCUNE';
-    logStep('🔑', 'Clé API Gemini', `Configurée (${maskedKey}) - Modèle : ${Config.getGeminiModel()}`);
-  } catch (e) {
-    logStep('❌', 'Clé API Gemini', `Erreur : ${e.message}`);
-  }
+  check('Service de résumé (Gemini)', () => {
+    const ping = GeminiService.pingPrimaryModel();
+    logStep(ping.ok ? 'OK' : 'ERREUR', 'Service de résumé (Gemini)', `${ping.detail} Modèle : ${ping.model}.`);
+  });
 
-  // 2. Test de l'API Gemini
-  try {
-    const apiKey = Config.getGeminiApiKey();
-    const model = Config.getGeminiModel();
-    const cleanModel = String(model).replace(/^models\//, '').trim();
-    const url = `${Config.DEFAULTS.GEMINI_API_BASE_URL}/${cleanModel}:generateContent?key=${apiKey}`;
-    const genConfig = {
-      temperature: 0.2,
-      maxOutputTokens: 64
-    };
-    if (!cleanModel.includes('lite')) {
-      genConfig.thinkingConfig = { thinkingBudget: 0 };
-    }
-    const res = UrlFetchApp.fetch(url, {
-      method: 'post',
-      contentType: 'application/json',
-      payload: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: 'Réponds par OK.' }] }],
-        generationConfig: genConfig
-      }),
-      muteHttpExceptions: true
-    });
-    const code = res.getResponseCode();
-    if (code === 200) {
-      logStep('🧠', 'Connexion Gemini API', `Succès HTTP 200 avec modèle ${cleanModel}`);
-    } else {
-      logStep('⚠️', 'Connexion Gemini API', `HTTP ${code} : ${res.getContentText().substring(0, 150)}`);
-    }
-  } catch (e) {
-    logStep('❌', 'Connexion Gemini API', `Exception : ${e.message}`);
-  }
+  check('Gmail', () => {
+    const unread = GmailApp.search('is:unread in:inbox', 0, 10);
+    logStep('OK', 'Gmail', `${unread.length} fil(s) non lu(s) détecté(s) (échantillon de 10).`);
+  });
 
-  // 3. Test de Gmail
-  try {
-    const unreadThreads = GmailApp.search('is:unread in:inbox', 0, 10);
-    logStep('📬', 'Accès Gmail Boîte de réception', `Succès (${unreadThreads.length} fil(s) non lu(s) détecté(s))`);
-  } catch (e) {
-    logStep('❌', 'Accès Gmail', `Erreur d'accès : ${e.message}`);
-  }
+  check('Google Agenda', () => {
+    const agenda = CalendarService.getAgenda();
+    logStep('OK', 'Google Agenda', `${agenda.todayEvents.length} événement(s) aujourd’hui, ${agenda.tomorrowEvents.length} demain.`);
+  });
 
-  // 4. Test du Calendrier
-  try {
-    const cal = CalendarApp.getDefaultCalendar();
-    const now = new Date();
-    const events = cal ? cal.getEventsForDay(now) : [];
-    logStep('📅', 'Google Calendar', `Succès (${events.length} événement(s) trouvé(s) pour aujourd'hui)`);
-  } catch (e) {
-    logStep('❌', 'Google Calendar', `Erreur d'accès : ${e.message}`);
-  }
+  check('Météo', () => {
+    const weather = WeatherService.getWeatherReport([]);
+    logStep(weather ? 'OK' : 'ATTENTION', 'Météo', weather ? `Données reçues pour ${weather.city}.` : 'Service indisponible (section omise).');
+  });
 
-  // 5. Test Météo & Actualités
-  try {
-    const weatherRaw = WeatherService.getRawWeatherContext([]);
-    if (weatherRaw) {
-      logStep('🌤️', 'Service Météo', `Données météo récupérées avec succès.`);
-    } else {
-      logStep('⚠️', 'Service Météo', 'Non disponible (repli transparent actif).');
-    }
-  } catch (e) {
-    logStep('⚠️', 'Service Météo', `Erreur non bloquante : ${e.message}`);
-  }
+  check('HugoDécrypte', () => {
+    const feeds = NewsService.checkHugoFeeds();
+    const ok = feeds.youtube || feeds.acast;
+    logStep(
+      ok ? 'OK' : 'ATTENTION',
+      'HugoDécrypte',
+      feeds.youtube ? `Dernière vidéo longue : « ${feeds.latestTitle} ».` : feeds.acast ? 'YouTube indisponible, repli Acast opérationnel.' : 'YouTube et Acast indisponibles.'
+    );
+  });
 
-  try {
-    const newsData = NewsService.fetchDailyNewsData();
-    if (newsData && newsData.rawContext) {
-      const hugoTitle = newsData.hugoEpisode ? newsData.hugoEpisode.title : 'Flux actif';
-      logStep('🗞️', 'Actus du Jour (HugoDécrypte + Google News)', `Succès — Édition détectée : "${hugoTitle}"`);
-    } else {
-      logStep('⚠️', 'Actus du Jour', 'Flux non disponible.');
-    }
-  } catch (e) {
-    logStep('⚠️', 'Actus du Jour', `Erreur non bloquante : ${e.message}`);
-  }
-
-  // 6. Test et Réparation des Déclencheurs
-  try {
-    const triggersBefore = TriggerService.getTriggersSummary();
-    logStep('⏰', 'Déclencheurs avant diagnostic', `${triggersBefore.length} déclencheur(s) actif(s)`);
-    
-    // Auto-réparation immédiate des déclencheurs
+  check('Déclencheurs', () => {
+    const before = TriggerService.getTriggersSummary().length;
     TriggerService.setupAllTriggers();
-    const triggersAfter = TriggerService.getTriggersSummary();
-    const handlers = triggersAfter.map(t => t.handler).join(', ');
-    logStep('✅', 'Déclencheurs après auto-réparation', `${triggersAfter.length} actif(s) : [${handlers}]`);
-  } catch (e) {
-    logStep('❌', 'Déclencheurs', `Erreur : ${e.message}`);
-  }
+    const after = TriggerService.getTriggersSummary().map((t) => t.handler);
+    const next = Utilities.formatDate(TriggerService.calculateNextTargetDate(), Config.DEFAULTS.TIMEZONE, 'dd/MM/yyyy à HH:mm:ss');
+    logStep('OK', 'Déclencheurs', `${before} avant, ${after.length} après réinstallation [${after.join(', ')}]. Prochain envoi : ${next}.`);
+  });
 
-  // 7. Envoi du Rapport de Diagnostic par Email
   const recipient = Config.getRecipientEmail();
-  try {
-    const reportHtml = `<div style="font-family: sans-serif; padding: 20px;">
-      <h2 style="color: #111827;">Rapport de Diagnostic du Briefing Quotidien</h2>
-      <p>Voici le statut en direct de vos services au ${new Date().toLocaleString('fr-FR', { timeZone: 'Europe/Paris' })} :</p>
-      <ul>${report.map(r => `<li style="margin-bottom: 8px;">${r}</li>`).join('')}</ul>
-      <hr style="margin: 20px 0; border: 0; border-top: 1px solid #E5E7EB;">
-      <p style="color: #047857; font-weight: bold;">Le système a été auto-réparé : déclencheurs de 06:00:00 et Watchdog 07:00 réinstallés.</p>
+  check('Envoi du rapport', () => {
+    const colors = { OK: '#047857', ATTENTION: '#B45309', ERREUR: '#B91C1C' };
+    const items = report
+      .map((r) => `<li style="margin-bottom:8px;color:${colors[r.status] || '#111827'};">${Utils.escapeHtml(r.line)}</li>`)
+      .join('');
+    const html = `<div style="font-family:sans-serif;padding:20px;">
+      <h2 style="color:#111827;">Rapport de diagnostic du Briefing Quotidien</h2>
+      <p>État de vos services au ${Utilities.formatDate(new Date(), Config.DEFAULTS.TIMEZONE, 'dd/MM/yyyy à HH:mm')} :</p>
+      <ul>${items}</ul>
+      <hr style="margin:20px 0;border:0;border-top:1px solid #E5E7EB;">
+      <p style="color:#047857;font-weight:bold;">Déclencheurs de 06:00:00 et watchdog de 07h00 réinstallés.</p>
     </div>`;
-
-    GmailApp.sendEmail(recipient, '🔍 [DIAGNOSTIC] Statut de votre Briefing Quotidien', report.join('\n'), {
-      htmlBody: reportHtml,
+    GmailApp.sendEmail(recipient, '[Diagnostic] Statut de votre Briefing Quotidien', report.map((r) => r.line).join('\n'), {
+      htmlBody: html,
       name: 'Diagnostic Briefing Quotidien'
     });
-    logStep('✉️', 'Envoi du rapport par e-mail', `Envoyé avec succès à ${recipient}`);
-  } catch (e) {
-    logStep('❌', 'Envoi du rapport par e-mail', `Échec d'envoi : ${e.message}`);
-  }
+    logStep('OK', 'Envoi du rapport', `Envoyé à ${recipient}.`);
+  });
 
-  // 8. Envoi immédiat du vrai Briefing Quotidien
-  try {
-    logStep('🚀', 'Briefing Quotidien', 'Lancement de l’envoi immédiat de votre vrai briefing...');
+  check('Briefing quotidien', () => {
     runBriefingNow();
-    logStep('🎉', 'Briefing Quotidien', 'Votre vrai briefing a été assemblé et envoyé avec succès !');
-  } catch (e) {
-    logStep('❌', 'Briefing Quotidien', `Erreur briefing : ${e.message}`);
-  }
+    logStep('OK', 'Briefing quotidien', 'Briefing assemblé et envoyé.');
+  });
 
-  console.log('=== FIN DU DIAGNOSTIC ===');
-  return report.join('\n');
+  console.log('=== Fin du diagnostic ===');
+  return report.map((r) => r.line).join('\n');
 }

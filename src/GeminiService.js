@@ -1,990 +1,633 @@
 /**
  * Google CC Briefing Agent
- * GeminiService.js — High-performance AI analysis via Gemini 2.0 Flash API with structured JSON output,
- * strict LinkedIn disambiguation, professional French localization, and resilient retry cascade.
+ * GeminiService.js — Accès unique à l'API Google Gemini : cascade de modèles, budget temps,
+ * sortie JSON structurée, et trois usages métier (e-mails, météo, actualités).
  *
  * @author Kouroufia
- * @version 2.0.0
+ * @version 3.0.0
  */
 
 const GeminiService = (() => {
-  /**
-   * Cached active working model for the current execution cycle.
-   * Prevents repeated 503/429 attempts on overloaded models.
-   * @type {string|null}
-   */
+  /** Modèle ayant répondu avec succès pendant cette exécution (réessayé en premier). */
   let activeWorkingModel = null;
-
-  /**
-   * Set of models that have hit daily quota limits (HTTP 429).
-   * Prevents repeated quota failure spam during the current run.
-   * @type {Set<string>}
-   */
+  /** Modèles ayant atteint leur quota (HTTP 429) pendant cette exécution. */
   const exhaustedModels = new Set();
+  /** Modèles introuvables (HTTP 404) pendant cette exécution. */
+  const unavailableModels = new Set();
+
+  const cleanModelName = (model) => String(model || '').replace(/^models\//, '').trim();
 
   /**
-   * Marks a model as quota-exhausted for the remainder of this session.
-   * @param {string} modelName - Model name.
+   * Transmet un incident à l'Agent de Contrôle (jamais bloquant).
+   * @param {Object} incident
    */
-  const markModelExhausted = (modelName) => {
-    const clean = String(modelName).replace(/^models\//, '').trim();
-    exhaustedModels.add(clean);
-    console.warn(`Modèle ${clean} marqué comme quota-épuisé pour cette session.`);
-
+  const notifyIncident = (incident) => {
     try {
-      if (typeof DevOpsAgentService !== 'undefined') {
-        DevOpsAgentService.recordIncident({
-          component: 'Serveur d’analyse IA',
-          severity: 'INFO',
-          resolved: true,
-          message: 'Le serveur principal était momentanément saturé.',
-          solution: 'Passage automatique et transparent sur un serveur de secours pour résumer vos e-mails.'
-        });
-      }
+      DevOpsAgentService.recordIncident(incident);
     } catch {}
   };
 
   /**
-   * Resolves the prioritized model cascade list.
-   * Puts the currently verified working model first if known.
-   * Automatically filters out any models that have hit daily quota limits.
-   *
-   * @returns {Array<string>} Ordered list of models to try.
+   * Cascade ordonnée, dédupliquée, sans les modèles épuisés ou introuvables.
+   * Le dernier modèle ayant fonctionné est placé en tête.
+   * @returns {Array<string>}
    */
   const getModelCascade = () => {
-    const primary = Config.getGeminiModel() || 'gemini-3.1-flash-lite';
-    const fallback = Config.DEFAULTS.GEMINI_FALLBACK_MODEL || 'gemini-3.5-flash-lite';
-    const allModels = [
-      primary,
-      fallback,
-      'gemini-3.1-flash-lite',
-      'gemini-3.5-flash-lite',
-      'gemini-3.6-flash',
-      'gemini-3.5-flash',
-      'gemini-2.5-flash-lite',
-      'gemini-2.5-flash',
-      'gemini-3.8-flash'
-    ];
-
-    const available = allModels.filter((m) => !exhaustedModels.has(m));
-    const models = available.length > 0 ? available : ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-2.5-flash-lite'];
-
-    if (activeWorkingModel && models.includes(activeWorkingModel) && !exhaustedModels.has(activeWorkingModel)) {
-      return [activeWorkingModel, ...models.filter((m) => m !== activeWorkingModel)];
-    }
-    return [...new Set(models)];
+    const ordered = [
+      activeWorkingModel,
+      Config.getGeminiModel(),
+      Config.DEFAULTS.GEMINI_FALLBACK_MODEL,
+      ...Config.GEMINI_MODEL_CASCADE
+    ]
+      .map(cleanModelName)
+      .filter(Boolean);
+    const unique = [...new Set(ordered)].filter((m) => !exhaustedModels.has(m) && !unavailableModels.has(m));
+    return unique.length > 0 ? unique : [Config.DEFAULTS.GEMINI_MODEL];
   };
 
   /**
-   * Generates weather advice based on raw weather data, with retry and model fallback.
-   *
-   * @param {string} rawWeatherContext - Formatted weather metrics.
-   * @returns {string|null} Advice string or null.
+   * Configuration de génération adaptée au modèle (désactivation du raisonnement hors « lite »).
+   * @param {string} model
+   * @param {Object} overrides
+   * @returns {Object}
    */
-  const generateWeatherAdvice = (rawWeatherContext) => {
-    if (!rawWeatherContext) return null;
-
-    let apiKey = null;
-    try {
-      apiKey = Config.getGeminiApiKey();
-    } catch (e) {
-      console.warn(`Weather advice skipped: ${e.message}`);
-      return null;
+  const buildGenerationConfig = (model, overrides) => {
+    const config = Object.assign(
+      { temperature: Config.DEFAULTS.TEMPERATURE, maxOutputTokens: Config.DEFAULTS.MAX_OUTPUT_TOKENS },
+      overrides || {}
+    );
+    if (!model.includes('lite')) {
+      config.thinkingConfig = { thinkingBudget: 0 };
     }
-    if (!apiKey) return null;
+    return config;
+  };
 
-    const modelCascade = getModelCascade();
+  /**
+   * Appel HTTP unique à un modèle. La clé transite par l'en-tête x-goog-api-key (jamais dans l'URL).
+   *
+   * @param {string} model - Modèle ciblé.
+   * @param {string} apiKey - Clé API.
+   * @param {string} prompt - Texte complet envoyé.
+   * @param {Object} generationOverrides - Paramètres de génération spécifiques.
+   * @returns {string} Texte du premier candidat.
+   * @throws {Error} Erreur portant `statusCode` (0 = réseau).
+   */
+  const requestModel = (model, apiKey, prompt, generationOverrides) => {
+    const url = `${Config.DEFAULTS.GEMINI_API_BASE_URL}/${model}:generateContent`;
+    const payload = {
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: buildGenerationConfig(model, generationOverrides)
+    };
 
-    const systemPrompt = 
-      "Tu es un assistant pratique et direct.\n" +
-      "Rédige un bulletin météo très court pour la ville détectée, en allant systématiquement à la ligne pour chaque moment de la journée : le matin (9h), l'après-midi (15h) et le soir (21h).\n" +
-      "IMPORTANT : Tu DOIS commencer ta réponse en annonçant clairement la ville sur sa propre ligne : '**Pour [Ville] :**'\n" +
-      "Donne les températures, les risques de pluie et des conseils vestimentaires simples (t-shirt, veste, parapluie).\n" +
-      "FORMAT DES CHIFFRES OBLIGATOIRE : écris TOUJOURS les températures avec le symbole '°C' (ex : '10 °C') et les risques de pluie avec '%' collé au chiffre (ex : '29%'). N'écris JAMAIS 'degrés' ni 'pour cent' en toutes lettres. N'utilise aucun emoji ni pictogramme.\n" +
-      "RESPECTE SCRUPULEUSEMENT CE FORMAT AVEC RETOURS À LA LIGNE POUR CHAQUE MOMENT :\n" +
-      "**Pour Annemasse :**\n" +
-      "• **Matin (9h) :** Il fera 10 °C avec 29% de risque de pluie, prévoyez une petite veste pour partir.\n" +
-      "• **Après-midi (15h) :** Le soleil s'installe avec 22 °C et 5% de risque de pluie, vous pourrez largement rester en t-shirt.\n" +
-      "• **Soir (21h) :** Attention, le ciel se couvre (80% de risque d'averses) et il fera 14 °C. Prenez un parapluie si vous sortez.";
-
-    for (let model of modelCascade) {
-      if (!model) continue;
-      const cleanModel = String(model).replace(/^models\//, '').trim();
-      const url = `${Config.DEFAULTS.GEMINI_API_BASE_URL}/${cleanModel}:generateContent?key=${apiKey}`;
-
-      const genConfig = {
-        temperature: 0.3,
-        maxOutputTokens: 512
-      };
-      if (!cleanModel.includes('lite')) {
-        genConfig.thinkingConfig = { thinkingBudget: 0 };
-      }
-
-      const requestBody = {
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: `${systemPrompt}\n\nVoici les données brutes :\n${rawWeatherContext}` }]
-          }
-        ],
-        generationConfig: genConfig
-      };
-
-      const options = {
+    let response;
+    try {
+      response = UrlFetchApp.fetch(url, {
         method: 'post',
         contentType: 'application/json',
-        payload: JSON.stringify(requestBody),
+        headers: { 'x-goog-api-key': apiKey },
+        payload: JSON.stringify(payload),
         muteHttpExceptions: true
-      };
+      });
+    } catch (netErr) {
+      const err = new Error(`Échec réseau vers Gemini : ${netErr.message}`);
+      err.statusCode = 0;
+      throw err;
+    }
 
+    const statusCode = response.getResponseCode();
+    const body = response.getContentText();
+    if (statusCode !== 200) {
+      let message = body.substring(0, 200);
       try {
-        const response = UrlFetchApp.fetch(url, options);
-        const statusCode = response.getResponseCode();
-        if (statusCode === 200) {
-          const json = JSON.parse(response.getContentText());
-          const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (text) {
-            activeWorkingModel = cleanModel;
-            return Utils.sanitizeText(text);
-          }
-        } else {
-          if (statusCode === 429) {
-            markModelExhausted(cleanModel);
-          }
-          console.warn(`Weather advice failed on model ${cleanModel} with HTTP ${statusCode}`);
+        message = JSON.parse(body)?.error?.message || message;
+      } catch {}
+      const err = new Error(`HTTP ${statusCode} : ${Utils.redactSensitive(message)}`);
+      err.statusCode = statusCode;
+      throw err;
+    }
+
+    const text = JSON.parse(body)?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) {
+      const err = new Error('Réponse Gemini vide.');
+      err.statusCode = 502;
+      throw err;
+    }
+    return text;
+  };
+
+  /**
+   * Génération avec cascade de modèles et respect strict du budget temps global.
+   *
+   * @param {Object} params
+   * @param {string} params.prompt - Prompt complet.
+   * @param {Object} [params.generationConfig] - Paramètres de génération.
+   * @param {string} params.purpose - Usage (pour les journaux).
+   * @param {number} [params.maxModels] - Nombre maximal de modèles essayés.
+   * @param {number} [params.minRemainingMs] - Temps global minimal requis avant chaque essai.
+   * @returns {string|null} Texte généré ou null (repli à la charge de l'appelant).
+   */
+  const generate = ({ prompt, generationConfig, purpose, maxModels, minRemainingMs = 20000 }) => {
+    if (!Config.hasGeminiApiKey()) return null;
+    const apiKey = Config.getGeminiApiKey();
+    const cascade = getModelCascade().slice(0, maxModels || Config.DEFAULTS.MAX_MODELS_PER_CALL);
+
+    for (let i = 0; i < cascade.length; i++) {
+      if (!Utils.hasTimeFor(minRemainingMs)) {
+        console.warn(`Gemini (${purpose}) : budget temps insuffisant, repli automatique.`);
+        return null;
+      }
+      const model = cascade[i];
+      try {
+        const text = requestModel(model, apiKey, prompt, generationConfig);
+        activeWorkingModel = model;
+        if (i > 0) {
+          notifyIncident({
+            component: 'Service de résumé automatique',
+            severity: 'INFO',
+            resolved: true,
+            message: 'Le service de résumé principal était momentanément très sollicité.',
+            solution: 'Relais automatique sur un service de secours, sans aucune coupure.'
+          });
         }
-      } catch (e) {
-        console.error(`Error generating weather advice with ${cleanModel}: ${e.message}`);
+        return text;
+      } catch (error) {
+        const code = error.statusCode || 0;
+        console.warn(`Gemini (${purpose}) : modèle ${model} indisponible — ${Utils.redactSensitive(error.message)}`);
+
+        if (code === 401 || code === 403) {
+          notifyIncident({
+            component: 'Service de résumé automatique',
+            severity: 'CRITICAL',
+            resolved: false,
+            message: 'La clé d’accès au service de résumé a été refusée.',
+            solution: 'Votre briefing a été préparé en mode simplifié. Remplacez la clé GEMINI_API_KEY dans les Propriétés du script pour retrouver les résumés détaillés.'
+          });
+          return null;
+        }
+        if (code === 429) exhaustedModels.add(model);
+        if (code === 404) unavailableModels.add(model);
+        if (code >= 500 && i < cascade.length - 1) {
+          Utilities.sleep(Math.min(1500, Math.max(0, Utils.remainingMs() - minRemainingMs)));
+        }
       }
     }
-    
     return null;
   };
 
   /**
-   * Analyzes an array of deduplicated email objects using Gemini API.
-   * Processes emails in single optimized batches to prevent rate limiting (HTTP 429).
-   *
-   * @param {Array<Object>} emailsList - Deduplicated email objects.
-   * @returns {Array<Object>} Enriched email objects with AI metadata.
+   * Analyse JSON tolérante (blocs ```json, caractères de contrôle).
+   * @param {string} text
+   * @returns {*} Objet analysé ou null.
    */
-  const analyzeEmails = (emailsList) => {
-    if (!emailsList || emailsList.length === 0) {
-      return [];
-    }
-
-    let apiKey = null;
+  const parseJson = (text) => {
+    if (!text) return null;
+    const cleaned = String(text).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
     try {
-      apiKey = Config.getGeminiApiKey();
-    } catch (e) {
-      console.warn(`Clé API Gemini non configurée (${e.message}). Mode de repli heuristique automatique activé.`);
-    }
-
-    if (!apiKey) {
-      return emailsList.map(msg => Object.assign({}, msg, getFallbackAiData(msg)));
-    }
-
-    const batchSize = Config.DEFAULTS.BATCH_SIZE || 12;
-    const enrichedResults = [];
-    const analysisStartTime = Date.now();
-    const MAX_ANALYSIS_MS = 140000; // 2 minutes 20s max pour l'ensemble des e-mails (garantie anti-timeout 6 min)
-
-    for (let i = 0; i < emailsList.length; i += batchSize) {
-      // Garde-fou temporel strict : empêche tout blocage Apps Script à 6 minutes
-      if (Date.now() - analysisStartTime > MAX_ANALYSIS_MS) {
-        console.warn(`Budget temps d'analyse (140s) atteint. Activation du repli déterministe immédiat pour les ${emailsList.length - i} e-mail(s) restant(s).`);
-        try {
-          if (typeof DevOpsAgentService !== 'undefined') {
-            DevOpsAgentService.recordIncident({
-              component: 'Vitesse de traitement des e-mails',
-              severity: 'INFO',
-              resolved: true,
-              message: 'Grand nombre d’e-mails reçus nécessitant une analyse plus longue.',
-              solution: 'Accélération immédiate de l’analyse pour vous livrer votre briefing complet à l’heure.'
-            });
-          }
-        } catch {}
-        for (let j = i; j < emailsList.length; j++) {
-          enrichedResults.push(Object.assign({}, emailsList[j], getFallbackAiData(emailsList[j])));
-        }
-        break;
-      }
-
-      const batch = emailsList.slice(i, i + batchSize);
-      const batchIndex = Math.floor(i / batchSize) + 1;
-      const totalBatches = Math.ceil(emailsList.length / batchSize);
-
-      console.log(
-        `Gemini analysis batch ${batchIndex}/${totalBatches} (${batch.length} emails in single API call)...`
-      );
-
-      const batchAnalysis = analyzeBatchWithRetry(batch, apiKey, batchIndex, totalBatches);
-
-      for (const originalMsg of batch) {
-        const aiData = batchAnalysis[originalMsg.id] || getFallbackAiData(originalMsg);
-        enrichedResults.push(Object.assign({}, originalMsg, aiData));
-      }
-
-      if (i + batchSize < emailsList.length) {
-        Utilities.sleep(1000);
-      }
-    }
-
-    return enrichedResults;
-  };
-
-  /**
-   * Executes a batch analysis with exponential backoff retry and model fallback.
-   *
-   * @param {Array<Object>} batch - Slice of emails to analyze.
-   * @param {string} apiKey - Gemini API Key.
-   * @param {number} batchIndex - Current batch index.
-   * @param {number} totalBatches - Total batches count.
-   * @returns {Object<string, Object>} Map of emailId -> AI analysis object.
-   */
-  const analyzeBatchWithRetry = (batch, apiKey, batchIndex, totalBatches) => {
-    const modelCascade = getModelCascade();
-    let cascadeIndex = 0;
-    const maxAttempts = Config.DEFAULTS.MAX_RETRIES || 4;
-    const baseDelayMs = Config.DEFAULTS.INITIAL_BACKOFF_MS || 1500;
-    const transientStatusCodes = [429, 500, 502, 503, 504];
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const modelToTry = modelCascade[cascadeIndex] || modelCascade[0];
+      return JSON.parse(cleaned);
+    } catch {
       try {
-        const result = callGeminiApi(batch, apiKey, modelToTry);
-        activeWorkingModel = modelToTry;
-        return result;
-      } catch (error) {
-        const statusCode = error.statusCode || 0;
-        const sanitizedMsg = Utils.redactSensitive(error.message);
-
-        // Immediate cascade on HTTP 404, 503 (high demand), 429 (quota), or network timeout (0)
-        if (statusCode === 404 || statusCode === 503 || statusCode === 429 || statusCode === 0) {
-          if (statusCode === 429 || (error.message && error.message.includes('quota'))) {
-            markModelExhausted(modelToTry);
-          }
-          console.warn(`Model ${modelToTry} unavailable (${sanitizedMsg}). Cascading to next available model.`);
-
-          try {
-            if (typeof DevOpsAgentService !== 'undefined') {
-              DevOpsAgentService.recordIncident({
-                component: 'Serveur d’analyse IA',
-                severity: 'INFO',
-                resolved: true,
-                message: statusCode === 503
-                  ? 'Pic d’affluence temporaire sur les serveurs d’analyse.'
-                  : 'Léger ralentissement détecté sur le serveur principal.',
-                solution: 'Relais automatique immédiat sur un serveur de secours sans aucune coupure.'
-              });
-            }
-          } catch {}
-
-          if (cascadeIndex < modelCascade.length - 1) {
-            cascadeIndex++;
-            attempt--; // Do not consume an attempt when instantly cascading
-            continue;
-          }
-        }
-
-        // Fatal non-recoverable errors
-        if (statusCode > 0 && !transientStatusCodes.includes(statusCode) && statusCode !== 404) {
-          console.error(`Non-recoverable API error (${sanitizedMsg}). Activating fallback mode for batch ${batchIndex}.`);
-          break;
-        }
-
-        // Transient errors with backoff
-        if (attempt < maxAttempts) {
-          const delay = Utils.calculateBackoffWithJitter(attempt, baseDelayMs);
-          console.warn(
-            `API temporarily unavailable (${sanitizedMsg}). Attempt ${attempt}/${maxAttempts} — Retrying in ${delay} ms...`
-          );
-          Utilities.sleep(delay);
-          if (cascadeIndex < modelCascade.length - 1) {
-            cascadeIndex++;
-          }
-        } else {
-          console.error(
-            `Batch ${batchIndex}/${totalBatches} failed after ${maxAttempts} attempts. Fallback activated.`
-          );
-        }
+        return JSON.parse(cleaned.replace(/[\u0000-\u001F]+/g, ' '));
+      } catch {
+        return null;
       }
     }
+  };
 
-    const fallbackResult = {};
-    for (const msg of batch) {
-      fallbackResult[msg.id] = getFallbackAiData(msg);
-    }
-    return fallbackResult;
+  // ---------------------------------------------------------------------------
+  // 1. Analyse des e-mails
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Prompt d'analyse des e-mails, construit à partir de la taxonomie canonique de Config.
+   * @returns {string}
+   */
+  const buildEmailPrompt = () => {
+    const C = Config.EMAIL_CATEGORY;
+    const today = Utils.formatDateFrench(new Date());
+    const taxonomy = Config.EMAIL_CATEGORIES.map((c) => `   - '${c.name}' : ${c.hint}`).join('\n');
+    return [
+      "Tu es l'analyste exécutif en chef de 'Mon Briefing Quotidien'. Produis une synthèse de très haute précision, fluide et 100 % en français pour chaque e-mail.",
+      `Date du jour : ${today} (fuseau Europe/Paris).`,
+      '',
+      'RÈGLES DE RÉDACTION STRICTES :',
+      '',
+      '1. DÉSAMBIGUÏSATION DES E-MAILS LINKEDIN (CRITIQUE) :',
+      "   - Invitations et demandes de connexion ('invitation', 'connecter', 'rejoindre votre réseau', \"j'attends votre réponse\", 'invites you to connect') :",
+      `     catégorie OBLIGATOIRE '${C.SOCIAL}' (JAMAIS '${C.JOBS}'). Résumé obligatoire : 'Invitation de **[Nom de la personne]** à rejoindre votre réseau professionnel.'`,
+      `   - Vraies offres d'emploi ('offre d'emploi', 'recrute', 'poste de', 'jobs', 'hiring') : catégorie OBLIGATOIRE '${C.JOBS}', résumé précis avec termes clés en gras.`,
+      `   - Articles et actualités partagés sur LinkedIn : catégorie OBLIGATOIRE '${C.NEWS}', synthèse en 1 phrase active.`,
+      '',
+      '2. ACTIONS PRIORITAIRES (actionRequired = true) :',
+      '   - UNIQUEMENT si une décision ou une action humaine est requise (confirmer un rendez-vous, payer une facture, transmettre un justificatif, signer un document).',
+      "   - 'actionTitle' au format strict '[Expéditeur / Organisme] — [Sujet précis et enjeu]' (ex. 'CAF — Justificatif de ressources à transmettre', 'Qare — Consultation médicale de suivi').",
+      "   - 'deadline' : date et heure précises tirées de l'e-mail (ex. '18/11 à 09h00', 'Aujourd'hui 18h') ou null. N'invente JAMAIS une date absente de l'e-mail.",
+      "   - 'summary' : l'instruction concrète en 1 phrase active (quoi faire et pourquoi).",
+      '',
+      `3. PLATEFORMES D'EMPLOI : tout e-mail de Michael Page, Meteojob, HelloWork, Apec, Indeed ou mentionnant 'Finance & Accounting', 'Fiduciaire', 'Comptable', 'Treuhand' va dans '${C.JOBS}'.`,
+      '',
+      '4. TRADUCTION OBLIGATOIRE EN FRANÇAIS des intitulés allemands ou anglais :',
+      "   - 'Sachbearbeiter/in Treuhand & Administration (m/w/d)' -> 'Collaborateur en fiduciaire et administration (H/F)'",
+      "   - 'New Jobs for: Finance & Accounting: Genève' -> 'Nouvelles offres d'emploi en finance et comptabilité à Genève'",
+      "   - Remplace systématiquement '(m/w/d)' par '(H/F)'.",
+      '',
+      '5. INTERDICTIONS : ne commence JAMAIS par "[Expéditeur] vous a envoyé un e-mail", n\'écris JAMAIS "Aucune action requise", aucune entité HTML (&amp;, &#039;), aucun symbole $, aucun emoji.',
+      '',
+      '6. TAXONOMIE STRICTE (choisis exactement un de ces libellés) :',
+      taxonomy
+    ].join('\n');
   };
 
   /**
-   * Calls the Gemini generateContent endpoint with native structured JSON schema.
-   *
-   * @param {Array<Object>} batch - Array of emails to analyze.
-   * @param {string} apiKey - Gemini API Key.
-   * @param {string} model - Target model identifier.
-   * @returns {Object<string, Object>} Map of emailId -> AI analysis object.
+   * Schéma JSON imposé à Gemini pour l'analyse des e-mails.
+   * @returns {Object}
    */
-  const callGeminiApi = (batch, apiKey, model) => {
-    const cleanModel = String(model).replace(/^models\//, '').trim();
-    const endpoint = `${Config.DEFAULTS.GEMINI_API_BASE_URL}/${cleanModel}:generateContent?key=${apiKey}`;
+  const buildEmailSchema = () => ({
+    type: 'ARRAY',
+    items: {
+      type: 'OBJECT',
+      properties: {
+        emailId: { type: 'STRING' },
+        category: { type: 'STRING', enum: Config.EMAIL_CATEGORIES.map((c) => c.name) },
+        summary: { type: 'STRING', description: '1 phrase concise et active en français avec termes clés en gras (**)' },
+        actionRequired: { type: 'BOOLEAN' },
+        actionTitle: { type: 'STRING', description: "Format strict : '[Expéditeur] — [Sujet et enjeu précis]' ou vide" },
+        deadline: { type: 'STRING', description: "Échéance tirée de l'e-mail (ex. '18/11 à 09h00') ou vide" },
+        estimatedMinutes: { type: 'INTEGER', description: "Durée estimée de l'action en minutes" }
+      },
+      required: ['emailId', 'category', 'summary', 'actionRequired']
+    }
+  });
 
+  /**
+   * Normalise une analyse IA brute.
+   * @param {Object} item
+   * @returns {Object}
+   */
+  const normalizeEmailAnalysis = (item) => {
+    const deadline = Utils.sanitizeText(item.deadline);
+    const minutes = parseInt(item.estimatedMinutes, 10);
+    return {
+      category: Config.normalizeEmailCategory(item.category),
+      summary: Utils.sanitizeText(item.summary) || 'Nouvelles informations partagées.',
+      actionRequired: Boolean(item.actionRequired),
+      actionTitle: Utils.sanitizeText(item.actionTitle) || (item.actionRequired ? 'Action requise' : ''),
+      deadline: deadline && !/^(null|aucune?|none|n\/a)$/i.test(deadline) ? deadline : null,
+      estimatedMinutes: Number.isFinite(minutes) && minutes > 0 ? minutes : 5
+    };
+  };
+
+  /**
+   * Analyse un lot d'e-mails en un seul appel.
+   * @param {Array<Object>} batch
+   * @returns {Object<string, Object>|null} Map emailId -> analyse, ou null si échec.
+   */
+  const analyzeBatch = (batch) => {
     const emailsPayload = batch.map((msg) => {
-      let snippet = msg.body || '';
-      if (snippet.length > 900) {
-        snippet = `${snippet.substring(0, 900)}...`;
-      }
-      snippet = Utils.sanitizeText(snippet);
-
+      const max = Config.DEFAULTS.MAX_SNIPPET_CHARS;
+      const body = String(msg.body || '');
       return {
         emailId: msg.id,
         expediteur: Utils.sanitizeText(msg.senderDisplayName || msg.senderName),
         objet: Utils.sanitizeText(msg.subject),
         date: `${msg.dateFormatted} ${msg.timeFormatted}`,
         nombreMessages: msg.duplicateCount || 1,
-        contenuAbrege: snippet
+        contenuAbrege: Utils.sanitizeText(body.length > max ? `${body.substring(0, max)}...` : body)
       };
     });
 
-    const systemPrompt =
-      "Tu es l'analyste exécutif en chef de 'Mon Briefing Quotidien'. Ta mission est de produire une synthèse de très haute précision, fluide et 100% en français pour chaque e-mail.\n\n" +
-      "RÈGLES DE RÉDACTION STRICTES :\n\n" +
-      "1. DÉSAMBIGUÏSATION CONTEXTUELLE DES E-MAILS LINKEDIN (CRITIQUE) :\n" +
-      "   - Invitations & Demandes de connexion réseau (contient 'invitation', 'connecter', 'rejoindre votre réseau', \"j'attends votre réponse\", 'invites you to connect') :\n" +
-      "     - Catégorie : OBLIGATOIREMENT 'Réseaux sociaux & Culture' (JAMAIS dans 'Emploi & Carrière').\n" +
-      "     - Résumé ('summary') : Formule obligatoire : 'Invitation de **[Nom de la personne]** à rejoindre votre réseau professionnel.'\n" +
-      "       (Exemple : si l'expéditeur ou l'objet est 'Aïmen Mimoun : Kouroufia, j'attends votre réponse', résumer par : 'Invitation de **Aïmen Mimoun** à rejoindre votre réseau professionnel.').\n" +
-      "   - Vraies offres d'emploi (contient 'offre d'emploi', 'recrute', 'poste de', 'comptable', 'finance', 'jobs', 'hiring') :\n" +
-      "     - Catégorie : OBLIGATOIREMENT 'Emploi & Carrière'.\n" +
-      "     - Résumé ('summary') : Explique précisément l'opportunité avec termes clés en gras.\n" +
-      "   - Articles & Actualités partagées sur LinkedIn (actualités économiques, analyses) :\n" +
-      "     - Catégorie : OBLIGATOIREMENT 'Actualités & Veille'.\n" +
-      "     - Résumé ('summary') : Synthèse en 1 phrase active en français.\n\n" +
-      "2. ACTIONS PRIORITAIRES (actionRequired = true) :\n" +
-      "   - Définis actionRequired = true UNIQUEMENT si une décision ou une action humaine est requise (ex: confirmer une réunion, s'inscrire à une formation, payer une facture, valider un document).\n" +
-      "   - Pour 'actionTitle', rédige impérativement un titre complet au format strict :\n" +
-      "     '[Expéditeur / Organisme] — [Sujet précis et enjeu de la tâche ou réunion]'\n" +
-      "     Exemples : 'France Travail — Réunion d'information sur la formation Croupier', 'Qare — Consultation médicale de suivi'\n" +
-      "   - Pour 'deadline', indique la date et l'heure précise (ex: '10/09 à 09h00', 'Aujourd'hui 18h') ou null.\n" +
-      "   - Pour 'summary', formule l'instruction concrète expliquant ce qu'il faut faire et pourquoi en 1 phrase active :\n" +
-      "     Exemple : 'Confirmez votre participation à la session collective d'Annemasse pour valider votre inscription.'\n\n" +
-      "3. ROUTAGE STRICT DES PLATEFORMES D'EMPLOI VERS 'Emploi & Carrière' :\n" +
-      "   - Tout e-mail provenant de Michael Page, Meteojob, HelloWork, Apec, Indeed ou mentionnant 'Finance & Accounting', 'Fiduciaire', 'Comptable', 'Treuhand' DOIT être classé dans 'Emploi & Carrière'.\n\n" +
-      "4. TRADUCTION OBLIGATOIRE EN FRANÇAIS (TITRES ÉTRANGERS) :\n" +
-      "   - Tout intitulé en allemand ou en anglais DOIT être traduit en français professionnel :\n" +
-      "     - 'Sachbearbeiter/in Treuhand & Administration (m/w/d)' -> 'Collaborateur en fiduciaire et administration (H/F)'\n" +
-      "     - 'New Jobs for: Finance & Accounting: Genève' -> 'Nouvelles offres d'emploi en finance et comptabilité à Genève'\n" +
-      "     - Remplacer systématiquement '(m/w/d)' par '(H/F)'.\n\n" +
-      "5. INTERDICTION ABSOLUE DE BOILERPLATE ROBOTIQUE ET D'ARTEFACTS :\n" +
-      "   - Ne commence JAMAIS par '[Expéditeur] vous a envoyé un e-mail'.\n" +
-      "   - N'écris JAMAIS 'Aucune action requise' dans le résumé.\n" +
-      "   - N'inclus JAMAIS d'entités HTML (&amp;, &#039;), de symboles mathématiques ($) ou de caractères de remplacement Unicode (\\uFFFD).\n\n" +
-      "6. TAXONOMIE STRICTE DES SOUS-CATÉGORIES :\n" +
-      "   - 'Emploi & Carrière' : Michael Page, Meteojob, LinkedIn (offres d'emploi uniquement), HelloWork, candidatures\n" +
-      "   - 'Banque & Finances' : Revolut, Société Générale, SG, PayPal, Qonto, virements, relevés bancaires\n" +
-      "   - 'Commandes & Livraisons' : Chronopost, Colissimo, Amazon, suivi de colis, commandes en cours, UPS\n" +
-      "   - 'Santé & Soins' : Consultations, médecins, ordonnances, praticiens (Doctolib, Qare)\n" +
-      "   - 'Démarches & Administration' : Services publics, formations, aides, impôts (France Travail, CAF, Ameli, impots.gouv)\n" +
-      "   - 'Sécurité & Accès' : Codes 2FA, connexions suspectes, alertes de compte Google/Microsoft\n" +
-      "   - 'Voyages & Loisirs' : Billets d'avion, réservations, vacances (easyJet, GetYourGuide, SNCF, American Express)\n" +
-      "   - 'Achats & Offres' : Soldes, remises, réductions e-commerce (ASOS, Twistshake)\n" +
-      "   - 'Actualités & Newsletters' : Articles de presse, Dribbble, newsletters générales\n" +
-      "   - 'Réseaux Sociaux' : Facebook, LinkedIn (réseau/messages), Instagram, TikTok\n" +
-      "   - 'Tech & Outils Numériques' : GitHub, Firebase, GCP, HeyGen, Lumosity, outils logiciels";
+    const text = generate({
+      purpose: 'analyse des e-mails',
+      prompt: `${buildEmailPrompt()}\n\nVoici les e-mails à analyser :\n${JSON.stringify(emailsPayload)}`,
+      generationConfig: {
+        maxOutputTokens: Config.DEFAULTS.MAX_OUTPUT_TOKENS,
+        responseMimeType: 'application/json',
+        responseSchema: buildEmailSchema()
+      },
+      minRemainingMs: Config.DEFAULTS.RESERVE_AFTER_EMAILS_MS
+    });
 
-    const responseSchema = {
-      type: 'ARRAY',
-      description: 'Liste des analyses structurées pour chaque e-mail',
-      items: {
-        type: 'OBJECT',
-        properties: {
-          emailId: { type: 'STRING' },
-          category: {
-            type: 'STRING',
-            enum: [
-              'Emploi & Carrière',
-              'Banque & Finances',
-              'Commandes & Livraisons',
-              'Santé & Soins',
-              'Démarches & Administration',
-              'Sécurité & Accès',
-              'Voyages & Loisirs',
-              'Achats & Offres',
-              'Actualités & Newsletters',
-              'Réseaux Sociaux',
-              'Tech & Outils Numériques'
-            ]
-          },
-          summary: {
-            type: 'STRING',
-            description: '1 phrase concise et active en français avec termes clés en gras (**)'
-          },
-          actionRequired: { type: 'BOOLEAN' },
-          actionTitle: {
-            type: 'STRING',
-            description: "Format strict : '[Expéditeur] — [Sujet et enjeu précis]' ou vide"
-          },
-          deadline: { type: 'STRING', description: "Date/heure limite de l'action si applicable (ex: '10/09 à 09h00') ou null" },
-          estimatedMinutes: { type: 'INTEGER', description: "Durée estimée de l'action en minutes" }
-        },
-        required: ['emailId', 'category', 'summary', 'actionRequired']
-      }
-    };
-
-    const genConfig = {
-      temperature: Config.DEFAULTS.TEMPERATURE || 0.2,
-      maxOutputTokens: Config.DEFAULTS.MAX_OUTPUT_TOKENS || 8192,
-      responseMimeType: 'application/json',
-      responseSchema
-    };
-
-    if (!cleanModel.includes('lite')) {
-      genConfig.thinkingConfig = { thinkingBudget: 0 };
+    const parsed = parseJson(text);
+    if (!Array.isArray(parsed)) return null;
+    const map = {};
+    for (const item of parsed) {
+      if (item && item.emailId) map[item.emailId] = normalizeEmailAnalysis(item);
     }
-
-    const requestBody = {
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              text: `${systemPrompt}\n\nVoici les e-mails à analyser et synthétiser :\n${JSON.stringify(emailsPayload)}`
-            }
-          ]
-        }
-      ],
-      generationConfig: genConfig
-    };
-
-    const options = {
-      method: 'post',
-      contentType: 'application/json',
-      payload: JSON.stringify(requestBody),
-      muteHttpExceptions: true
-    };
-
-    let response;
-    try {
-      response = UrlFetchApp.fetch(endpoint, options);
-    } catch (netErr) {
-      const err = new Error(`Network failure calling Gemini API: ${netErr.message}`);
-      err.statusCode = 0;
-      throw err;
-    }
-
-    const statusCode = response.getResponseCode();
-    const responseText = response.getContentText();
-
-    if (statusCode !== 200) {
-      let parsedMessage = responseText.substring(0, 200);
-      try {
-        const errJson = JSON.parse(responseText);
-        if (errJson?.error?.message) {
-          parsedMessage = errJson.error.message;
-        }
-      } catch {}
-
-      const err = new Error(`HTTP ${statusCode} : ${parsedMessage}`);
-      err.statusCode = statusCode;
-      throw err;
-    }
-
-    const data = JSON.parse(responseText);
-    const candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!candidateText) {
-      const emptyErr = new Error('Empty candidate received from Gemini API.');
-      emptyErr.statusCode = 502;
-      throw emptyErr;
-    }
-
-    let cleanedJsonText = candidateText.trim();
-    cleanedJsonText = cleanedJsonText.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim();
-
-    let parsedArray;
-    try {
-      parsedArray = JSON.parse(cleanedJsonText);
-    } catch {
-      const sanitizedJson = cleanedJsonText.replace(/[\u0000-\u001F]+/g, ' ');
-      parsedArray = JSON.parse(sanitizedJson);
-    }
-
-    const resultMap = {};
-
-    if (Array.isArray(parsedArray)) {
-      for (const item of parsedArray) {
-        if (item?.emailId) {
-          resultMap[item.emailId] = {
-            category: item.category ? Utils.sanitizeText(item.category) : 'Actualités & Newsletters',
-            summary: item.summary ? Utils.sanitizeText(item.summary) : 'Nouvelles informations partagées.',
-            actionRequired: Boolean(item.actionRequired),
-            actionTitle: item.actionTitle ? Utils.sanitizeText(item.actionTitle) : (item.actionRequired ? 'Action requise' : ''),
-            deadline: item.deadline && item.deadline !== 'null' && item.deadline !== 'Aucune' ? Utils.sanitizeText(item.deadline) : null,
-            estimatedMinutes: item.estimatedMinutes || 5
-          };
-        }
-      }
-    }
-
-    return resultMap;
+    return map;
   };
 
   /**
-   * Deterministic fallback metadata generator when API is unreachable.
+   * Enrichit chaque e-mail (catégorie, résumé, action, échéance) par lots,
+   * avec repli déterministe (EmailClassifier) pour tout e-mail non couvert.
    *
-   * @param {Object} msg - Email object.
-   * @returns {Object} Synthetic AI metadata.
+   * @param {Array<Object>} emailsList - E-mails dédupliqués.
+   * @returns {Array<Object>} E-mails enrichis.
    */
-  const getFallbackAiData = (msg) => {
-    let cleanSubj = Utils.sanitizeText(msg.subject) || 'Nouveau message';
-    const lower = `${msg.from} ${msg.subject}`.toLowerCase();
+  const analyzeEmails = (emailsList) => {
+    if (!emailsList || emailsList.length === 0) return [];
 
-    // Heuristic translation of German/English job terms
-    cleanSubj = cleanSubj.replace(/Sachbearbeiter\s*\/\s*in\s+Treuhand\s*&\s*Administration/gi, 'Collaborateur en fiduciaire et administration');
-    cleanSubj = cleanSubj.replace(/Sachbearbeiter\s*\/\s*in/gi, 'Collaborateur / Assistant');
-    cleanSubj = cleanSubj.replace(/Treuhand/gi, 'Fiduciaire');
-    cleanSubj = cleanSubj.replace(/New Jobs for:\s*/gi, 'Nouvelles offres pour : ');
-    cleanSubj = cleanSubj.replace(/Finance & Accounting/gi, 'Finance & Comptabilité');
-    cleanSubj = cleanSubj.replace(/Project Manager\s*-\s*Remote/gi, 'Chef de projet en télétravail');
+    const withFallback = (msg) => Object.assign({}, msg, EmailClassifier.buildFallbackAnalysis(msg));
 
-    let cat = 'Actualités & Newsletters';
-    let summary = cleanSubj;
-    let isAction = false;
-    let actionTitle = '';
-    let deadline = null;
+    if (!Config.hasGeminiApiKey()) {
+      console.warn('Clé Gemini absente : analyse des e-mails en mode de repli.');
+      return emailsList.map(withFallback);
+    }
 
-    // 1. LinkedIn Disambiguation
-    if (lower.includes('linkedin')) {
-      if (
-        lower.includes('attends votre réponse') ||
-        lower.includes('rejoindre votre réseau') ||
-        lower.includes('invitation') ||
-        lower.includes('connecter') ||
-        lower.includes('invites you to connect')
-      ) {
-        cat = 'Réseaux Sociaux';
-        let personName = '';
-        const parts = cleanSubj.split(':');
-        if (parts.length > 1 && parts[1].toLowerCase().includes('attends')) {
-          personName = parts[0].trim();
+    const batchSize = Config.DEFAULTS.BATCH_SIZE;
+    const analysisBudget = Math.min(
+      Config.DEFAULTS.EMAIL_ANALYSIS_MAX_MS,
+      Utils.remainingMs() - Config.DEFAULTS.RESERVE_AFTER_EMAILS_MS
+    );
+    const deadline = Date.now() + Math.max(0, analysisBudget);
+    const results = [];
+    let fallbackCount = 0;
+
+    for (let i = 0; i < emailsList.length; i += batchSize) {
+      const batch = emailsList.slice(i, i + batchSize);
+
+      if (Date.now() >= deadline) {
+        console.warn(`Budget d'analyse atteint : repli pour ${emailsList.length - i} e-mail(s) restant(s).`);
+        notifyIncident({
+          component: 'Vitesse de traitement des e-mails',
+          severity: 'INFO',
+          resolved: true,
+          message: 'Un grand nombre d’e-mails est arrivé depuis le dernier briefing.',
+          solution: 'Les derniers e-mails ont été résumés de façon simplifiée pour vous livrer le briefing à l’heure.'
+        });
+        emailsList.slice(i).forEach((msg) => results.push(withFallback(msg)));
+        fallbackCount += emailsList.length - i;
+        break;
+      }
+
+      console.log(`Analyse Gemini du lot ${Math.floor(i / batchSize) + 1}/${Math.ceil(emailsList.length / batchSize)} (${batch.length} e-mails)...`);
+      const analysis = analyzeBatch(batch) || {};
+      for (const msg of batch) {
+        if (analysis[msg.id]) {
+          results.push(Object.assign({}, msg, analysis[msg.id]));
+        } else {
+          results.push(withFallback(msg));
+          fallbackCount++;
         }
-        summary = personName
-          ? `Invitation de **${personName}** à rejoindre votre réseau professionnel.`
-          : 'Invitation à rejoindre votre réseau professionnel sur LinkedIn.';
-      } else if (
-        lower.includes('trump') ||
-        lower.includes('data centre') ||
-        lower.includes('build-out') ||
-        lower.includes('newsletter')
-      ) {
-        cat = 'Tech & Outils Numériques';
-        summary = `Article et actualités partagés sur LinkedIn : ${cleanSubj}`;
-      } else {
-        cat = 'Emploi & Carrière';
-        summary = `Opportunité professionnelle sur LinkedIn : ${cleanSubj}`;
       }
-    }
-    // 2. Job & Recruitment Platforms
-    else if (
-      lower.includes('michaelpage') ||
-      lower.includes('michael page') ||
-      lower.includes('meteojob') ||
-      lower.includes('hellowork') ||
-      lower.includes('apec') ||
-      lower.includes('indeed') ||
-      lower.includes('offres finance') ||
-      lower.includes('finance & accounting') ||
-      lower.includes('treuhand') ||
-      lower.includes('recrutement')
-    ) {
-      cat = 'Emploi & Carrière';
-      if (lower.includes('michael page')) {
-        summary = 'Nouvelles opportunités d’emploi en finance et comptabilité à Genève.';
-      } else if (lower.includes('meteojob')) {
-        summary = 'Plus de 30 offres d’emploi récentes en finance, comptabilité et assurance.';
-      } else {
-        summary = `Opportunité professionnelle : ${cleanSubj}`;
-      }
-    }
-    // 3. Public administration & Training
-    else if (
-      lower.includes('francetravail') ||
-      lower.includes('pole-emploi') ||
-      lower.includes('croupier') ||
-      lower.includes('formation') ||
-      lower.includes('caf.fr') ||
-      lower.includes('impots.gouv')
-    ) {
-      cat = 'Démarches & Administration';
-      if (lower.includes('croupier') || lower.includes('formation')) {
-        isAction = true;
-        actionTitle = "France Travail — Réunion d'information sur la formation Croupier";
-        deadline = '10/09 à 09h00';
-        summary = 'Confirmez votre participation à la session collective d’Annemasse pour valider votre inscription.';
-      } else {
-        summary = `Information sur vos démarches administratives : ${cleanSubj}`;
-      }
-    }
-    // 4. Healthcare
-    else if (
-      lower.includes('doctolib') ||
-      lower.includes('qare') ||
-      lower.includes('sante') ||
-      lower.includes('soins') ||
-      lower.includes('medecin')
-    ) {
-      cat = 'Santé & Soins';
-      summary = `Notification médicale concernant l’accès aux soins : ${cleanSubj}`;
-    }
-    // 5. Bank & Finance
-    else if (lower.includes('revolut') || lower.includes('sg') || lower.includes('société générale') || lower.includes('paypal') || lower.includes('qonto') || lower.includes('banque')) {
-      cat = 'Banque & Finances';
-      summary = `Notification bancaire : ${cleanSubj}`;
-    }
-    // 6. Orders & Delivery
-    else if (lower.includes('chronopost') || lower.includes('colissimo') || lower.includes('amazon') || lower.includes('suivi de commande') || lower.includes('livraison')) {
-      cat = 'Commandes & Livraisons';
-      summary = `Suivi de commande et livraison : ${cleanSubj}`;
-    }
-    // 7. Travel & Leisure
-    else if (
-      lower.includes('easyjet') ||
-      lower.includes('getyourguide') ||
-      lower.includes('voyage') ||
-      lower.includes('american express') ||
-      lower.includes('amex')
-    ) {
-      cat = 'Voyages & Loisirs';
-      summary = `Offre de séjour et voyage : ${cleanSubj}`;
-    }
-    // 8. E-Commerce & Shopping
-    else if (
-      lower.includes('asos') ||
-      lower.includes('twistshake') ||
-      lower.includes('aprizo') ||
-      lower.includes('promo') ||
-      lower.includes('solde')
-    ) {
-      cat = 'Achats & Offres';
-      summary = `Offre promotionnelle : ${cleanSubj}`;
-    }
-    // 9. Tech, Social Networks, News
-    else if (
-      lower.includes('github') || lower.includes('firebase') || lower.includes('cloud') ||
-      lower.includes('heygen') || lower.includes('lumosity') || lower.includes('api')
-    ) {
-      cat = 'Tech & Outils Numériques';
-      if (lower.includes('lumosity')) {
-        summary = 'Exercices d’entraînement cérébral pour la mémoire et la concentration.';
-      } else {
-        summary = `Activité ou mise à jour technique : ${cleanSubj}`;
-      }
-    }
-    else if (lower.includes('tiktok') || lower.includes('facebook') || lower.includes('instagram')) {
-      cat = 'Réseaux Sociaux';
-      summary = `Notification réseau social : ${cleanSubj}`;
-    }
-    else if (lower.includes('dribbble') || lower.includes('ugc') || lower.includes('newsletter')) {
-      cat = 'Actualités & Newsletters';
-      if (lower.includes('ugc')) {
-        summary = 'Vos sorties cinéma et programmation de la semaine.';
-      } else {
-        summary = `Actualités et veille : ${cleanSubj}`;
-      }
-    }
-    // 9. Account Security
-    else if (lower.includes('securite') || lower.includes('connexion') || lower.includes('google')) {
-      cat = 'Sécurité & Accès';
-      summary = `Alerte de sécurité de compte : ${cleanSubj}`;
     }
 
+    if (fallbackCount > 0 && fallbackCount === emailsList.length) {
+      notifyIncident({
+        component: 'Service de résumé automatique',
+        severity: 'WARNING',
+        resolved: true,
+        message: 'Le service de résumé n’a pas répondu ce matin.',
+        solution: 'Vos e-mails ont été classés et résumés en mode simplifié : rien n’a été perdu.'
+      });
+    }
+    return results;
+  };
+
+  // ---------------------------------------------------------------------------
+  // 2. Météo
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Rédige le bulletin météo et le conseil vestimentaire (format AGENTS.md).
+   * @param {string} rawWeatherContext - Données météo structurées.
+   * @param {string} city - Ville retenue.
+   * @returns {string|null} Texte du bulletin, ou null (repli déterministe côté WeatherService).
+   */
+  const generateWeatherAdvice = (rawWeatherContext, city) => {
+    if (!rawWeatherContext) return null;
+    const prompt = [
+      'Tu es un assistant pratique et direct.',
+      `Rédige un bulletin météo très court pour ${city}, en allant à la ligne pour chaque moment de la journée : le matin (9h), l'après-midi (15h) et le soir (21h).`,
+      `Commence OBLIGATOIREMENT par la ligne : '**Pour ${city} :**'`,
+      'Donne la température, le risque de pluie et un conseil vestimentaire simple (t-shirt, pull, veste, manteau, parapluie).',
+      "FORMAT DES CHIFFRES OBLIGATOIRE : températures en chiffres avec une espace avant '°C' (ex. '10 °C'), risques de pluie en chiffres avec '%' collé (ex. '29%'). N'écris JAMAIS 'degrés' ni 'pour cent' en toutes lettres. Aucun emoji.",
+      'FORMAT EXACT ATTENDU :',
+      `**Pour ${city} :**`,
+      '• **Matin (9h) :** Il fera 10 °C avec 29% de risque de pluie, prévoyez une petite veste.',
+      "• **Après-midi (15h) :** 22 °C et 5% de risque de pluie, un t-shirt suffira.",
+      '• **Soir (21h) :** 14 °C et 80% de risque d’averses, prenez un parapluie si vous sortez.',
+      '',
+      `Données brutes :\n${rawWeatherContext}`
+    ].join('\n');
+
+    const text = generate({
+      purpose: 'météo',
+      prompt,
+      generationConfig: { temperature: 0.3, maxOutputTokens: 512 },
+      maxModels: 3,
+      minRemainingMs: 60000
+    });
+    return text ? Utils.sanitizeText(text) : null;
+  };
+
+  // ---------------------------------------------------------------------------
+  // 3. Actualités (HugoDécrypte + Google Actualités)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Prompt du digest d'actualités (règles anti-vague AGENTS.md).
+   * @param {boolean} hasHugoSource - Indique si une édition HugoDécrypte réelle est disponible.
+   * @returns {string}
+   */
+  const buildNewsPrompt = (hasHugoSource) => {
+    const categoryLines = Config.NEWS_CATEGORIES.map((c, idx) => `     ${idx + 1}) "${c.name}"`).join('\n');
+    // Libellés courts pour les badges de segments (ex. "Politique & Géopolitique", "Culture & Savoir")
+    const segmentCategories = Config.NEWS_CATEGORIES
+      .map((c) => c.name.replace(/^[A-Z] — /, '').replace(/\s*\(.*\)$/, ''))
+      .join('", "');
+    return [
+      'Tu es un journaliste vulgarisateur d’élite pour un briefing exécutif matinal.',
+      'Résume l’actualité comme pour un jeune curieux de 15 ans, en livrant 100 % des faits concrets (qui, quoi, ville précise, pourquoi, impact) en phrases courtes, pour pouvoir en discuter sans chercher ailleurs.',
+      '',
+      'RÈGLES ANTI-VAGUE (STRICTES ET OBLIGATOIRES) :',
+      '1. SIGLES, ENTREPRISES ET TERMES EXPLIQUÉS : chaque sigle, entreprise, organisation ou terme technique est immédiatement expliqué entre parenthèses en mots simples.',
+      '   Ex. : "la COP31 (la conférence mondiale annuelle de l’ONU sur le climat)", "l’Arcom (le régulateur français de la télévision et de la radio)", "OpenAI (l’entreprise qui a créé ChatGPT)".',
+      '2. IDENTITÉS ET FONCTIONS : chaque personne est citée avec prénom, nom ET fonction exacte (ex. "Antonio Guterres (le secrétaire général de l’ONU)").',
+      '   Chaque sportif avec son club ET son poste exact (ex. "Senny Mayulu (le jeune milieu de terrain du PSG)").',
+      '3. LIEUX PRÉCIS : donne TOUJOURS la ville ou commune exacte quand elle figure dans les sources (ex. "à Trappes, dans les Yvelines" et jamais "en banlieue parisienne").',
+      '   Interdiction des formules vagues ("accusations graves", "certains cas", "situation difficile"). Donne les noms, les chiffres, la raison et la conséquence.',
+      '4. FORMAT : 2 à 3 phrases denses par sujet — (1) qui, quoi, où ; (2) pourquoi ou polémique ; (3) impact ou suite.',
+      '5. FIDÉLITÉ : n’invente AUCUN fait absent des sources. Ne mélange jamais les détails de deux dépêches distinctes.',
+      '6. ZÉRO EMOJI.',
+      '',
+      'STRUCTURE JSON ATTENDUE :',
+      hasHugoSource
+        ? `- "segments" : un objet par segment du sommaire HugoDécrypte (hors intro et outro) avec "timestamp" (minutage exact), "segmentTitle", "category" (parmi "${segmentCategories}") et "summary".`
+        : '- "segments" : renvoie un tableau VIDE (aucune édition HugoDécrypte disponible ce matin, n’invente rien).',
+      '- "categories" : un objet par rubrique, dans CET ORDRE EXACT, uniquement à partir des dépêches de la section [COMPLÉMENT D’ACTUALITÉS] et de leur corroboration presse, sans répéter un sujet déjà traité par HugoDécrypte sauf absence d’autre dépêche :',
+      categoryLines,
+      '  Champs : "categoryName" (libellé exact ci-dessus), "headline" (titre précis), "summary" (2 à 3 phrases).',
+      '  Rubrique Culture & Savoir : une découverte scientifique ou historique, un film ou un livre expliqué concrètement (jamais le terme abstrait "médias").',
+      '  Rubrique Faits divers : délit, crime, enquête ou accident marquant avec ville exacte et motif.'
+    ].join('\n');
+  };
+
+  /** @returns {Object} Schéma JSON du digest d'actualités. */
+  const buildNewsSchema = () => ({
+    type: 'OBJECT',
+    properties: {
+      segments: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            timestamp: { type: 'STRING' },
+            segmentTitle: { type: 'STRING' },
+            category: { type: 'STRING' },
+            summary: { type: 'STRING' }
+          },
+          required: ['timestamp', 'segmentTitle', 'category', 'summary']
+        }
+      },
+      categories: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            categoryName: { type: 'STRING' },
+            headline: { type: 'STRING' },
+            summary: { type: 'STRING' }
+          },
+          required: ['categoryName', 'headline', 'summary']
+        }
+      }
+    },
+    required: ['segments', 'categories']
+  });
+
+  /**
+   * Bloc « édition HugoDécrypte » destiné au template.
+   * @param {Object|null} episode - Épisode issu de NewsService.
+   * @param {Array<Object>} aiSegments - Segments résumés par l'IA (peut être vide).
+   * @returns {Object|null}
+   */
+  const buildHugoEdition = (episode, aiSegments) => {
+    if (!episode) return null;
+    const nativeSegments = (episode.segments || []).map((seg) => ({
+      timestamp: Utils.sanitizeText(seg.timestamp),
+      segmentTitle: Utils.sanitizeText(seg.title),
+      category: '',
+      summary: ''
+    }));
     return {
-      category: cat,
-      summary: Utils.sanitizeText(summary),
-      actionRequired: isAction,
-      actionTitle,
-      deadline,
-      estimatedMinutes: isAction ? 5 : 0
+      available: Boolean(episode.available),
+      source: episode.source,
+      sourceLabel: episode.sourceLabel,
+      videoTitle: Utils.sanitizeText(episode.title),
+      videoUrl: episode.url,
+      publishedDate: Utils.sanitizeText(episode.publishedDate),
+      segments: aiSegments && aiSegments.length > 0 ? aiSegments : nativeSegments
     };
   };
 
   /**
-   * Génère le résumé exécutif des actualités (vidéo quotidienne complète HugoDécrypte + dépêches par catégorie).
+   * Digest de repli sans IA (aucune information inventée).
+   * @param {Object} newsData
+   * @returns {Object}
+   */
+  const buildFallbackDigest = (newsData) => ({
+    hugoEdition: buildHugoEdition(newsData.hugoEpisode, []),
+    categories: newsData.fallbackCategories || []
+  });
+
+  /**
+   * Résumé complet des actualités : édition HugoDécrypte segment par segment
+   * + Complément Google Actualités en 9 rubriques PESTEL+.
    *
-   * @param {Object} newsData - Données brutes issues de NewsService.fetchDailyNewsData().
-   * @returns {Object} { hugoEdition: Object|null, categories: Array<Object>, hugoEpisode: Object|null }
+   * @param {Object} newsData - Données de NewsService.fetchDailyNewsData().
+   * @returns {Object|null} { hugoEdition, categories }
    */
   const generateNewsDigest = (newsData) => {
     if (!newsData || !newsData.rawContext) return null;
+    const hasHugoSource = Boolean(newsData.hugoEpisode && newsData.hugoEpisode.available);
 
-    let apiKey = null;
-    try {
-      apiKey = Config.getGeminiApiKey();
-    } catch {
-      return {
-        hugoEdition: newsData.hugoEpisode ? {
-          videoTitle: Utils.sanitizeText(newsData.hugoEpisode.title),
-          videoUrl: newsData.hugoEpisode.url,
-          publishedDate: Utils.sanitizeText(newsData.hugoEpisode.publishedDate),
-          editionTitle: Utils.sanitizeText(newsData.hugoEpisode.editionTitle),
-          segments: (newsData.hugoEpisode.segments || []).map((seg) => ({
-            timestamp: Utils.sanitizeText(seg.timestamp),
-            segmentTitle: Utils.sanitizeText(seg.title),
-            category: 'Actualités',
-            summary: Utils.sanitizeText(seg.title)
-          }))
-        } : null,
-        categories: newsData.fallbackCategories || [],
-        hugoEpisode: newsData.hugoEpisode || null
-      };
-    }
-
-    const modelCascade = getModelCascade();
-
-    const systemPrompt = [
-      'Tu es un journaliste vulgarisateur d’élite pour un briefing exécutif matinal.',
-      'Ton rôle : résumer l’actualité comme si tu parlais à un jeune curieux de 15 ans, tout en livrant 100 % des faits concrets (qui, quoi, ville précise, pourquoi la polémique, impact/suite) en phrases courtes et directes pour qu’on puisse en discuter avec des collègues sans devoir chercher ailleurs.',
-      '',
-      'DIRECTIVES MAJEURES (STRICTES ET OBLIGATOIRES — TEST DE L’ADO DE 15 ANS) :',
-      '1. ZÉRO MOT, SIGLE OU NOM NON EXPLIQUÉ :',
-      '   - N’emploie JAMAIS un sigle, événement, unité ou terme technique sans l’expliquer immédiatement entre parenthèses en mots très simples.',
-      '   - Exemples : "la COP31 (la grande conférence mondiale annuelle de l’ONU sur le climat)", "Shahid Kaveh (une unité secrète de hackers militaires iraniens liée aux Gardiens de la Révolution)", "l’Arcom (le régulateur français qui surveille la télévision et la radio)", "une OPA (offre pour racheter une entreprise en Bourse)".',
-      '2. CONTEXTUALISATION PRÉCISE DE CHAQUE PERSONNE, SPORTIF ET ENTREPRISE :',
-      '   - Pour CHAQUE personne : précise TOUJOURS qui elle est et sa fonction/rôle exact (ex : "Thomas Massie (un député républicain américain)", "Antonio Guterres (le secrétaire général de l’ONU)").',
-      '   - Pour CHAQUE sportif : indique TOUJOURS son club/équipe ET son poste exact sur le terrain (ex : "Senny Mayulu (le jeune milieu de terrain du PSG)", "Kylian Mbappé (l’attaquant de l’équipe de France et du Real Madrid)").',
-      '   - Pour CHAQUE entreprise, marque, parti ou organisation : précise ce qu’elle fait ou vend (ex : "Coopérative U (l’enseigne française de supermarchés)", "OpenAI (l’entreprise qui a créé ChatGPT)").',
-      '3. ZÉRO RÉSUMÉ À 60 % — PRÉCISION GÉOGRAPHIQUE ET FACTUELLE MAXIMALE :',
-      '   - Interdiction absolue des formules vagues ("dans les Yvelines" sans la ville, "accusations graves", "domaines sensibles", "certains cas", "situation difficile").',
-      '   - Donne TOUJOURS la VILLE exacte si elle apparaît dans les sources ou la corroboration (ex : "à Trappes, dans les Yvelines"), le NOM exact des suspects/acteurs cités, les CHIFFRES marquants, la RAISON/POLÉMIQUE d’origine (pourquoi les gens manifestent, signent une pétition ou attaquent) ET la CONSÉQUENCE / IMPACT.',
-      '   - Pour une pétition, grève, procès ou destitution : explique toujours en mots simples POURQUOI l’affaire a commencé (ex : reproches de manque de pluralisme contre une chaîne, revendications de salaires/postes, actes illégaux reprochés) ET ce que ça change ensuite.',
-      '4. FORMAT COURT MAIS COMPLET (2 À 3 PHRASES DENSES ET LISIBLES PAR SUJET) :',
-      '   - Phrase 1 (QUI + QUOI + OÙ) : L’événement concret avec ville exacte, explication des sigles/entreprises et rôle/poste précis des personnes.',
-      '   - Phrase 2 (POURQUOI / POLÉMIQUE) : Le motif d’origine ou l’enjeu expliqué simplement.',
-      '   - Phrase 3 (IMPACT / SUITE) : La décision prise, la réaction ou ce qui va se passer ensuite.',
-      '5. DEUX BLOCS ATTENDUS DANS LE JSON :',
-      '   - "segments" : pour CHAQUE segment du sommaire d’HugoDécrypte (ignore Intro et Outro). Précise le minutage exact ("timestamp"), un titre clair ("segmentTitle"), une catégorie strictement choisie parmi ["Politique & Géopolitique", "Économie & Entreprises", "Social & Sociétal", "Tech, IA & Sciences", "Environnement & Écologie", "Justice & Lois", "Culture & Savoir", "Sport", "Faits divers"] (n’utilise JAMAIS le mot vague "Médias"), et le résumé factuel complet ("summary").',
-      '   - "categories" : génère UN objet par rubrique dans CET ORDRE EXACT (PESTEL + Culture + Sport + Faits divers) en utilisant UNIQUEMENT les sources Google Actualités correspondantes fournies dans [COMPLÉMENT D’ACTUALITÉS] (avec leur corroboration presse pour être 100 % précis, et sans répéter les sujets déjà résumés dans HugoDécrypte sauf absence d’autre dépêche) :',
-      '     1) "P — Politique & Géopolitique" (élections, diplomatie, conflits, gouvernement, parlement — laisse les sujets climat/COP pour la rubrique Environnement)',
-      '     2) "E — Économie, Finance & Entreprises" (entreprises, marchés, impôts, budget, énergie/carburant)',
-      '     3) "S — Social & Sociétal" (pouvoir d’achat, logement, grèves avec leurs revendications précises, éducation, santé publique)',
-      '     4) "T — Technologie, IA & Innovation" (intelligence artificielle, cybersécurité, high-tech, puces)',
-      '     5) "E — Environnement & Écologie" (climat, COP, transition écologique, biodiversité)',
-      '     6) "L — Légal : Justice, Lois & Procès" (procès, décisions judiciaires majeures, projets de loi, condamnations)',
-      '     7) "Culture & Savoir (Cinéma, Livres, Histoire & Sciences)" (découverte scientifique ou historique passionnante, film, livre ou fait culturel pour dormir moins bête — explique concrètement de quoi il s’agit, jamais du terme abstrait "médias")',
-      '     8) "Sport" (résultat, transfert, blessure ou événement majeur du sport avec poste exact des joueurs)',
-      '     9) "Faits divers (Délits, Crimes & Accidents marquants)" (délit, crime, enquête, accident grave ou décès marquant avec ville exacte et motif)',
-      '     Pour chaque rubrique : "categoryName", "headline" (titre précis), "summary" (2 à 3 phrases claires, complètes et pédagogiques). Ne mélange JAMAIS les détails (lieux, dates ou affaires) de deux dépêches distinctes dans un même résumé.',
-      '6. ZÉRO ÉMOJI : n’utilise strictement aucun emoji ni symbole dans le texte généré.',
-      '7. Réponds UNIQUEMENT en JSON avec la structure spécifiée dans le schéma.'
-    ].join('\n');
-
-    const responseSchema = {
-      type: 'OBJECT',
-      properties: {
-        segments: {
-          type: 'ARRAY',
-          items: {
-            type: 'OBJECT',
-            properties: {
-              timestamp: { type: 'STRING' },
-              segmentTitle: { type: 'STRING' },
-              category: { type: 'STRING' },
-              summary: { type: 'STRING' }
-            },
-            required: ['timestamp', 'segmentTitle', 'category', 'summary']
-          }
-        },
-        categories: {
-          type: 'ARRAY',
-          items: {
-            type: 'OBJECT',
-            properties: {
-              categoryName: { type: 'STRING' },
-              headline: { type: 'STRING' },
-              summary: { type: 'STRING' }
-            },
-            required: ['categoryName', 'headline', 'summary']
-          }
-        }
-      },
-      required: ['segments', 'categories']
-    };
-
-    for (const model of modelCascade) {
-      if (!model) continue;
-      const cleanModel = String(model).replace(/^models\//, '').trim();
-      const url = `${Config.DEFAULTS.GEMINI_API_BASE_URL}/${cleanModel}:generateContent?key=${apiKey}`;
-
-      const genConfig = {
-        temperature: 0.2,
+    const text = generate({
+      purpose: 'actualités',
+      prompt: `${buildNewsPrompt(hasHugoSource)}\n\nSOURCES DU JOUR :\n${newsData.rawContext.substring(0, 48000)}`,
+      generationConfig: {
         maxOutputTokens: 8192,
         responseMimeType: 'application/json',
-        responseSchema
-      };
-      if (!cleanModel.includes('lite')) {
-        genConfig.thinkingConfig = { thinkingBudget: 0 };
-      }
+        responseSchema: buildNewsSchema()
+      },
+      maxModels: 3,
+      minRemainingMs: 60000
+    });
 
-      const requestBody = {
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text: `${systemPrompt}\n\nSOURCES DU JOUR :\n${newsData.rawContext.substring(0, 48000)}`
-              }
-            ]
-          }
-        ],
-        generationConfig: genConfig
-      };
+    const parsed = parseJson(text);
+    if (!parsed || typeof parsed !== 'object') {
+      notifyIncident({
+        component: 'Actualités du jour',
+        severity: 'INFO',
+        resolved: true,
+        message: 'Le résumé détaillé des actualités n’a pas pu être rédigé à temps.',
+        solution: 'Les titres du jour vous sont présentés directement, avec leurs sources.'
+      });
+      return buildFallbackDigest(newsData);
+    }
 
-      const options = {
-        method: 'post',
-        contentType: 'application/json',
-        payload: JSON.stringify(requestBody),
-        muteHttpExceptions: true
-      };
+    const aiSegments = hasHugoSource && Array.isArray(parsed.segments)
+      ? parsed.segments
+          .map((seg) => ({
+            timestamp: Utils.sanitizeText(seg.timestamp),
+            segmentTitle: Utils.sanitizeText(seg.segmentTitle),
+            category: Utils.sanitizeText(seg.category),
+            summary: Utils.sanitizeText(seg.summary)
+          }))
+          .filter((seg) => seg.segmentTitle && seg.summary)
+      : [];
 
-      try {
-        const response = UrlFetchApp.fetch(url, options);
-        const statusCode = response.getResponseCode();
+    // Rubriques ordonnées strictement selon Config.NEWS_CATEGORIES
+    const buckets = {};
+    Config.NEWS_CATEGORIES.forEach((c) => {
+      buckets[c.name] = [];
+    });
+    for (const rawCat of Array.isArray(parsed.categories) ? parsed.categories : []) {
+      const target = Config.resolveNewsCategoryName(Utils.sanitizeText(rawCat.categoryName));
+      const headline = Utils.sanitizeText(rawCat.headline);
+      const summary = Utils.sanitizeText(rawCat.summary);
+      if (target && headline && summary) buckets[target].push({ headline, summary });
+    }
 
-        if (statusCode === 200) {
-          const json = JSON.parse(response.getContentText());
-          const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (rawText) {
-            const parsed = JSON.parse(rawText);
-            activeWorkingModel = cleanModel;
-
-            const segments = Array.isArray(parsed.segments) ? parsed.segments : [];
-            const sanitizedSegments = segments.map((seg) => ({
-              timestamp: Utils.sanitizeText(seg.timestamp),
-              segmentTitle: Utils.sanitizeText(seg.segmentTitle),
-              category: Utils.sanitizeText(seg.category),
-              summary: Utils.sanitizeText(seg.summary)
-            }));
-
-            // Structure Hugo Edition (avec repli systématique sur les segments natifs si Gemini en omettait)
-            const fallbackSegments = (newsData.hugoEpisode?.segments || []).map((seg) => ({
-              timestamp: Utils.sanitizeText(seg.timestamp || '01:00'),
-              segmentTitle: Utils.sanitizeText(seg.title || seg.segmentTitle),
-              category: 'Actualités',
-              summary: Utils.sanitizeText(seg.title || seg.segmentTitle)
-            }));
-
-            const hugoEdition = newsData.hugoEpisode ? {
-              videoTitle: Utils.sanitizeText(newsData.hugoEpisode.title),
-              videoUrl: newsData.hugoEpisode.url,
-              publishedDate: Utils.sanitizeText(newsData.hugoEpisode.publishedDate),
-              editionTitle: Utils.sanitizeText(newsData.hugoEpisode.editionTitle),
-              segments: sanitizedSegments.length > 0 ? sanitizedSegments : fallbackSegments
-            } : null;
-
-            // Catégories complémentaires ordonnées strictement (PESTEL -> Culture & Savoir -> Sport -> Faits divers)
-            // Uniquement issues des sources Google Actualités.
-            const canonicalCategories = (NewsService.CATEGORIES || []).map((c) => c.name);
-            const bucketByCanonical = {};
-            for (const cName of canonicalCategories) {
-              bucketByCanonical[cName] = [];
-            }
-
-            if (Array.isArray(parsed.categories) && parsed.categories.length > 0) {
-              for (const rawCat of parsed.categories) {
-                const rawName = Utils.sanitizeText(rawCat.categoryName);
-                const lowerRaw = rawName.toLowerCase();
-                let targetName =
-                  canonicalCategories.find((c) => c.toLowerCase() === lowerRaw) ||
-                  canonicalCategories.find((c) => {
-                    const stem = c.split(/[—:(]/)[0].trim().toLowerCase();
-                    if (stem.length <= 2) {
-                      return c.toLowerCase().includes(lowerRaw) || lowerRaw.includes(c.substring(0, 12).toLowerCase());
-                    }
-                    return lowerRaw.includes(stem);
-                  });
-
-                // Correspondance fine sur mots-clés si libellé abrégé
-                if (!targetName) {
-                  if (lowerRaw.includes('politique') || lowerRaw.includes('géopolitique')) targetName = canonicalCategories[0];
-                  else if (lowerRaw.includes('économie') || lowerRaw.includes('finance')) targetName = canonicalCategories[1];
-                  else if (lowerRaw.includes('social') || lowerRaw.includes('sociétal')) targetName = canonicalCategories[2];
-                  else if (lowerRaw.includes('tech') || lowerRaw.includes('innovation')) targetName = canonicalCategories[3];
-                  else if (lowerRaw.includes('environnement') || lowerRaw.includes('écologie')) targetName = canonicalCategories[4];
-                  else if (lowerRaw.includes('légal') || lowerRaw.includes('justice') || lowerRaw.includes('loi')) targetName = canonicalCategories[5];
-                  else if (lowerRaw.includes('culture') || lowerRaw.includes('savoir') || lowerRaw.includes('science')) targetName = canonicalCategories[6];
-                  else if (lowerRaw.includes('sport')) targetName = canonicalCategories[7];
-                  else if (lowerRaw.includes('faits divers') || lowerRaw.includes('crime') || lowerRaw.includes('délit')) targetName = canonicalCategories[8];
-                }
-
-                if (targetName && rawCat.headline && rawCat.summary) {
-                  bucketByCanonical[targetName].push({
-                    headline: Utils.sanitizeText(rawCat.headline),
-                    summary: Utils.sanitizeText(rawCat.summary)
-                  });
-                }
-              }
-            }
-
-            const finalCategories = [];
-            for (const catName of canonicalCategories) {
-              if (bucketByCanonical[catName].length > 0) {
-                finalCategories.push({
-                  name: catName,
-                  items: bucketByCanonical[catName]
-                });
-              } else {
-                const fb = (newsData.fallbackCategories || []).find((f) => f.name === catName);
-                if (fb && fb.items && fb.items.length > 0) {
-                  finalCategories.push({
-                    name: catName,
-                    items: fb.items.slice(0, 1)
-                  });
-                }
-              }
-            }
-
-            return {
-              hugoEdition,
-              categories: finalCategories,
-              hugoEpisode: newsData.hugoEpisode || null
-            };
-          }
-        } else {
-          if (statusCode === 429) {
-            markModelExhausted(cleanModel);
-          }
-          console.warn(`News digest HTTP ${statusCode} on ${cleanModel}`);
-          Utilities.sleep(1500);
-        }
-      } catch (e) {
-        console.warn(`Error generating news digest with ${cleanModel}: ${e.message}`);
-        Utilities.sleep(1000);
+    const categories = [];
+    for (const c of Config.NEWS_CATEGORIES) {
+      if (buckets[c.name].length > 0) {
+        categories.push({ name: c.name, items: buckets[c.name] });
+      } else {
+        const fb = (newsData.fallbackCategories || []).find((f) => f.name === c.name);
+        if (fb && fb.items && fb.items.length > 0) categories.push({ name: c.name, items: fb.items.slice(0, 1) });
       }
     }
 
-    // Deterministic fallback
     return {
-      hugoEdition: newsData.hugoEpisode ? {
-        videoTitle: Utils.sanitizeText(newsData.hugoEpisode.title),
-        videoUrl: newsData.hugoEpisode.url,
-        publishedDate: Utils.sanitizeText(newsData.hugoEpisode.publishedDate),
-        editionTitle: Utils.sanitizeText(newsData.hugoEpisode.editionTitle),
-        segments: (newsData.hugoEpisode.segments || []).map((seg) => ({
-          timestamp: Utils.sanitizeText(seg.timestamp || '01:00'),
-          segmentTitle: Utils.sanitizeText(seg.title || seg.segmentTitle || 'Actualité'),
-          category: 'Actualités',
-          summary: Utils.sanitizeText(seg.summary || seg.title || seg.segmentTitle || 'Sujet du jour')
-        }))
-      } : null,
-      categories: newsData.fallbackCategories || [],
-      hugoEpisode: newsData.hugoEpisode || null
+      hugoEdition: buildHugoEdition(newsData.hugoEpisode, aiSegments),
+      categories
     };
+  };
+
+  // ---------------------------------------------------------------------------
+  // 4. Diagnostic
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Teste la connexion au modèle principal (utilisé par diagnostiquerBriefing).
+   * @returns {{ok: boolean, model: string, detail: string}}
+   */
+  const pingPrimaryModel = () => {
+    const model = cleanModelName(Config.getGeminiModel());
+    if (!Config.hasGeminiApiKey()) {
+      return { ok: false, model, detail: 'Clé GEMINI_API_KEY absente des Propriétés du script.' };
+    }
+    try {
+      requestModel(model, Config.getGeminiApiKey(), 'Réponds par OK.', { maxOutputTokens: 16 });
+      return { ok: true, model, detail: 'Réponse reçue (HTTP 200).' };
+    } catch (error) {
+      return { ok: false, model, detail: Utils.redactSensitive(error.message).substring(0, 160) };
+    }
   };
 
   return {
     analyzeEmails,
     generateWeatherAdvice,
-    generateNewsDigest
+    generateNewsDigest,
+    pingPrimaryModel
   };
 })();

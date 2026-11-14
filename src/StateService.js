@@ -1,149 +1,121 @@
 /**
  * Google CC Briefing Agent
- * StateService.js — Concurrency locking, timestamp checkpointing, and execution idempotence.
+ * StateService.js — Verrou d'exécution, checkpoint horaire des e-mails et protection anti-double envoi.
  *
  * @author Kouroufia
- * @version 2.0.0
+ * @version 3.0.0
  */
 
 const StateService = (() => {
   let activeLock = null;
 
-  /**
-   * Acquires an exclusive script lock to prevent concurrent executions.
-   * @returns {boolean} True if lock was acquired, false otherwise.
-   */
-  const acquireLock = () => {
-    const lock = LockService.getScriptLock();
-    try {
-      const success = lock.tryLock(Config.DEFAULTS.LOCK_TIMEOUT_MS);
-      if (!success) {
-        console.warn('ScriptLock unavailable: another execution is already active.');
-        return false;
-      }
-      activeLock = lock;
-      return true;
-    } catch (error) {
-      console.error(`Lock acquisition failure: ${error.message}`);
-      return false;
-    }
-  };
+  const props = () => PropertiesService.getScriptProperties();
+  const nowSec = () => Math.floor(Date.now() / 1000);
 
   /**
-   * Releases the active script lock safely.
+   * Lit une propriété numérique (secondes UNIX).
+   * @param {string} key
+   * @returns {number|null}
    */
-  const releaseLock = () => {
-    if (activeLock) {
-      try {
-        activeLock.releaseLock();
-      } catch (error) {
-        console.warn(`Lock release warning: ${error.message}`);
-      }
-      activeLock = null;
-    }
-  };
-
-  /**
-   * Retrieves the UNIX timestamp (in seconds) of the last successful briefing checkpoint.
-   * @returns {number|null} Timestamp in seconds, or null if uninitialized.
-   */
-  const getLastCheckpointTime = () => {
+  const readTimestamp = (key) => {
     try {
-      const val = PropertiesService.getScriptProperties().getProperty(Config.KEYS.LAST_CHECKPOINT_TIME);
-      if (!val) return null;
-      const parsed = parseInt(val, 10);
-      return isNaN(parsed) ? null : parsed;
+      const parsed = parseInt(props().getProperty(key), 10);
+      return Number.isFinite(parsed) ? parsed : null;
     } catch (error) {
-      console.warn(`Unable to read LAST_CHECKPOINT_TIME: ${error.message}`);
+      console.warn(`Lecture impossible de ${key} : ${error.message}`);
       return null;
     }
   };
 
   /**
-   * Initializes the checkpoint if missing or too old, preventing historical backlog timeout.
-   * Clamps lookback to 24-48 hours maximum if the last run was weeks ago.
-   * @returns {number} Active checkpoint timestamp in seconds.
+   * Acquiert le verrou exclusif du script (évite deux briefings simultanés).
+   * @returns {boolean} true si le verrou est obtenu.
    */
-  const initCheckpointIfMissing = () => {
-    const current = getLastCheckpointTime();
-    const nowSec = Math.floor(Date.now() / 1000);
-    const MAX_LOOKBACK_SEC = 48 * 3600; // 48h limit
-
-    if (!current || (nowSec - current) > MAX_LOOKBACK_SEC) {
-      const safeStartSec = nowSec - (24 * 3600); // 24h
-      resetCheckpointTo(safeStartSec);
-      console.log(`Checkpoint initialisé/recalibré sur 24h : ${new Date(safeStartSec * 1000).toISOString()}`);
-      return safeStartSec;
+  const acquireLock = () => {
+    try {
+      const lock = LockService.getScriptLock();
+      if (!lock.tryLock(Config.DEFAULTS.LOCK_TIMEOUT_MS)) {
+        console.warn('Verrou indisponible : une autre exécution est déjà en cours.');
+        return false;
+      }
+      activeLock = lock;
+      return true;
+    } catch (error) {
+      console.error(`Échec d'acquisition du verrou : ${error.message}`);
+      return false;
     }
-    return current;
   };
 
+  /** Libère le verrou s'il est détenu. */
+  const releaseLock = () => {
+    if (!activeLock) return;
+    try {
+      activeLock.releaseLock();
+    } catch (error) {
+      console.warn(`Libération du verrou : ${error.message}`);
+    }
+    activeLock = null;
+  };
+
+  /** @returns {number|null} Checkpoint courant (secondes UNIX). */
+  const getLastCheckpointTime = () => readTimestamp(Config.KEYS.LAST_CHECKPOINT_TIME);
+
   /**
-   * Explicitly sets the checkpoint timestamp to a specific value in seconds.
-   * @param {number} timestampSec - UNIX timestamp in seconds.
-   * @returns {number} Set timestamp in seconds.
+   * Fixe le checkpoint à une valeur donnée.
+   * @param {number} timestampSec
+   * @returns {number}
    */
   const resetCheckpointTo = (timestampSec) => {
     try {
-      PropertiesService.getScriptProperties().setProperty(
-        Config.KEYS.LAST_CHECKPOINT_TIME,
-        String(timestampSec)
-      );
+      props().setProperty(Config.KEYS.LAST_CHECKPOINT_TIME, String(timestampSec));
     } catch (error) {
-      console.warn(`resetCheckpointTo error: ${error.message}`);
+      console.warn(`Écriture du checkpoint impossible : ${error.message}`);
     }
     console.log(`Checkpoint défini à : ${new Date(timestampSec * 1000).toISOString()}`);
     return timestampSec;
   };
 
   /**
-   * Explicitly resets the checkpoint timestamp to the current instant.
-   * @returns {number} Reset timestamp in seconds.
+   * Retourne le checkpoint, en le (ré)initialisant sur les dernières 24 h s'il est absent
+   * ou plus ancien que MAX_LOOKBACK_HOURS (évite d'analyser un historique massif).
+   * @returns {number}
    */
-  const resetCheckpointToNow = () => {
-    const nowSec = Math.floor(Date.now() / 1000);
-    return resetCheckpointTo(nowSec);
+  const initCheckpointIfMissing = () => {
+    const current = getLastCheckpointTime();
+    const now = nowSec();
+    if (!current || now - current > Config.DEFAULTS.MAX_LOOKBACK_HOURS * 3600) {
+      return resetCheckpointTo(now - 24 * 3600);
+    }
+    return current;
   };
 
   /**
-   * Verifies whether a production briefing has already run today (idempotence protection).
-   * @returns {boolean} True if briefing already ran today.
+   * Indique si un briefing de production a déjà été envoyé aujourd'hui (Europe/Paris).
+   * @returns {boolean}
    */
   const hasRunToday = () => {
-    try {
-      const lastRunVal = PropertiesService.getScriptProperties().getProperty(Config.KEYS.LAST_BRIEFING_RUN_TIME);
-      if (!lastRunVal) return false;
-
-      const lastRunSec = parseInt(lastRunVal, 10);
-      if (isNaN(lastRunSec)) return false;
-
-      const todayStr = Utilities.formatDate(new Date(), Config.DEFAULTS.TIMEZONE, 'yyyy-MM-dd');
-      const lastRunDateStr = Utilities.formatDate(new Date(lastRunSec * 1000), Config.DEFAULTS.TIMEZONE, 'yyyy-MM-dd');
-
-      return todayStr === lastRunDateStr;
-    } catch {
-      return false;
-    }
+    const lastRunSec = readTimestamp(Config.KEYS.LAST_BRIEFING_RUN_TIME);
+    if (!lastRunSec) return false;
+    const tz = Config.DEFAULTS.TIMEZONE;
+    return Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd') === Utilities.formatDate(new Date(lastRunSec * 1000), tz, 'yyyy-MM-dd');
   };
 
   /**
-   * Records a successful briefing execution and advances the checkpoint.
-   * @param {number} [newCheckpointSec] - Checkpoint timestamp to store.
+   * Enregistre un envoi réussi et avance le checkpoint.
+   * @param {number} newCheckpointSec - Début de l'exécution réussie.
    */
   const recordSuccessfulRun = (newCheckpointSec) => {
-    const nowSec = Math.floor(Date.now() / 1000);
-    const targetCheckpoint = newCheckpointSec || nowSec;
-
+    const now = nowSec();
+    const checkpoint = newCheckpointSec || now;
     try {
-      PropertiesService.getScriptProperties().setProperties({
-        [Config.KEYS.LAST_CHECKPOINT_TIME]: String(targetCheckpoint),
-        [Config.KEYS.LAST_BRIEFING_RUN_TIME]: String(nowSec)
+      props().setProperties({
+        [Config.KEYS.LAST_CHECKPOINT_TIME]: String(checkpoint),
+        [Config.KEYS.LAST_BRIEFING_RUN_TIME]: String(now)
       });
     } catch (error) {
-      console.warn(`recordSuccessfulRun error: ${error.message}`);
+      console.warn(`Enregistrement de l'envoi impossible : ${error.message}`);
     }
-
-    console.log(`Run recorded. Advanced checkpoint to ${new Date(targetCheckpoint * 1000).toISOString()}`);
+    console.log(`Envoi enregistré. Checkpoint avancé à ${new Date(checkpoint * 1000).toISOString()}`);
   };
 
   return {
@@ -152,7 +124,6 @@ const StateService = (() => {
     getLastCheckpointTime,
     initCheckpointIfMissing,
     resetCheckpointTo,
-    resetCheckpointToNow,
     hasRunToday,
     recordSuccessfulRun
   };

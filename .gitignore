@@ -1,6 +1,5 @@
 # Dépendances Node
 node_modules/
-package-lock.json
 
 # Clasp et secrets d'authentification
 .clasprc.json

@@ -51,7 +51,7 @@
         ?>
         <li style="margin-bottom: 10px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
           <span style="color: #6B7280; font-size: 12px;">[ <?= item.timeEstimate ?> ] &bull; </span>
-          <strong><?= item.actionTitle ?></strong><? if (item.deadline) { ?> <span style="color: #4B5563;">(<?= item.deadline ?>)</span><? } ?><? if (item.summary) { ?> : <?!= Utils.formatSummaryHtml(item.summary) ?><? } ?>.
+          <strong><?= item.actionTitle ?></strong><? if (item.account) { ?><span style="display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-left: 4px; background-color: <?= item.account.bg ?>; color: <?= item.account.color ?>; border: 1px solid <?= item.account.border ?>;"><?= item.account.label ?></span><? } ?><? if (item.deadline) { ?> <span style="color: #4B5563;">(<?= item.deadline ?>)</span><? } ?><? if (item.summary) { ?> : <?!= Utils.formatSummaryHtml(item.summary) ?><? } ?>.
           <a href="<?= item.webUrl ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 4px 8px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-size: 11.5px; font-weight: 600; margin-left: 6px; white-space: nowrap; vertical-align: middle;">Détails</a>
         </li>
         <? } ?>
@@ -77,7 +77,7 @@
                  var cItem = group.items[j];
             ?>
             <li style="margin-bottom: 8px; font-size: 13.5px; line-height: 1.5; color: #374151;">
-              <strong><?= cItem.sender ?> :</strong> <?!= Utils.formatSummaryHtml(cItem.summary) ?>
+              <strong><?= cItem.sender ?></strong><? if (cItem.account) { ?><span style="display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-left: 4px; background-color: <?= cItem.account.bg ?>; color: <?= cItem.account.color ?>; border: 1px solid <?= cItem.account.border ?>;"><?= cItem.account.label ?></span><? } ?><strong> :</strong> <?!= Utils.formatSummaryHtml(cItem.summary) ?>
               <a href="<?= cItem.webUrl ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 4px 8px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-size: 11.5px; font-weight: 600; margin-left: 6px; white-space: nowrap; vertical-align: middle;">Détails</a>
             </li>
             <? } ?>
@@ -124,6 +124,24 @@
         <? } ?>
       </ul>
       <? } ?>
+
+      <? if (data.tomorrowEvents && data.tomorrowEvents.length > 0) { ?>
+      <div style="font-size: 13px; font-weight: 700; color: #374151; margin: 14px 0 6px 0;">
+        À anticiper demain
+      </div>
+      <ul style="margin: 0; padding-left: 20px; list-style-type: circle;">
+        <? for (var tm = 0; tm < data.tomorrowEvents.length; tm++) {
+             var tev = data.tomorrowEvents[tm];
+        ?>
+        <li style="margin-bottom: 4px; font-size: 12.5px; line-height: 1.5; color: #4B5563;">
+          <?= tev.timeFormatted ?> : <?= tev.title ?><? if (tev.conferenceLink) { ?> <span style="color: #047857;">(visioconférence)</span><? } ?>
+        </li>
+        <? } ?>
+        <? if (data.tomorrowExtraCount > 0) { ?>
+        <li style="font-size: 12.5px; color: #6B7280;">et <?= data.tomorrowExtraCount ?> autre(s) rendez-vous</li>
+        <? } ?>
+      </ul>
+      <? } ?>
     </div>
 
     <!-- 4. MÉTÉO & CONSEIL VESTIMENTAIRE -->
@@ -152,14 +170,20 @@
       ?>
       <!-- BANDEAU ÉDITION HUGODÉCRYPTE -->
       <div style="margin-bottom: 14px; padding: 12px 16px; background-color: #FFF5F5; border: 1px solid #FED7D7; border-radius: 8px;">
+        <? if (he.available) { ?>
         <div style="font-size: 13px; font-weight: 700; color: #9B2C2C; margin-bottom: 4px;">
-          Édition vidéo du <?= he.publishedDate ?> : &laquo; <?= he.videoTitle ?> &raquo;
+          Édition <?= he.source === 'acast' ? 'audio' : 'vidéo' ?> du <?= he.publishedDate ?> : &laquo; <?= he.videoTitle ?> &raquo;
         </div>
         <div style="font-size: 12px; color: #742A2A; margin-bottom: 8px;">
           Synthèse détaillée segment par segment (tous les faits clés sans avoir à regarder la vidéo) :
         </div>
+        <? } else { ?>
+        <div style="font-size: 13px; font-weight: 700; color: #9B2C2C; margin-bottom: 8px;">
+          L’édition du jour n’a pas encore pu être récupérée ce matin.
+        </div>
+        <? } ?>
         <div>
-          <a href="<?= he.videoUrl ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 6px 12px; background-color: #E53E3E; color: #FFFFFF; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: 600;">Regarder la vidéo complète sur YouTube</a>
+          <a href="<?= he.videoUrl ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 6px 12px; background-color: #E53E3E; color: #FFFFFF; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: 600;"><?= he.sourceLabel ?></a>
         </div>
       </div>
 
@@ -170,8 +194,8 @@
              var seg = he.segments[s];
         ?>
         <li style="margin-bottom: 10px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
-          <span style="display: inline-block; font-size: 11px; font-weight: 700; color: #4B5563; background-color: #EDF2F7; padding: 2px 6px; border-radius: 4px; margin-right: 6px;"><?= seg.category ?></span>
-          <strong>[<?= seg.timestamp ?>] <?= seg.segmentTitle ?> :</strong> <?= seg.summary ?>
+          <? if (seg.category) { ?><span style="display: inline-block; font-size: 11px; font-weight: 700; color: #4B5563; background-color: #EDF2F7; padding: 2px 6px; border-radius: 4px; margin-right: 6px;"><?= seg.category ?></span><? } ?>
+          <strong>[<?= seg.timestamp ?>] <?= seg.segmentTitle ?><? if (seg.summary) { ?> :<? } ?></strong> <?!= Utils.formatSummaryHtml(seg.summary) ?>
         </li>
         <? } ?>
       </ul>
@@ -195,7 +219,7 @@
                  var nItem = nCat.items[ni];
             ?>
             <li style="margin-bottom: 6px; font-size: 13px; line-height: 1.5; color: #4B5563;">
-              <strong><?= nItem.headline ?> :</strong> <?= nItem.summary ?>
+              <strong><?!= Utils.formatSummaryHtml(nItem.headline) ?> :</strong> <?!= Utils.formatSummaryHtml(nItem.summary) ?>
             </li>
             <? } ?>
           </ul>
@@ -207,7 +231,7 @@
     </div>
     <? } ?>
 
-    <!-- 6. RAPPORT DE SUPERVISION & BON FONCTIONNEMENT (AGENT DE CONTRÔLE ET STABILITÉ) -->
+    <!-- 6. AGENT DE CONTRÔLE & BON FONCTIONNEMENT (ZÉRO EMOJI, FRANÇAIS NON TECHNIQUE) -->
     <? if (data.devOpsReport) { 
          var rep = data.devOpsReport;
     ?>
@@ -234,17 +258,17 @@
         <?= rep.engineerNote ?>
       </div>
 
-      <? if (rep.hasIncidents && rep.status !== 'ALL_CLEAR') { ?>
+      <? if (rep.hasIncidents) { ?>
       <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed <?= rep.statusBorderColor ?>;">
         <div style="font-size: 12px; font-weight: 700; color: #374151; margin-bottom: 4px;">
           Suivi du bon fonctionnement et ajustements automatiques :
         </div>
         <ul style="margin: 0; padding-left: 18px; font-size: 12px; color: #4B5563; line-height: 1.4;">
           <? for (var inc = 0; inc < rep.incidents.length; inc++) {
-               var item = rep.incidents[inc];
+               var incident = rep.incidents[inc];
           ?>
           <li style="margin-bottom: 4px;">
-            <strong>[<?= item.component ?>]</strong> <?= item.message ?> &rarr; <em><?= item.solution ?></em>
+            <strong>[<?= incident.component ?>]</strong> <?= incident.message ?> &rarr; <em><?= incident.solution ?></em>
           </li>
           <? } ?>
         </ul>

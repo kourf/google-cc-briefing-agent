@@ -1,209 +1,109 @@
-# Google CC Briefing Agent ☀️
+# Google CC Briefing Agent — Mon Briefing Quotidien (v3.0)
 
-Assistant de briefing quotidien automatique propulsé par **Google Apps Script** et **Gemini Developer API (Google AI Studio Free Tier)**.
+Agent exécutif autonome hébergé sur **Google Apps Script** (runtime V8, fuseau `Europe/Paris`) et propulsé par l'API **Google Gemini**.
+Chaque matin à **06:00:00 pile**, il analyse vos e-mails non lus, votre agenda, la météo et l'actualité, puis vous envoie un briefing lisible en 2 minutes.
 
-Chaque matin autour de **06:00 (heure de Paris)**, l'agent analyse vos nouveaux e-mails Gmail non lus et votre Google Calendar, synthétise les urgences en français très simple (niveau **ELI15**), distingue la provenance de vos e-mails (compte principal, compte pro, ancien perso), et vous livre un briefing e-mail élégant, épuré et actionnable inspiré du design **Apple × Linear × Notion**.
-
----
-
-## 🎯 Philosophie & Objectif
-
-Vous n'avez pas le temps de lire tous vos e-mails le matin.
-L'objectif de cet agent est de vous permettre de **comprendre l'essentiel de votre boîte de réception et de votre agenda en 2 minutes** :
-- Identifier immédiatement ce qui est **critique** ou **urgent**.
-- Savoir précisément quelle **action** est attendue de votre part et avant quelle **échéance**.
-- Distinguer d'où provient l'e-mail (transfert depuis votre compte pro ou personnel).
-- Visualiser votre **planning du jour** et les réunions à préparer pour le lendemain.
-- Garantir que **vos e-mails restent 100% intacts** (aucun e-mail n'est marqué comme lu, archivé ou supprimé).
+Vos e-mails restent intacts : aucun message n'est marqué comme lu, archivé ou supprimé.
 
 ---
 
-## ✨ Fonctionnalités Clés
+## Contenu du briefing
 
-1. **Résumés ELI15 en 1 à 2 phrases** : Explications claires, en français simple, sans jargon, tout en préservant scrupuleusement les montants, dates et expéditeurs clés.
-2. **Hiérarchisation intelligente à 4 niveaux** :
-   - 🔴 **Critique** & 🟠 **Élevée** : Cartes modulaires détaillées avec badge d'urgence, temps de traitement estimé, action requise, échéance et bouton direct Gmail.
-   - 🔵 **Moyenne** : Résumés compacts pour les messages utiles.
-   - ⚪ **Faible (Pour information)** : Liste condensée des notifications, reçus et newsletters.
-3. **Détection Multi-Comptes Intelligente** :
-   - 🏢 **Compte Pro** (`dramekouroufia.pro@gmail.com`)
-   - 👤 **Compte Principal** (`kouroufia15@gmail.com`)
-   - ✉️ **Ancien Compte Perso** (`dkouroufia27@outlook.fr`)
-4. **Google Calendar Intégré** :
-   - Planning complet d'**Aujourd'hui** avec liens directs Google Meet / Visioconférence et Calendar.
-   - Section **À anticiper demain** pour préparer la journée suivante sans surcharge.
-5. **Idempotence & Checkpoints robustes** :
-   - Aucun risque de double envoi grâce au verrou exclusif `LockService`.
-   - Le premier lancement n'ingère pas tout votre historique d'e-mails non lus.
-   - Le checkpoint de production n'avance qu'après confirmation de l'envoi réussi.
-6. **Mode Test Immédiat** :
-   - Possibilité d'exécuter un test à tout moment (`runBriefingTest()`) sur les dernières 24h sans toucher au checkpoint de production.
-7. **100% Gratuit & Réutilisable** :
-   - Fonctionne sur le palier gratuit (*Free Tier*) de Google Apps Script et Google AI Studio.
-   - Code modulaire prêt à être déployé par une tierce personne sans modification du code source.
+1. **Actions prioritaires** : e-mails demandant une action humaine, avec temps estimé, échéance et lien direct vers Gmail.
+2. **Récapitulatif des e-mails non lus** classés en 11 catégories canoniques (Emploi & Carrière, Démarches & Administration, Banque & Finances, Santé & Soins, Commandes & Livraisons, Sécurité & Accès, Tech & Outils Numériques, Voyages & Loisirs, Achats & Offres, Réseaux Sociaux, Actualités & Newsletters). Les e-mails reçus sur le **Compte Pro** ou l'**Ancien Perso** portent un badge de provenance.
+3. **Planning du jour** (Google Calendar) avec liens Google Meet, Zoom et Microsoft Teams, plus une rubrique compacte **À anticiper demain**.
+4. **Météo & conseil vestimentaire** pour la ville détectée dans l'agenda (sinon Annemasse) : en-tête `Pour [Ville] :`, puis `Matin (9h)`, `Après-midi (15h)`, `Soir (21h)` sur des lignes séparées, températures au format `10 °C` et pluie au format `29%`.
+5. **Les Actus du Jour — Synthèse HugoDécrypte** : dernière vidéo longue de [@hugodecrypteactus](https://www.youtube.com/@hugodecrypteactus/videos) (Shorts exclus), résumée segment par segment, avec repli automatique sur le flux audio Acast. Règles anti-vague : villes exactes, prénom + nom + fonction, sigles expliqués.
+6. **Complément d'actualités issu de Google Actualités** en 9 rubriques PESTEL+ (Politique, Économie, Social, Technologie, Environnement, Légal, Culture & Savoir, Sport, Faits divers), avec corroboration multi-sources.
+7. **Agent de Contrôle & Bon Fonctionnement** : vérifie et répare automatiquement le suivi des e-mails, l'horloge d'envoi et la connexion au service de résumé, puis rend compte en français clair, sans jargon ni emoji.
 
 ---
 
-## 🔒 Confidentialité & Free Tier Gemini
+## Architecture (`src/`)
 
-> [!IMPORTANT]
-> **Transparence sur les données (Google AI Studio Free Tier)** :
-> Le palier gratuit de l'API Gemini Developer prévoit que les requêtes et réponses peuvent faire l'objet d'un examen par des réviseurs humains pour améliorer les produits Google.
-> Afin de protéger au maximum vos données personnelles :
-> - Notre code applique un **nettoyage local strict avant transmission** (suppression des balises de tracking, des codes de sécurité superflus, des styles et des signatures).
-> - **Les pièces jointes ne sont jamais envoyées à Gemini**.
-> - Vos identifiants et clés API ne transitent jamais dans le corps du message et sont protégés dans les `ScriptProperties`.
+| Fichier | Rôle |
+| :--- | :--- |
+| `Code.js` | Points d'entrée publics et chaîne d'exécution commune. |
+| `Config.js` | Source unique de configuration : constantes, budgets temps, cascade Gemini, taxonomies e-mails et PESTEL+, comptes connus, Script Properties. |
+| `Utils.js` | Budget temps global, décodeur HTML unifié, nettoyage de texte, `fetchUrlsSafely`, dates et URLs. |
+| `EmailClassifier.js` | Règles déterministes de classement (désambiguïsation LinkedIn, emploi, administration…) et analyse de repli sans IA. |
+| `GmailService.js` | Lecture des non-lus, déduplication pré-IA, détection du compte de destination. |
+| `CalendarService.js` | Agenda du jour et du lendemain, liens de visioconférence. |
+| `GeminiService.js` | Accès unique à Gemini : cascade de modèles, budget temps, sortie JSON (e-mails, météo, actualités). |
+| `WeatherService.js` | Données wttr.in, bulletin IA ou déterministe, mise en forme stricte. |
+| `NewsService.js` | HugoDécrypte (YouTube puis Acast) et Google Actualités PESTEL+. |
+| `BriefingService.js` | Assemblage, rendu HTML et texte, envoi. |
+| `DevOpsAgentService.js` | Agent de Contrôle & Bon Fonctionnement. |
+| `StateService.js` | Verrou d'exécution, checkpoint des e-mails, anti-double envoi. |
+| `TriggerService.js` | Déclencheur exact de 06:00:00 (calcul explicite du fuseau et du changement d'heure) et watchdog de 07h00. |
+| `Template.html` | E-mail HTML responsive. |
 
----
+### Garantie anti-timeout (limite Apps Script de 6 minutes)
+- Budget global de **5 minutes** mesuré depuis le début de l'exécution (`Utils.remainingMs()`).
+- Analyse des e-mails plafonnée à 140 s, en conservant toujours 120 s pour la météo, les actualités et l'envoi.
+- Chaque appel Gemini essaie au plus 3 à 4 modèles et s'arrête dès que le budget devient insuffisant ; un repli déterministe prend alors le relais.
+- `fetchUrlsSafely` exécute les requêtes en sous-lots parallèles de 10, isole une URL défaillante par dichotomie (sans repasser en séquentiel) et applique un budget de 25 s par appel.
+- Les étapes facultatives (enrichissement presse, corroboration) sont sautées si le temps manque.
 
-## 📂 Architecture & Fichiers
-
-```text
-├── .clasp.json          # Configuration de liaison Clasp avec le projet Apps Script
-├── .gitignore            # Exclusion stricte des identifiants et node_modules
-├── appsscript.json      # Manifeste Apps Script avec permissions OAuth minimales
-├── package.json         # Dépendances locales (@google/clasp)
-├── Code.js              # Points d'entrée (runBriefing, runBriefingTest, installDailyTrigger)
-├── Config.js            # Propriétés centralisées, comptes connus, fuseau Europe/Paris
-├── Utils.js             # Échappement HTML strict, nettoyeur de texte, détection multi-comptes
-├── StateService.js      # Gestion des checkpoints et verrous concurrentiels
-├── GmailService.js      # Récupération non lus, pagination sans limite silencieuse
-├── CalendarService.js   # Agenda du jour et détection des visioconférences (Meet/Zoom)
-├── GeminiService.js     # Appels API avec schéma JSON forcé et backoff exponentiel
-├── BriefingService.js   # Assemblage du briefing, KPIs, et expédition Gmail
-├── TriggerService.js    # Déclencheur automatique à 06:00 et gestion week-end
-├── Template.html        # Template d'e-mail responsive moderne (Apple x Linear x Notion)
-└── README.md            # Ce guide
-```
+### Résilience
+- Sans Gemini (quota, panne ou clé absente), le briefing part quand même : e-mails classés par `EmailClassifier`, météo rédigée de façon déterministe, actualités présentées avec leurs sources. Aucune information n'est inventée.
+- Si HugoDécrypte est indisponible sur YouTube et sur Acast, l'e-mail propose un lien vers la chaîne au lieu de résumer un contenu inexistant.
 
 ---
 
-## 🚀 Installation & Déploiement Initial
+## Points d'entrée (menu de l'éditeur Apps Script)
 
-### 1. Prérequis sur votre machine
-- **Node.js** (v18+) et **npm**
-- **Git**
-- Un compte Google avec accès à [Google AI Studio](https://aistudio.google.com/)
+| Fonction | Usage |
+| :--- | :--- |
+| `runDailyBriefing` | Exécution automatique de production à 06:00:00, qui se reprogramme chaque jour (même en cas d'erreur). |
+| `runBriefingNow` | Envoi immédiat sur les dernières 24 h, sans toucher au checkpoint de production. |
+| `watchdogSafetyCheck` | Filet de sécurité quotidien à 07h00 : rattrape un briefing manqué et vérifie le déclencheur du lendemain. |
+| `reparerEtActiverBriefing` | Réparation en un clic : recalibre le checkpoint, réinstalle les déclencheurs (06:00 et 07:00) et envoie un briefing de confirmation. |
+| `diagnostiquerBriefing` | Teste Gemini, Gmail, l'agenda, la météo, HugoDécrypte et les déclencheurs, envoie un rapport par e-mail puis le briefing. |
 
-### 2. Création de votre Clé API Gemini (Dédiée)
-1. Rendez-vous sur [Google AI Studio — Clés API](https://aistudio.google.com/app/apikey).
-2. Cliquez sur **Create API key**.
-3. Choisissez de créer la clé dans un nouveau projet dédié nommé par exemple `Google CC Briefing Agent`.
-4. Copiez votre clé en lieu sûr (ne la partagez jamais publiquement).
+---
 
-### 3. Connexion Clasp & Création du projet Apps Script
-Dans le terminal de ce dossier :
+## Installation
 
 ```bash
-# 1. Installer les dépendances du projet
 npm install
-
-# 2. Vous connecter à votre compte Google via Clasp
 npx clasp login
-```
-*Une page Google s'ouvrira dans votre navigateur. Connectez-vous avec `kouroufia15@gmail.com` et autorisez Clasp.*
-
-```bash
-# 3. Créer le projet Google Apps Script autonome
-npx clasp create --type standalone --title "Google CC Briefing Agent"
-
-# 4. Déployer tous les fichiers sur Apps Script
-npx clasp push
+npx clasp push --force
+npx clasp open
 ```
 
----
+Ensuite, dans **Paramètres du projet > Propriétés du script** :
 
-## ⚙️ Configuration des Propriétés de Script
-
-1. Ouvrez votre script dans l'éditeur Google :
-   ```bash
-   npx clasp open
-   ```
-2. Dans le menu de gauche, cliquez sur l'icône d'engrenage **Paramètres du projet** (Project Settings).
-3. Descendez jusqu'à la section **Propriétés de script** (Script Properties) et cliquez sur **Ajouter une propriété de script** :
-
-| Nom de la propriété | Valeur recommandée | Description |
+| Propriété | Valeur | Description |
 | :--- | :--- | :--- |
-| `GEMINI_API_KEY` | *(Votre clé API Google AI Studio)* | **Obligatoire**. Clé dédiée pour les résumés. |
-| `BRIEFING_RECIPIENT_EMAIL` | `kouroufia15@gmail.com` | Adresse recevant le briefing quotidien. |
-| `WEEKEND_ENABLED` | `true` | `true` pour recevoir le briefing 7j/7, `false` pour lun-ven. |
-| `TEST_LOOKBACK_HOURS` | `24` | Nombre d'heures analysées lors des tests manuels. |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Modèle rapide par défaut (fallback sur `gemini-1.5-flash`). |
+| `GEMINI_API_KEY` | *(votre clé Google AI Studio)* | **Obligatoire** pour les résumés IA. Ne l'écrivez jamais dans le code : le dépôt est public. |
+| `BRIEFING_RECIPIENT_EMAIL` | `kouroufia15@gmail.com` | Destinataire du briefing. |
+| `WEEKEND_ENABLED` | `true` | `false` pour ne recevoir le briefing que du lundi au vendredi. |
+| `TEST_LOOKBACK_HOURS` | `24` | Fenêtre analysée par `runBriefingNow`. |
+| `GEMINI_MODEL` | `gemini-3.1-flash-lite` | Modèle principal (les modèles obsolètes sont migrés automatiquement). |
 
-4. Cliquez sur **Enregistrer les propriétés de script**.
-
----
-
-## 🧪 Procédure de Test Immédiat
-
-Vous n'avez pas besoin d'attendre 06:00 pour valider le système !
-
-1. Dans l'éditeur Apps Script, ouvrez le fichier `Code.js`.
-2. Dans la barre d'outils supérieure, sélectionnez la fonction **`runBriefingTest`**.
-3. Cliquez sur **Exécuter** (Run).
-4. Lors de la première exécution, Google vous demandera d'autoriser les accès nécessaires :
-   - Lecture de Gmail (`gmail.readonly`)
-   - Envoi du briefing (`gmail.send`)
-   - Lecture de l'agenda (`calendar.readonly`)
-   - Appels réseau externes (`script.external_request`)
-5. Consultez l'onglet **Journal d'exécution** en bas :
-   - L'agent extrait vos messages non lus récents sans modifier leur statut.
-   - L'e-mail de test est envoyé avec l'objet : `🧪 Briefing test — Google CC`.
-6. Ouvrez votre boîte Gmail et admirez le résultat !
+Enfin, exécutez **`reparerEtActiverBriefing`** une fois : la production est active.
 
 ---
 
-## ⏰ Activation de la Production (Automatique à 06:00)
-
-Une fois le test validé, activez la production en 2 clics :
-
-1. Dans l'éditeur Apps Script, sélectionnez la fonction **`setupInitialCheckpoint`** et cliquez sur **Exécuter**.
-   *Cela enregistre l'instant T comme point de départ. Vos centaines d'anciens e-mails non lus ne seront pas retraités.*
-2. Sélectionnez la fonction **`installDailyTrigger`** et cliquez sur **Exécuter**.
-   *Le déclencheur automatique est configuré pour s'exécuter chaque matin autour de 06:00 (Europe/Paris).*
-
-C'est tout ! Votre agent est désormais 100% autonome.
-
----
-
-## 👥 Déployer une seconde instance (Pour un ami ou collègue)
-
-Le code est conçu pour être **strictement réutilisable sans aucune modification de code**.
-Pour qu'une autre personne déploie sa propre instance :
-
-1. **Cloner ou copier** ce dossier sur son ordinateur.
-2. Installer les dépendances : `npm install`.
-3. Se connecter avec son propre compte Google : `npx clasp login`.
-4. Créer son projet Apps Script : `npx clasp create --type standalone --title "Mon Briefing Quotidien"`.
-5. Pousser les fichiers : `npx clasp push`.
-6. Ouvrir son projet : `npx clasp open`.
-7. Dans les **Propriétés de script**, renseigner :
-   - Sa propre `GEMINI_API_KEY` (gratuite sur [aistudio.google.com](https://aistudio.google.com/)).
-   - Son propre `BRIEFING_RECIPIENT_EMAIL`.
-8. Exécuter `runBriefingTest` pour valider les autorisations.
-9. Exécuter `setupInitialCheckpoint` puis `installDailyTrigger`.
-
-Chaque utilisateur dispose ainsi de sa propre instance étanche, sécurisée et indépendante.
-
----
-
-## 🛡️ Mesures de Sécurité & Bonnes Pratiques
-
-- **Aucun marquage ou suppression** : Vos e-mails conservent rigoureusement leur statut non lu dans Gmail.
-- **Principe du moindre privilège** : Scopes OAuth strictement limités à la lecture et à l'envoi de briefings.
-- **Protection XSS** : Tout contenu extrait (expéditeur, sujet, corps, liens) est échappé via `Utils.escapeHtml()` avant d'être injecté dans le template HTML.
-- **Anti-doublons & LockService** : Verrou de synchronisation empêchant les collisions si deux déclencheurs s'exécutent au même moment.
-- **Zéro secret dans Git** : Les clés API sont exclusivement gérées via les Script Properties et exclues de Git par le `.gitignore`.
-
----
-
-## 🤝 Dépôt GitHub Privé
-
-Pour lier ce projet à votre compte GitHub privé :
+## Développement
 
 ```bash
-git remote add origin https://github.com/VOTRE_PSEUDO/google-cc-briefing-agent.git
-git branch -M main
-git push -u origin main
+# Vérification syntaxique
+for f in src/*.js; do node --check "$f"; done
+
+# Déploiement
+npx clasp push --force
+git add . && git commit -m "feat/fix: description" && git push origin main
 ```
-*(Assurez-vous de créer le dépôt en mode **PRIVÉ** sur GitHub).*
+
+Les règles métier non négociables sont décrites dans [`AGENTS.md`](AGENTS.md).
+
+---
+
+## Sécurité & confidentialité
+
+- Scopes OAuth minimaux : `gmail.readonly`, `gmail.send`, `calendar.readonly`, `script.external_request`, `script.scriptapp`.
+- La clé Gemini est lue uniquement depuis les Script Properties et transmise dans l'en-tête `x-goog-api-key` (jamais dans l'URL ni dans les journaux).
+- Tout contenu extrait est nettoyé et échappé avant d'être inséré dans l'e-mail HTML.
+- Palier gratuit Gemini : les requêtes peuvent être examinées par Google. Les pièces jointes ne sont jamais transmises, et les corps d'e-mails sont tronqués et nettoyés avant envoi.

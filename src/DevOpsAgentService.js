@@ -1,17 +1,14 @@
 /**
  * Google CC Briefing Agent
- * DevOpsAgentService.js — Agent Salarié Virtuel (Ingénieur DevOps & SRE Dédié)
+ * DevOpsAgentService.js — « Agent de Contrôle & Bon Fonctionnement ».
  *
- * Rôle :
- * Supervise en continu la santé du code, des API et de l'infrastructure Google Apps Script.
- * Détecte les anomalies, auto-répare les erreurs (verrous, checkpoints, quotas IA, déclencheurs),
- * et rend compte de manière transparente dans le briefing quotidien comme un collaborateur salarié.
- *
- * Résilience absolue : Fonctionne en pur JavaScript déterministe, 100% autonome même en cas
- * de coupure totale de l'API Gemini ou de panne réseau.
+ * Rôle : avant chaque envoi, vérifier et réparer automatiquement le suivi des e-mails,
+ * l'horloge d'envoi de 06h00 et la connexion au service de résumé ; puis rendre compte
+ * dans le briefing, en français clair, sans jargon technique et sans aucun emoji.
+ * Fonctionne en JavaScript déterministe, même si l'IA ou le réseau sont indisponibles.
  *
  * @author Kouroufia
- * @version 2.2.0
+ * @version 3.0.0
  */
 
 const DevOpsAgentService = (() => {
@@ -19,197 +16,186 @@ const DevOpsAgentService = (() => {
   const EMPLOYEE_ROLE = 'Supervision et bon fonctionnement de votre assistant';
   const SHIFT_HOURS = 'Vérification quotidienne avant chaque envoi';
 
-  // Registre en mémoire des événements de la session active
+  /** Incidents de l'exécution courante. */
   let recordedIncidents = [];
-  let maintenanceActions = [];
+  /** Vérifications réalisées (affichées en langage courant). */
+  let checks = [];
 
-  /**
-   * Réinitialise le registre d'incidents au démarrage de chaque exécution.
-   */
+  /** Réinitialise le registre au début d'une exécution. */
   const resetSession = () => {
     recordedIncidents = [];
-    maintenanceActions = [];
+    checks = [];
   };
 
   /**
-   * Enregistre un incident technique détecté et son statut de résolution.
-   *
+   * Enregistre un incident (dédupliqué par composant + message).
    * @param {Object} incident
-   * @param {string} incident.component - Composant concerné ('Gestion des e-mails', 'Intelligence artificielle', etc.)
-   * @param {string} incident.severity - 'INFO', 'WARNING', ou 'CRITICAL'
-   * @param {boolean} incident.resolved - Si l'incident a été auto-réparé avec succès
-   * @param {string} incident.message - Explication simple et humaine (sans jargon technique)
-   * @param {string} incident.solution - Action corrective appliquée en mots simples
+   * @param {string} incident.component - Élément concerné, en mots simples.
+   * @param {string} incident.severity - 'INFO' | 'WARNING' | 'CRITICAL'.
+   * @param {boolean} incident.resolved - true si réparé automatiquement.
+   * @param {string} incident.message - Ce qui s'est passé, sans jargon.
+   * @param {string} incident.solution - Ce qui a été fait ou ce qu'il faut faire.
    */
   const recordIncident = (incident) => {
-    const comp = incident.component || 'Système';
-    const msg = incident.message || 'Ajustement nécessaire';
-    const isDuplicate = recordedIncidents.some((i) => i.component === comp && i.message === msg);
-    if (isDuplicate) return;
-
+    const component = incident.component || 'Assistant';
+    const message = incident.message || 'Ajustement nécessaire.';
+    if (recordedIncidents.some((i) => i.component === component && i.message === message)) return;
     recordedIncidents.push({
-      component: comp,
+      component,
       severity: incident.severity || 'WARNING',
       resolved: incident.resolved !== false,
-      message: msg,
-      solution: incident.solution || 'Ajustement appliqué avec succès'
+      message,
+      solution: incident.solution || 'Ajustement appliqué avec succès.'
     });
   };
 
   /**
-   * Enregistre une action préventive de maintenance réussie.
-   *
-   * @param {string} action - Description de l'action.
+   * Enregistre une vérification effectuée (ex. « vos e-mails (12 analysés) »).
+   * @param {string} label - Libellé en français courant.
+   * @param {number} [order=50] - Position dans la phrase de synthèse (croissante).
    */
-  const recordMaintenanceAction = (action) => {
-    maintenanceActions.push(action);
+  const recordCheck = (label, order = 50) => {
+    if (label && !checks.some((c) => c.label === label)) checks.push({ label, order });
   };
 
   /**
-   * Ronde matinale pré-vol : inspecte l'infrastructure et applique l'auto-réparation
-   * sans aucune dépendance à une IA externe.
+   * Ronde de contrôle avant envoi : checkpoint, horloge d'envoi, clé d'accès.
    */
   const inspectAndSelfHeal = () => {
-    // 1. Audit et auto-réparation du checkpoint horaire
+    // 1. Suivi des e-mails (checkpoint)
     try {
-      const nowSec = Math.floor(Date.now() / 1000);
+      const now = Math.floor(Date.now() / 1000);
       const lastCp = StateService.getLastCheckpointTime();
+      const maxLookbackSec = Config.DEFAULTS.MAX_LOOKBACK_HOURS * 3600;
       if (!lastCp) {
-        const safeStartSec = nowSec - (24 * 3600);
-        StateService.resetCheckpointTo(safeStartSec);
+        StateService.resetCheckpointTo(now - 24 * 3600);
         recordIncident({
-          component: 'Gestion des e-mails',
+          component: 'Suivi des e-mails',
           severity: 'INFO',
           resolved: true,
           message: 'Premier démarrage de votre assistant.',
-          solution: 'Configuration propre pour ne traiter que les e-mails des dernières 24 heures.'
+          solution: 'Mise en place pour ne traiter que les e-mails des dernières 24 heures.'
         });
-      } else if ((nowSec - lastCp) > (48 * 3600)) {
-        const safeStartSec = nowSec - (24 * 3600);
-        StateService.resetCheckpointTo(safeStartSec);
+      } else if (now - lastCp > maxLookbackSec) {
+        StateService.resetCheckpointTo(now - 24 * 3600);
         recordIncident({
-          component: 'Gestion des e-mails',
+          component: 'Suivi des e-mails',
           severity: 'WARNING',
           resolved: true,
-          message: `L'outil n'avait pas tourné depuis plusieurs jours (${Math.round((nowSec - lastCp) / 3600)}h d’accumulation).`,
-          solution: 'Recentrage automatique sur les dernières 24h pour vous livrer un briefing rapide et sans surcharge.'
+          message: `L’assistant n’avait pas fonctionné depuis environ ${Math.round((now - lastCp) / 3600)} heures.`,
+          solution: 'Recentrage automatique sur les dernières 24 heures pour un briefing rapide et lisible.'
         });
-      } else {
-        recordMaintenanceAction('Suivi des e-mails vérifié et conforme.');
       }
     } catch (e) {
+      console.warn(`Contrôle du suivi des e-mails : ${e.message}`);
       recordIncident({
-        component: 'Gestion des e-mails',
+        component: 'Suivi des e-mails',
         severity: 'WARNING',
-        resolved: false,
-        message: 'Léger contretemps sur l’historique des e-mails.',
-        solution: 'Poursuite normale de l’envoi de votre briefing.'
+        resolved: true,
+        message: 'L’historique des e-mails n’a pas pu être relu.',
+        solution: 'Le briefing analyse par sécurité les e-mails des dernières 24 heures.'
       });
     }
 
-    // 2. Audit des déclencheurs
+    // 2. Horloge d'envoi automatique (06h00 + filet de sécurité 07h00)
     try {
-      const triggers = TriggerService.getTriggersSummary();
-      const hasMain = triggers.some((t) => t.handler === 'runDailyBriefing');
-      const hasWatchdog = triggers.some((t) => t.handler === 'watchdogSafetyCheck');
-
-      if (!hasMain || !hasWatchdog) {
+      const health = TriggerService.getTriggerHealth();
+      if (!health.hasMain || !health.hasWatchdog) {
         TriggerService.setupAllTriggers();
         recordIncident({
           component: 'Horloge d’envoi automatique',
           severity: 'WARNING',
           resolved: true,
-          message: 'L’horloge d’envoi automatique n’était pas active.',
-          solution: 'Réglage et verrouillage immédiat pour un envoi chaque matin à 06h00 pile.'
+          message: 'L’envoi automatique du matin n’était plus programmé.',
+          solution: 'Reprogrammation immédiate pour un envoi chaque matin à 06h00 pile, avec une vérification de secours à 07h00.'
         });
-      } else {
-        recordMaintenanceAction('Horloge automatique active et programmée à 06h00.');
       }
+      recordCheck('l’horloge d’envoi automatique de 06h00', 90);
     } catch (e) {
+      console.warn(`Contrôle des déclencheurs : ${e.message}`);
       recordIncident({
         component: 'Horloge d’envoi automatique',
         severity: 'WARNING',
         resolved: false,
-        message: 'Impossible de vérifier l’horloge automatique.',
-        solution: 'Une seconde vérification automatique aura lieu dans l’heure.'
+        message: 'L’horloge d’envoi automatique n’a pas pu être vérifiée.',
+        solution: 'Une nouvelle vérification aura lieu automatiquement à 07h00.'
       });
     }
 
-    // 3. Audit de la configuration et de la clé API
-    try {
-      const apiKey = Config.getGeminiApiKey();
-      if (!apiKey || apiKey.length < 10) {
-        recordIncident({
-          component: 'Connexion de l’assistant',
-          severity: 'CRITICAL',
-          resolved: false,
-          message: 'Clé d’accès manquante dans les paramètres.',
-          solution: 'Bascule automatique en mode autonome pour préparer votre briefing.'
-        });
-      } else {
-        recordMaintenanceAction('Connexion au service d’intelligence artificielle opérationnelle.');
-      }
-    } catch (e) {
+    // 3. Clé d'accès au service de résumé
+    if (!Config.hasGeminiApiKey()) {
       recordIncident({
-        component: 'Connexion de l’assistant',
-        severity: 'WARNING',
-        resolved: true,
-        message: 'Ajustement de la clé de connexion.',
-        solution: 'Utilisation de la configuration de secours.'
+        component: 'Service de résumé automatique',
+        severity: 'CRITICAL',
+        resolved: false,
+        message: 'La clé d’accès au service de résumé n’est pas renseignée.',
+        solution: 'Votre briefing a été préparé en mode simplifié. Pour retrouver les résumés détaillés, ajoutez la clé GEMINI_API_KEY dans les Propriétés du script.'
       });
     }
   };
 
   /**
-   * Compile le rapport officiel de l'agent pour insertion dans le briefing.
-   *
-   * @returns {Object} Rapport structuré prêt pour le template HTML.
+   * Phrase de synthèse listant les vérifications effectuées.
+   * @returns {string}
+   */
+  const describeChecks = () => {
+    const labels = [...checks].sort((a, b) => a.order - b.order).map((c) => c.label);
+    if (labels.length === 0) return '';
+    if (labels.length === 1) return labels[0];
+    return `${labels.slice(0, -1).join(', ')} et ${labels[labels.length - 1]}`;
+  };
+
+  /**
+   * Rapport destiné au briefing (Zéro Emoji garanti par un nettoyage final).
+   * @returns {Object}
    */
   const generateEngineerReport = () => {
+    const name = Config.DEFAULTS.RECIPIENT_NAME;
+    // Seul un problème critique non résolu demande une action ; le reste est géré automatiquement.
     const hasUnresolved = recordedIncidents.some((i) => !i.resolved && i.severity === 'CRITICAL');
-    const hasAutoRepaired = recordedIncidents.some((i) => i.resolved && (i.severity === 'WARNING' || i.severity === 'INFO'));
+    const hasAdjustments = recordedIncidents.length > 0;
+    const checked = describeChecks();
+    const checkedSentence = checked ? `Avant l’envoi, j’ai vérifié ${checked}.` : 'Avant l’envoi, j’ai vérifié le bon fonctionnement de votre assistant.';
 
-    let status = 'ALL_CLEAR';
-    let statusPill = 'Systèmes 100% opérationnels';
-    let statusBadgeColor = '#10B981'; // Émeraude
-    let statusBgColor = '#ECFDF5';
-    let statusBorderColor = '#A7F3D0';
-    let engineerNote = '';
+    let status;
+    let statusPill;
+    let palette;
+    let engineerNote;
 
     if (hasUnresolved) {
       status = 'ALERT';
-      statusPill = 'Action requise';
-      statusBadgeColor = '#EF4444'; // Rouge
-      statusBgColor = '#FEF2F2';
-      statusBorderColor = '#FECACA';
-      engineerNote = 'Attention Kouroufia : une vérification externe nécessite une action manuelle.';
-    } else if (hasAutoRepaired) {
+      statusPill = 'Votre intervention est utile';
+      palette = { badge: '#EF4444', bg: '#FEF2F2', border: '#FECACA' };
+      engineerNote = `Bonjour ${name}. ${checkedSentence} Un point demande votre attention, il est expliqué ci-dessous. Votre briefing a tout de même été préparé.`;
+    } else if (hasAdjustments) {
       status = 'AUTO_REPAIRED';
-      statusPill = 'Ajustements appliqués avec succès';
-      statusBadgeColor = '#D97706'; // Ambre soutenu
-      statusBgColor = '#FFFBEB';
-      statusBorderColor = '#FDE68A';
-      engineerNote = 'Bonjour Kouroufia, les systèmes ont été vérifiés et automatiquement ajustés : votre briefing est prêt et complet.';
+      statusPill = 'Ajustements faits automatiquement';
+      palette = { badge: '#D97706', bg: '#FFFBEB', border: '#FDE68A' };
+      engineerNote = `Bonjour ${name}. ${checkedSentence} Quelques petits ajustements ont été faits automatiquement, rien n’est à faire de votre côté.`;
     } else {
       status = 'ALL_CLEAR';
-      statusPill = 'Systèmes 100% opérationnels';
-      statusBadgeColor = '#10B981';
-      statusBgColor = '#ECFDF5';
-      statusBorderColor = '#A7F3D0';
-      engineerNote = 'Bonjour Kouroufia, tous les systèmes fonctionnent parfaitement ce matin pour préparer votre journée !';
+      statusPill = 'Tout fonctionne normalement';
+      palette = { badge: '#10B981', bg: '#ECFDF5', border: '#A7F3D0' };
+      engineerNote = `Bonjour ${name}. ${checkedSentence} Tout fonctionne normalement ce matin.`;
     }
 
+    const clean = (s) => Utils.sanitizeText(s);
     return {
       employeeName: EMPLOYEE_NAME,
       employeeRole: EMPLOYEE_ROLE,
       shiftHours: SHIFT_HOURS,
       status,
-      statusPill,
-      statusBadgeColor,
-      statusBgColor,
-      statusBorderColor,
-      engineerNote,
-      incidents: recordedIncidents,
+      statusPill: clean(statusPill),
+      statusBadgeColor: palette.badge,
+      statusBgColor: palette.bg,
+      statusBorderColor: palette.border,
+      engineerNote: clean(engineerNote),
+      incidents: recordedIncidents.map((i) => ({
+        component: clean(i.component),
+        message: clean(i.message),
+        solution: clean(i.solution),
+        resolved: i.resolved
+      })),
       hasIncidents: recordedIncidents.length > 0
     };
   };
@@ -217,10 +203,8 @@ const DevOpsAgentService = (() => {
   return {
     resetSession,
     recordIncident,
-    recordMaintenanceAction,
+    recordCheck,
     inspectAndSelfHeal,
-    generateEngineerReport,
-    EMPLOYEE_NAME,
-    SHIFT_HOURS
+    generateEngineerReport
   };
 })();
