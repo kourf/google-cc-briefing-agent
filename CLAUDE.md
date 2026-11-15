@@ -131,7 +131,8 @@ flowchart TB
 - **Manifeste `src/appsscript.json`** :
   - `timeZone` : `Europe/Paris`
   - `runtimeVersion` : `V8`
-  - `oauthScopes` : `gmail.readonly`, `gmail.send`, `calendar.readonly`, `script.external_request`, `script.scriptapp`.
+  - `oauthScopes` : `gmail.readonly`, `gmail.send`, `calendar.readonly`, `youtube.readonly`, `script.external_request`, `script.scriptapp`.
+  - Services avancés : `Calendar` v3 (liens Meet natifs) et `YouTube` v3 (dernière vidéo HugoDécrypte : le flux RSS et les pages YouTube sont bloqués depuis les serveurs Apps Script, l'API officielle ne l'est pas).
 
 ### 3.3 Dépôt Git & GitHub
 - **Remote `origin`** : `https://github.com/kourf/google-cc-briefing-agent.git`
@@ -174,7 +175,7 @@ git push origin main
 2. **Les Actus du Jour — Synthèse HugoDécrypte** :
    - Source : dernière vidéo longue publique de `https://www.youtube.com/@hugodecrypteactus/videos` (`channel_id=UCAcAnMF0OrCtUep3Y4M-ZPw`).
    - Exclure impérativement les Shorts (`/shorts/` ou `#shorts`).
-   - Source unique YouTube (décision du 14/11/2026) : la page « Vidéos » désigne la dernière vidéo longue, le flux RSS ou la page de la vidéo fournit les chapitres. Ne jamais utiliser Acast ni renvoyer vers la chaîne. Chaque sujet de la vidéo est analysé et classé par rubrique PESTEL+, au même format que le Complément Google Actualités.
+   - Source unique YouTube (décision du 14/11/2026) : vidéo d'actu publiée la veille au soir, résumée le lendemain à 06h00. Lue via l'API officielle YouTube Data v3 (service avancé), avec en secours la page « Vidéos » et le flux RSS. Ne jamais utiliser Acast ni renvoyer vers la chaîne. Chaque sujet de la vidéo est analysé et classé par rubrique PESTEL+, au même format que le Complément Google Actualités.
    - **Règles Anti-Vague** :
      - **Lieux précis** : Toujours nommer la ville ou commune exacte (ex. "Trappes" et non "en banlieue parisienne").
      - **Identités et fonctions** : Toujours donner le prénom, le nom ET la fonction ou le poste exact (ex. "Senny Mayulu (le jeune milieu de terrain du PSG)").

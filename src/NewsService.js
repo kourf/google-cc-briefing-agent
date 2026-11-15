@@ -274,18 +274,90 @@ const NewsService = (() => {
   };
 
   /**
-   * Dernière vidéo longue publique de la chaîne YouTube HugoDécrypte (source unique, jamais de Short) :
-   * 1. la page « Vidéos » de la chaîne désigne la dernière vidéo longue (source de vérité) ;
-   * 2. son sommaire est lu dans le flux RSS, sinon directement sur la page de la vidéo ;
-   * 3. si la page de la chaîne est illisible, le flux RSS seul est utilisé.
-   * YouTube renvoie parfois des erreurs passagères (404 sur le flux RSS) : jusqu'à
-   * YOUTUBE_RETRY_DELAYS_MS.length nouvelles tentatives espacées, dans la limite du budget temps.
+   * Durée ISO 8601 de l'API YouTube (ex. "PT11M38S", "PT1H2M") en secondes.
+   * @param {string} iso
+   * @returns {number}
+   */
+  const isoDurationToSeconds = (iso) => {
+    const m = String(iso || '').match(/P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+    if (!m) return 0;
+    const [, d, h, min, s] = m.map((v) => parseInt(v, 10) || 0);
+    return d * 86400 + h * 3600 + min * 60 + s;
+  };
+
+  /** Au-delà de 3 minutes, une vidéo ne peut pas être un Short YouTube. */
+  const SHORT_MAX_SECONDS = 180;
+
+  /**
+   * Dernière vidéo longue via l'API officielle YouTube Data v3 (service avancé « YouTube »).
+   * Source principale : contrairement au flux RSS et aux pages web, l'API n'est pas bloquée
+   * depuis les serveurs Google Apps Script. Coût : 2 unités de quota par jour.
    *
-   * @param {string} feedXml - Flux RSS déjà téléchargé.
-   * @param {string} pageHtml - Page « Vidéos » déjà téléchargée.
+   * @returns {Object|null} { id, title, url, published, description }
+   */
+  const fetchLatestVideoViaApi = () => {
+    if (typeof YouTube === 'undefined' || !YouTube.PlaylistItems || !YouTube.Videos) {
+      console.warn('HugoDécrypte : service avancé YouTube non disponible.');
+      return null;
+    }
+    try {
+      // Playlist « mises en ligne » de la chaîne : UC… -> UU… (de la plus récente à la plus ancienne)
+      const uploadsPlaylist = `UU${Config.NEWS_SOURCES.HUGO_CHANNEL_ID.slice(2)}`;
+      const playlist = YouTube.PlaylistItems.list('contentDetails', { playlistId: uploadsPlaylist, maxResults: 15 });
+      const ids = ((playlist && playlist.items) || []).map((it) => it.contentDetails && it.contentDetails.videoId).filter(Boolean);
+      if (ids.length === 0) return null;
+
+      const details = YouTube.Videos.list('snippet,contentDetails', { id: ids.join(',') });
+      const byId = new Map(((details && details.items) || []).map((v) => [v.id, v]));
+      const videos = ids
+        .map((id) => byId.get(id))
+        .filter((v) => v && v.snippet && v.snippet.liveBroadcastContent === 'none')
+        .filter((v) => isoDurationToSeconds(v.contentDetails && v.contentDetails.duration) > SHORT_MAX_SECONDS)
+        .filter((v) => !/#shorts?\b/i.test(`${v.snippet.title} ${v.snippet.description}`))
+        .map((v) => ({
+          id: v.id,
+          title: Utils.sanitizeText(v.snippet.title),
+          url: watchUrl(v.id),
+          published: v.snippet.publishedAt,
+          description: v.snippet.description || ''
+        }));
+      const pick = selectFromFeed(videos);
+      if (pick) console.log(`HugoDécrypte : dernière vidéo longue (API YouTube) « ${pick.title} » publiée le ${pick.published}.`);
+      return pick;
+    } catch (error) {
+      console.warn(`HugoDécrypte : API YouTube indisponible — ${error.message}`);
+      return null;
+    }
+  };
+
+  /**
+   * Code HTTP lisible pour le journal (diagnostic des refus YouTube).
+   * @param {GoogleAppsScript.URL_Fetch.HTTPResponse|null} res
+   * @returns {string}
+   */
+  const httpStatus = (res) => {
+    try {
+      return res ? `HTTP ${res.getResponseCode()}` : 'aucune réponse';
+    } catch {
+      return 'aucune réponse';
+    }
+  };
+
+  /**
+   * Dernière vidéo longue publique de la chaîne YouTube HugoDécrypte (source unique, jamais de Short) :
+   * la vidéo d'actualité publiée la veille au soir, résumée dans le briefing du lendemain matin.
+   * 1. API officielle YouTube Data v3 (source principale, non bloquée depuis Apps Script) ;
+   * 2. en secours : page « Vidéos » de la chaîne + flux RSS / page de la vidéo pour le sommaire,
+   *    avec jusqu'à YOUTUBE_RETRY_DELAYS_MS.length nouvelles tentatives espacées.
+   *
+   * @param {string} feedXml - Flux RSS déjà téléchargé (secours).
+   * @param {string} pageHtml - Page « Vidéos » déjà téléchargée (secours).
    * @returns {Object|null} { title, url, published, description }
    */
   const resolveLatestVideo = (feedXml, pageHtml) => {
+    const viaApi = fetchLatestVideoViaApi();
+    if (viaApi) return viaApi;
+
     let feedVideos = parseFeedVideos(feedXml);
     let pageId = firstVideoIdFromChannelPage(pageHtml);
 
@@ -293,14 +365,19 @@ const NewsService = (() => {
       // Dès que la page « Vidéos » ou le flux RSS répond, inutile d'insister.
       if (pageId || feedVideos.length > 0) break;
       if (!Utils.hasTimeFor(MIN_REMAINING_FOR_HUGO_ENRICHMENT_MS)) break;
-      console.warn(`HugoDécrypte : YouTube n’a pas répondu, nouvelle tentative dans ${delay / 1000} s.`);
       Utilities.sleep(delay);
       const [feedRes, pageRes] = Utils.fetchUrlsSafely([
         { url: Config.NEWS_SOURCES.HUGO_YOUTUBE_FEED },
         { url: Config.NEWS_SOURCES.HUGO_CHANNEL_VIDEOS_URL, headers: YOUTUBE_HEADERS }
       ]);
-      feedVideos = parseFeedVideos(Utils.okText(feedRes));
-      pageId = firstVideoIdFromChannelPage(Utils.okText(pageRes));
+      const feedText = Utils.okText(feedRes);
+      const pageText = Utils.okText(pageRes);
+      feedVideos = parseFeedVideos(feedText);
+      pageId = firstVideoIdFromChannelPage(pageText);
+      if (!pageId && feedVideos.length === 0) {
+        const pageNote = pageText && /consent\.youtube|before you continue|avant d.accéder/i.test(pageText) ? ' (page de consentement)' : '';
+        console.warn(`HugoDécrypte : YouTube refuse toujours (flux RSS ${httpStatus(feedRes)}, page Vidéos ${httpStatus(pageRes)}${pageNote}), nouvelle tentative après ${delay / 1000} s d’attente.`);
+      }
     }
 
     if (pageId) {
@@ -569,19 +646,21 @@ const NewsService = (() => {
 
   /**
    * Vérification rapide de la chaîne YouTube HugoDécrypte (diagnostic).
-   * @returns {{rss: boolean, page: boolean, latestTitle: string, latestUrl: string}}
+   * @returns {{api: boolean, rss: string, page: string, latestTitle: string, latestUrl: string}}
    */
   const checkHugoFeeds = () => {
+    const apiVideo = fetchLatestVideoViaApi();
     const [feedRes, pageRes] = Utils.fetchUrlsSafely([
       { url: Config.NEWS_SOURCES.HUGO_YOUTUBE_FEED },
       { url: Config.NEWS_SOURCES.HUGO_CHANNEL_VIDEOS_URL, headers: YOUTUBE_HEADERS }
     ]);
-    const feedXml = Utils.okText(feedRes);
-    const pageHtml = Utils.okText(pageRes);
-    const video = resolveLatestVideo(feedXml, pageHtml);
+    const feedOk = parseFeedVideos(Utils.okText(feedRes)).length > 0;
+    const pageOk = Boolean(firstVideoIdFromChannelPage(Utils.okText(pageRes)));
+    const video = apiVideo || (feedOk || pageOk ? resolveLatestVideo(Utils.okText(feedRes), Utils.okText(pageRes)) : null);
     return {
-      rss: parseFeedVideos(feedXml).length > 0,
-      page: Boolean(firstVideoIdFromChannelPage(pageHtml)),
+      api: Boolean(apiVideo),
+      rss: feedOk ? 'OK' : httpStatus(feedRes),
+      page: pageOk ? 'OK' : httpStatus(pageRes),
       latestTitle: video ? video.title : '',
       latestUrl: video ? video.url : ''
     };

@@ -194,7 +194,7 @@ function diagnostiquerBriefing() {
 
   check('HugoDécrypte (YouTube)', () => {
     const yt = NewsService.checkHugoFeeds();
-    const sources = `page Vidéos ${yt.page ? 'OK' : 'indisponible'}, flux RSS ${yt.rss ? 'OK' : 'indisponible'}`;
+    const sources = `API YouTube ${yt.api ? 'OK' : 'indisponible'}, page Vidéos ${yt.page}, flux RSS ${yt.rss}`;
     logStep(
       yt.latestTitle ? 'OK' : 'ATTENTION',
       'HugoDécrypte (YouTube)',
