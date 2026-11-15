@@ -51,7 +51,7 @@
         ?>
         <li style="margin-bottom: 10px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
           <span style="color: #6B7280; font-size: 12px;">[ <?= item.timeEstimate ?> ] &bull; </span>
-          <strong><?= item.actionTitle ?></strong><? if (item.account) { ?><span style="display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-left: 4px; background-color: <?= item.account.bg ?>; color: <?= item.account.color ?>; border: 1px solid <?= item.account.border ?>;"><?= item.account.label ?></span><? } ?><? if (item.deadline) { ?> <span style="color: #4B5563;">(<?= item.deadline ?>)</span><? } ?><? if (item.summary) { ?> : <?!= Utils.formatSummaryHtml(item.summary) ?><? } ?>.
+          <strong><?= item.actionTitle ?></strong><? if (item.account) { ?><span style="display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-left: 4px; background-color: <?= item.account.bg ?>; color: <?= item.account.color ?>; border: 1px solid <?= item.account.border ?>;"><?= item.account.label ?></span><? } ?><? if (item.deadline) { ?> <span style="color: #4B5563;">(<?= item.deadline ?>)</span><? } ?><? if (item.summary) { ?> : <?!= Utils.formatSummaryHtml(item.summary) ?><? } ?>
           <a href="<?= item.webUrl ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 4px 8px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-size: 11.5px; font-weight: 600; margin-left: 6px; white-space: nowrap; vertical-align: middle;">Détails</a>
         </li>
         <? } ?>
@@ -60,8 +60,32 @@
     <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
     <? } ?>
 
+    <!-- 1 bis. OFFRES D'EMPLOI DU JOUR (COMPTABILITÉ / FINANCE EN SUISSE EN PREMIER) -->
+    <? if (data.jobOffers && data.jobOffers.items.length > 0) { ?>
+    <div style="margin-bottom: 20px;">
+      <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 10px;">
+        Offres d'emploi du jour
+      </div>
+      <ul style="margin: 0; padding-left: 20px; list-style-type: disc;">
+        <? for (var jo = 0; jo < data.jobOffers.items.length; jo++) {
+             var offer = data.jobOffers.items[jo];
+        ?>
+        <li style="margin-bottom: 8px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
+          <a href="<?= offer.url ?>" target="_blank" rel="noopener noreferrer" style="color: #1D4ED8; font-weight: 700; text-decoration: none;"><?= offer.title ?></a><? if (offer.company) { ?> &mdash; <?= offer.company ?><? } ?><? if (offer.location) { ?> <span style="color: #6B7280;">(<?= offer.location ?>)</span><? } ?>
+          <? if (offer.matchesProfile) { ?><span style="display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-left: 4px; background-color: #ECFDF5; color: #047857; border: 1px solid #A7F3D0;">Correspond à votre recherche</span><? } ?>
+          <span style="color: #9CA3AF; font-size: 11.5px;"> &bull; via <?= offer.source ?></span>
+        </li>
+        <? } ?>
+        <? if (data.jobOffers.extraCount > 0) { ?>
+        <li style="font-size: 12.5px; color: #6B7280;">et <?= data.jobOffers.extraCount ?> autre(s) offre(s) dans vos alertes emploi</li>
+        <? } ?>
+      </ul>
+    </div>
+    <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
+    <? } ?>
+
     <!-- 2. POUR INFORMATION (RÉCAPITULATIF DES E-MAILS REÇUS NON LUS) -->
-    <? if (data.sortedInfoGroups && data.sortedInfoGroups.length > 0) { ?>
+    <? if ((data.sortedInfoGroups && data.sortedInfoGroups.length > 0) || data.lowPriority.total > 0 || data.unsubscribeSuggestions.length > 0) { ?>
     <div style="margin-bottom: 20px;">
       <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 12px;">
         Pour information (récapitulatif des e-mails reçus non lus)
@@ -85,6 +109,32 @@
         </li>
         <? } ?>
       </ul>
+
+      <!-- Notifications sans importance regroupées en une ligne -->
+      <? if (data.lowPriority.total > 0) { ?>
+      <div style="margin: 4px 0 0 0; font-size: 12.5px; line-height: 1.6; color: #6B7280;">
+        <strong style="color: #4B5563;"><?= data.lowPriority.total ?> notification<?= data.lowPriority.total > 1 ? 's' : '' ?> sans importance :</strong>
+        <? for (var lp = 0; lp < data.lowPriority.senders.length; lp++) {
+             var lps = data.lowPriority.senders[lp];
+        ?><a href="<?= lps.webUrl ?>" target="_blank" rel="noopener noreferrer" style="color: #6B7280;"><?= lps.name ?></a><? if (lps.count > 1) { ?> (<?= lps.count ?>)<? } ?><?= lp < data.lowPriority.senders.length - 1 ? ', ' : '.' ?><? } ?>
+      </div>
+      <? } ?>
+
+      <!-- Désabonnements suggérés (aucun clic automatique) -->
+      <? if (data.unsubscribeSuggestions.length > 0) { ?>
+      <div style="margin: 12px 0 0 0; font-size: 12.5px; line-height: 1.6; color: #4B5563;">
+        <strong>Désabonnements suggérés</strong> <span style="color: #9CA3AF;">(e-mails jamais lus ces 30 derniers jours)</span> :
+        <ul style="margin: 4px 0 0 0; padding-left: 20px; list-style-type: circle;">
+          <? for (var us = 0; us < data.unsubscribeSuggestions.length; us++) {
+               var sug = data.unsubscribeSuggestions[us];
+          ?>
+          <li><?= sug.name ?> &mdash; <?= sug.unread ?> non lus
+            <a href="<?= sug.url ?>" target="_blank" rel="noopener noreferrer" style="color: #B91C1C; margin-left: 4px;">Se désinscrire</a>
+          </li>
+          <? } ?>
+        </ul>
+      </div>
+      <? } ?>
     </div>
     <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
     <? } ?>
@@ -94,9 +144,15 @@
       <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 10px;">
         Au planning du jour
       </div>
+      <? if (data.routine) { ?>
+      <div style="font-size: 13px; color: #4B5563; margin: 0 0 10px 0; padding: 8px 12px; background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px;">
+        <strong>Journée type habituelle :</strong> <?= data.routine.count ?> créneaux<? if (data.routine.start) { ?> de <?= data.routine.start ?> à <?= data.routine.end ?><? } ?>
+        <span style="color: #6B7280;">(<?= data.routine.preview ?>)</span>
+      </div>
+      <? } ?>
       <? if (!data.todayEvents || data.todayEvents.length === 0) { ?>
       <div style="font-size: 13.5px; color: #6B7280; margin-left: 10px;">
-        Aucun rendez-vous programmé aujourd'hui.
+        <?= data.routine ? 'Aucun rendez-vous particulier en dehors de votre journée type.' : 'Aucun rendez-vous programmé aujourd’hui.' ?>
       </div>
       <? } else { ?>
       <ul style="margin: 0; padding-left: 20px; list-style-type: disc;">
@@ -125,6 +181,11 @@
       </ul>
       <? } ?>
 
+      <? if ((!data.tomorrowEvents || data.tomorrowEvents.length === 0) && data.tomorrowRoutineCount > 0) { ?>
+      <div style="font-size: 12.5px; color: #6B7280; margin: 14px 0 0 0;">
+        <strong style="color: #374151;">À anticiper demain :</strong> rien de particulier, journée type habituelle.
+      </div>
+      <? } ?>
       <? if (data.tomorrowEvents && data.tomorrowEvents.length > 0) { ?>
       <div style="font-size: 13px; font-weight: 700; color: #374151; margin: 14px 0 6px 0;">
         À anticiper demain

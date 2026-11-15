@@ -104,11 +104,18 @@ const CalendarService = (() => {
     const diffMinutes = Math.round((endTime.getTime() - startTime.getTime()) / 60000);
     const conferenceLink = findNativeLink(event, nativeLinks) || extractConferenceLink(event);
     const location = Utils.sanitizeText(event.getLocation() || '');
+    let isRecurring = false;
+    try {
+      isRecurring = event.isRecurringEvent();
+    } catch {}
 
     return {
       title: Utils.sanitizeText(event.getTitle()) || '(Sans titre)',
       isAllDay,
+      isRecurring,
       startTime,
+      startFormatted: isAllDay ? '' : Utils.formatTime(startTime),
+      endFormatted: isAllDay ? '' : Utils.formatTime(endTime),
       timeFormatted: isAllDay ? 'Toute la journée' : `${Utils.formatTime(startTime)} - ${Utils.formatTime(endTime)}`,
       durationFormatted: isAllDay ? '' : Utils.formatDuration(diffMinutes),
       location,
@@ -131,8 +138,25 @@ const CalendarService = (() => {
       .map((event) => formatEvent(event, nativeLinks))
       .sort((a, b) => (a.isAllDay === b.isAllDay ? a.startTime.getTime() - b.startTime.getTime() : a.isAllDay ? -1 : 1));
 
+  /** Signature d'un créneau habituel : même intitulé à la même heure. */
+  const slotKey = (e) => `${e.title.toLowerCase()}|${e.startFormatted}`;
+
   /**
-   * Agenda d'aujourd'hui et de demain (fuseau du script : Europe/Paris).
+   * Marque les créneaux de la « journée type » : événements récurrents, ou présents
+   * à l'identique (même intitulé, même heure) la veille ou le lendemain.
+   * @param {Array<Object>} events - Événements du jour concerné.
+   * @param {Array<Array<Object>>} neighbours - Événements des jours voisins.
+   */
+  const markRoutine = (events, neighbours) => {
+    const known = new Set(neighbours.flat().map(slotKey));
+    events.forEach((e) => {
+      e.isRoutine = Boolean(e.isRecurring || known.has(slotKey(e))) && !e.conferenceLink;
+    });
+  };
+
+  /**
+   * Agenda d'aujourd'hui et de demain (fuseau du script : Europe/Paris),
+   * avec repérage des créneaux habituels (journée type).
    * @returns {{todayEvents: Array<Object>, tomorrowEvents: Array<Object>}}
    */
   const getAgenda = () => {
@@ -142,6 +166,7 @@ const CalendarService = (() => {
       return { todayEvents: [], tomorrowEvents: [] };
     }
     const now = new Date();
+    const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12, 0, 0);
     const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 12, 0, 0);
 
     // Fenêtre large (veille 00h -> surlendemain 00h) : couvre les événements à cheval sur minuit.
@@ -149,9 +174,14 @@ const CalendarService = (() => {
     const windowEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2, 0, 0, 0);
     const nativeLinks = fetchNativeConferenceLinks(windowStart, windowEnd);
 
+    const yesterdayEvents = getEventsForDay(cal, yesterday, nativeLinks);
     const todayEvents = getEventsForDay(cal, now, nativeLinks);
     const tomorrowEvents = getEventsForDay(cal, tomorrow, nativeLinks);
-    console.log(`Agenda : ${todayEvents.length} événement(s) aujourd'hui, ${tomorrowEvents.length} demain.`);
+    markRoutine(todayEvents, [yesterdayEvents, tomorrowEvents]);
+    markRoutine(tomorrowEvents, [todayEvents]);
+
+    const routineCount = todayEvents.filter((e) => e.isRoutine).length;
+    console.log(`Agenda : ${todayEvents.length} événement(s) aujourd'hui (dont ${routineCount} habituels), ${tomorrowEvents.length} demain.`);
     return { todayEvents, tomorrowEvents };
   };
 

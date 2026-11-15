@@ -20,22 +20,82 @@ const BriefingService = (() => {
   };
 
   /**
-   * Répartit les e-mails enrichis entre actions prioritaires et groupes d'information,
-   * avec déduplication et ordre canonique des catégories (Config.EMAIL_CATEGORIES).
+   * Score de pertinence d'une offre par rapport au profil recherché (métier + Suisse).
+   * @param {Object} offer
+   * @returns {{score: number, matchesProfile: boolean}}
+   */
+  const scoreJobOffer = (offer) => {
+    const profile = Config.JOB_PROFILE;
+    const text = `${offer.title} ${offer.company} ${offer.location}`;
+    const jobMatch = Utils.containsKeyword(text, profile.keywords);
+    const swissMatch = Utils.containsKeyword(text, profile.swissLocations) || /\.ch(?:\/|$)/i.test(String(offer.url).split('?')[0]);
+    return { score: (jobMatch ? 2 : 0) + (swissMatch ? 2 : 0), matchesProfile: jobMatch && swissMatch };
+  };
+
+  /**
+   * Offres d'emploi d'un e-mail : extraites par l'IA (avec liens directs),
+   * sinon liens d'offres détectés dans l'e-mail.
+   * @param {Object} email
+   * @returns {Array<Object>}
+   */
+  const offersFromEmail = (email) => {
+    if (email.jobOffers && email.jobOffers.length > 0) return email.jobOffers;
+    return (email.jobLinks || []).map((l) => ({ title: Utils.sanitizeText(l.text), company: '', location: '', url: l.url }));
+  };
+
+  /**
+   * Offres du jour dédupliquées, triées par pertinence (comptabilité / finance en Suisse d'abord).
+   * @param {Array<Object>} rawOffers
+   * @returns {{items: Array<Object>, extraCount: number}}
+   */
+  const rankJobOffers = (rawOffers) => {
+    const seen = new Set();
+    const unique = rawOffers.filter((o) => {
+      const key = `${o.title}|${o.company}`.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    const ranked = unique
+      .map((o, idx) => Object.assign({}, o, scoreJobOffer(o), { order: idx }))
+      .sort((a, b) => b.score - a.score || a.order - b.order);
+    const max = Config.JOB_PROFILE.maxOffers;
+    return { items: ranked.slice(0, max), extraCount: Math.max(0, ranked.length - max) };
+  };
+
+  /**
+   * Répartit les e-mails enrichis : actions prioritaires, offres d'emploi du jour,
+   * groupes d'information (ordre canonique) et notifications sans importance regroupées.
    *
    * @param {Array<Object>} emails
-   * @returns {{urgentItems: Array<Object>, sortedInfoGroups: Array<Object>}}
+   * @returns {{urgentItems: Array<Object>, jobOffers: Object, sortedInfoGroups: Array<Object>, lowPriority: Object}}
    */
   const organizeEmails = (emails) => {
     const urgentItems = [];
     const seenUrgent = new Set();
     const grouped = {};
     const seenGrouped = new Set();
+    const rawOffers = [];
+    const lowPriorityBySender = new Map();
 
     for (const email of emails) {
       const sender = Utils.sanitizeText(email.senderDisplayName || email.senderName);
       const subject = Utils.sanitizeText(email.subject);
       const webUrl = email.webUrl || Utils.buildGmailUrl(email.threadId);
+
+      // 1. Alertes Google liées à votre propre assistant : simple information, jamais une action.
+      if (EmailClassifier.isOwnAssistantAlert(email)) {
+        const ownKey = `own-assistant::${sender.toLowerCase()}`;
+        if (seenGrouped.has(ownKey)) continue;
+        seenGrouped.add(ownKey);
+        (grouped[Config.EMAIL_CATEGORY.SECURITY] = grouped[Config.EMAIL_CATEGORY.SECURITY] || []).push({
+          sender,
+          summary: 'Alerte liée à **votre propre assistant** (autorisation accordée à Google CC Briefing Agent) : rien à faire si c’est bien vous qui l’avez autorisé.',
+          account: accountBadge(email),
+          webUrl
+        });
+        continue;
+      }
 
       if (email.actionRequired && email.actionTitle) {
         const key = Utils.normalizeSubject(email.actionTitle) || Utils.normalizeSubject(subject);
@@ -53,6 +113,25 @@ const BriefingService = (() => {
       }
 
       const category = EmailClassifier.resolveCategory(email);
+
+      // 2. Offres d'emploi : section dédiée en tête (l'e-mail n'est pas répété plus bas).
+      if (category === Config.EMAIL_CATEGORY.JOBS || EmailClassifier.isJobPlatform(email)) {
+        const offers = offersFromEmail(email);
+        if (offers.length > 0) {
+          offers.forEach((o) => rawOffers.push(Object.assign({}, o, { source: email.senderName, account: accountBadge(email) })));
+          continue;
+        }
+      }
+
+      // 3. Notifications sans importance : une seule ligne compacte par expéditeur.
+      if (Config.LOW_PRIORITY_EMAIL_CATEGORIES.includes(category)) {
+        const name = Utils.sanitizeText(email.senderName);
+        const entry = lowPriorityBySender.get(name) || { name, count: 0, webUrl };
+        entry.count += email.duplicateCount || 1;
+        lowPriorityBySender.set(name, entry);
+        continue;
+      }
+
       const key = `${sender.toLowerCase()}::${Utils.normalizeSubject(subject)}`;
       if (seenGrouped.has(key)) continue;
       seenGrouped.add(key);
@@ -68,7 +147,38 @@ const BriefingService = (() => {
       .filter((c) => grouped[c.name] && grouped[c.name].length > 0)
       .map((c) => ({ name: c.name, items: grouped[c.name] }));
 
-    return { urgentItems, sortedInfoGroups };
+    const lowSenders = [...lowPriorityBySender.values()].sort((a, b) => b.count - a.count);
+    return {
+      urgentItems,
+      jobOffers: rankJobOffers(rawOffers),
+      sortedInfoGroups,
+      lowPriority: { total: lowSenders.reduce((n, s) => n + s.count, 0), senders: lowSenders }
+    };
+  };
+
+  /**
+   * Désabonnements suggérés : expéditeurs de notifications sans importance qui proposent un lien
+   * de désinscription et accumulent des e-mails non lus sur 30 jours. Aucun clic automatique.
+   *
+   * @param {Array<Object>} emails
+   * @returns {Array<{name: string, unread: number, url: string}>}
+   */
+  const buildUnsubscribeSuggestions = (emails) => {
+    const candidates = new Map();
+    for (const email of emails) {
+      if (!email.unsubscribeUrl || !email.senderEmail || candidates.has(email.senderEmail)) continue;
+      if (EmailClassifier.isJobPlatform(email)) continue;
+      if (!Config.LOW_PRIORITY_EMAIL_CATEGORIES.includes(EmailClassifier.resolveCategory(email))) continue;
+      candidates.set(email.senderEmail, { name: Utils.sanitizeText(email.senderName), url: email.unsubscribeUrl });
+    }
+
+    const suggestions = [];
+    for (const [address, info] of [...candidates.entries()].slice(0, 8)) {
+      if (!Utils.hasTimeFor(Config.DEFAULTS.SEND_RESERVE_MS + 15000)) break;
+      const unread = GmailService.countUnreadFromLast30Days(address);
+      if (unread >= Config.UNSUBSCRIBE_MIN_UNREAD_30D) suggestions.push(Object.assign({ unread }, info));
+    }
+    return suggestions.sort((a, b) => b.unread - a.unread).slice(0, Config.UNSUBSCRIBE_MAX_SUGGESTIONS);
   };
 
   /**
@@ -133,6 +243,42 @@ const BriefingService = (() => {
     }
   };
 
+  /** En dessous de ce nombre de créneaux habituels, l'agenda est affiché en entier. */
+  const MIN_ROUTINE_TO_COMPACT = 3;
+
+  /**
+   * Agenda allégé : la journée type (créneaux qui reviennent chaque jour) tient en une ligne,
+   * seuls les rendez-vous inhabituels sont détaillés (aujourd'hui et demain).
+   *
+   * @param {Object} agenda - { todayEvents, tomorrowEvents } (événements marqués isRoutine).
+   * @returns {Object}
+   */
+  const summarizeAgenda = (agenda) => {
+    const split = (events) => {
+      const routine = events.filter((e) => e.isRoutine);
+      if (routine.length < MIN_ROUTINE_TO_COMPACT) return { special: events, routine: [] };
+      return { special: events.filter((e) => !e.isRoutine), routine };
+    };
+    const today = split(agenda.todayEvents || []);
+    const tomorrow = split(agenda.tomorrowEvents || []);
+    const timed = today.routine.filter((e) => !e.isAllDay);
+    const max = Config.DEFAULTS.MAX_TOMORROW_EVENTS;
+    return {
+      todaySpecial: today.special,
+      routine: today.routine.length > 0
+        ? {
+            count: today.routine.length,
+            start: timed.length ? timed[0].startFormatted : '',
+            end: timed.length ? timed[timed.length - 1].endFormatted : '',
+            preview: today.routine.slice(0, 5).map((e) => e.title).join(', ') + (today.routine.length > 5 ? '…' : '')
+          }
+        : null,
+      tomorrowSpecial: tomorrow.special.slice(0, max),
+      tomorrowExtraCount: Math.max(0, tomorrow.special.length - max),
+      tomorrowRoutineCount: tomorrow.routine.length
+    };
+  };
+
   /**
    * Construit, rend et envoie le briefing.
    *
@@ -151,7 +297,8 @@ const BriefingService = (() => {
     const now = new Date();
     const dateTitle = Utils.formatDateFrench(now);
 
-    const { urgentItems, sortedInfoGroups } = organizeEmails(emails);
+    const { urgentItems, jobOffers, sortedInfoGroups, lowPriority } = organizeEmails(emails);
+    const agendaView = summarizeAgenda(agenda);
     const stats = {
       totalEmails: emails.length,
       urgentCount: urgentItems.length,
@@ -167,6 +314,13 @@ const BriefingService = (() => {
     const weather = buildWeather(todayEvents);
     const newsDigest = buildNews();
 
+    let unsubscribeSuggestions = [];
+    try {
+      unsubscribeSuggestions = buildUnsubscribeSuggestions(emails);
+    } catch (e) {
+      console.warn(`Suggestions de désabonnement : ${e.message}`);
+    }
+
     let devOpsReport = null;
     try {
       devOpsReport = DevOpsAgentService.generateEngineerReport();
@@ -181,10 +335,15 @@ const BriefingService = (() => {
       recipientEmail,
       stats,
       urgentItems,
+      jobOffers,
       sortedInfoGroups,
-      todayEvents,
-      tomorrowEvents: (agenda.tomorrowEvents || []).slice(0, Config.DEFAULTS.MAX_TOMORROW_EVENTS),
-      tomorrowExtraCount: Math.max(0, (agenda.tomorrowEvents || []).length - Config.DEFAULTS.MAX_TOMORROW_EVENTS),
+      lowPriority,
+      unsubscribeSuggestions,
+      todayEvents: agendaView.todaySpecial,
+      routine: agendaView.routine,
+      tomorrowEvents: agendaView.tomorrowSpecial,
+      tomorrowExtraCount: agendaView.tomorrowExtraCount,
+      tomorrowRoutineCount: agendaView.tomorrowRoutineCount,
       hasZeroEmails: stats.totalEmails === 0,
       isCalm: stats.totalEmails === 0 && stats.todayEventsCount === 0,
       weatherAdviceHtml: weather ? weather.html : null,
@@ -247,7 +406,18 @@ const BriefingService = (() => {
       lines.push('');
     }
 
-    if (data.sortedInfoGroups.length > 0) {
+    if (data.jobOffers.items.length > 0) {
+      lines.push('=== OFFRES D’EMPLOI DU JOUR ===');
+      for (const o of data.jobOffers.items) {
+        const where = o.location ? ` (${o.location})` : '';
+        const match = o.matchesProfile ? ' [correspond à votre recherche]' : '';
+        lines.push(`• ${o.title}${o.company ? ` — ${o.company}` : ''}${where}${match} — via ${o.source} — ${o.url}`);
+      }
+      if (data.jobOffers.extraCount > 0) lines.push(`• et ${data.jobOffers.extraCount} autre(s) offre(s) dans vos alertes emploi`);
+      lines.push('');
+    }
+
+    if (data.sortedInfoGroups.length > 0 || data.lowPriority.total > 0 || data.unsubscribeSuggestions.length > 0) {
       lines.push('=== POUR INFORMATION (RÉCAPITULATIF DES E-MAILS REÇUS NON LUS) ===');
       for (const group of data.sortedInfoGroups) {
         lines.push(`• ${group.name} :`);
@@ -255,12 +425,24 @@ const BriefingService = (() => {
           lines.push(`  - ${it.sender}${badge(it)} : ${md(it.summary)} — ${it.webUrl}`);
         }
       }
+      if (data.lowPriority.total > 0) {
+        const senders = data.lowPriority.senders.map((s) => (s.count > 1 ? `${s.name} (${s.count})` : s.name)).join(', ');
+        lines.push(`• ${data.lowPriority.total} notification(s) sans importance : ${senders}.`);
+      }
+      if (data.unsubscribeSuggestions.length > 0) {
+        lines.push('• Désabonnements suggérés (e-mails jamais lus ces 30 derniers jours) :');
+        for (const s of data.unsubscribeSuggestions) lines.push(`  - ${s.name} — ${s.unread} non lus — ${s.url}`);
+      }
       lines.push('');
     }
 
     lines.push('=== AU PLANNING DU JOUR ===');
+    if (data.routine) {
+      const span = data.routine.start ? ` de ${data.routine.start} à ${data.routine.end}` : '';
+      lines.push(`Journée type habituelle : ${data.routine.count} créneaux${span} (${data.routine.preview})`);
+    }
     if (data.todayEvents.length === 0) {
-      lines.push('Aucun rendez-vous programmé aujourd’hui.');
+      lines.push(data.routine ? 'Aucun rendez-vous particulier en dehors de votre journée type.' : 'Aucun rendez-vous programmé aujourd’hui.');
     }
     for (const ev of data.todayEvents) {
       lines.push(`• ${ev.timeFormatted} : ${ev.title}${ev.location ? ` (${ev.location})` : ''}`);
@@ -272,6 +454,8 @@ const BriefingService = (() => {
         lines.push(`  - ${ev.timeFormatted} : ${ev.title}`);
       }
       if (data.tomorrowExtraCount > 0) lines.push(`  - et ${data.tomorrowExtraCount} autre(s) rendez-vous`);
+    } else if (data.tomorrowRoutineCount > 0) {
+      lines.push('À anticiper demain : rien de particulier, journée type habituelle.');
     }
     lines.push('');
 

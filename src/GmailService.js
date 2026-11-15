@@ -34,6 +34,76 @@ const GmailService = (() => {
     );
   };
 
+  /** Chemins d'URL typiques d'une offre d'emploi (LinkedIn, Indeed, Jobup, Meteojob, HelloWork, Apec, Michael Page…). */
+  const JOB_LINK_PATTERN = /\/jobs?\/view\/|\/viewjob|\/emplois?\/|\/offres?[-_/]|\/offre-d-emploi|\/job-detail|\/stellen|\/stelle\/|\/vacanc|\/annonce|jobup\.ch\/[a-z]{2}\/|\/detail\//i;
+  const MAX_JOB_LINKS_PER_EMAIL = 15;
+
+  /**
+   * Liens d'offres d'emploi d'un e-mail HTML : texte du lien (intitulé) + adresse.
+   * Les liens LinkedIn sont nettoyés de leurs paramètres de suivi.
+   *
+   * @param {string} html
+   * @returns {Array<{text: string, url: string}>}
+   */
+  const extractJobLinks = (html) => {
+    const links = [];
+    const seen = new Set();
+    for (const m of String(html || '').matchAll(/<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+      let url = Utils.decodeHtmlEntities(m[1]).trim();
+      const text = Utils.stripMarkup(m[2]);
+      if (!/^https?:\/\//i.test(url) || !JOB_LINK_PATTERN.test(url)) continue;
+      if (text.length < 6 || text.length > 140 || /désabonn|unsubscribe|voir toutes|see all|paramètres|settings|afficher plus/i.test(text)) continue;
+      const linkedIn = url.match(/linkedin\.com\/(?:comm\/)?jobs\/view\/(\d+)/i);
+      if (linkedIn) url = `https://www.linkedin.com/jobs/view/${linkedIn[1]}`;
+      const key = url.split('?')[0];
+      if (seen.has(key)) continue;
+      seen.add(key);
+      links.push({ text, url });
+      if (links.length >= MAX_JOB_LINKS_PER_EMAIL) break;
+    }
+    return links;
+  };
+
+  /**
+   * Lien https de désinscription (en-tête List-Unsubscribe), s'il existe.
+   * @param {GoogleAppsScript.Gmail.GmailMessage} msg
+   * @returns {string}
+   */
+  const readUnsubscribeUrl = (msg) => {
+    try {
+      const header = msg.getHeader('List-Unsubscribe') || '';
+      const https = header.match(/<(https:\/\/[^>]+)>/i);
+      return https ? https[1] : '';
+    } catch {
+      return '';
+    }
+  };
+
+  /**
+   * Adresse e-mail de l'expéditeur (ex. "news@twistshake.com").
+   * @param {string} fromRaw
+   * @returns {string}
+   */
+  const senderAddress = (fromRaw) => {
+    const m = String(fromRaw || '').match(/<([^>]+@[^>]+)>/) || String(fromRaw || '').match(/([\w.+-]+@[\w.-]+\.[a-z]{2,})/i);
+    return m ? m[1].toLowerCase() : '';
+  };
+
+  /**
+   * Nombre d'e-mails non lus reçus d'un expéditeur sur 30 jours (plafonné à 20).
+   * @param {string} address
+   * @returns {number}
+   */
+  const countUnreadFromLast30Days = (address) => {
+    if (!address) return 0;
+    try {
+      return GmailApp.search(`from:${address} is:unread newer_than:30d`, 0, 20).length;
+    } catch (error) {
+      console.warn(`Comptage des non-lus impossible pour ${address} : ${error.message}`);
+      return 0;
+    }
+  };
+
   /**
    * Clé de regroupement d'une campagne (même expéditeur + début d'objet identique).
    * @param {Object} item
@@ -99,16 +169,23 @@ const GmailService = (() => {
     // 2. Du plus récent au plus ancien : la version la plus récente d'une campagne est conservée
     rawMessages.sort((a, b) => b.timestampSec - a.timestampSec);
 
-    // 3. Déduplication pré-IA (avant les appels coûteux de lecture du corps)
+    // 3. Déduplication pré-IA (avant les appels coûteux de lecture du corps).
+    //    Le compteur « (N messages) » ne compte que des messages réellement différents :
+    //    deux copies du même e-mail (transfert Outlook configuré en double) ne comptent qu'une fois.
     const deduplicated = [];
     const indexByKey = new Map();
     for (const item of rawMessages) {
       const key = buildDedupKey(item);
+      const subjectKey = Utils.normalizeSubject(item.subject);
       if (indexByKey.has(key)) {
         const existing = deduplicated[indexByKey.get(key)];
-        existing.duplicateCount += 1;
-        existing.senderDisplayName = `${existing.senderName} (${existing.duplicateCount} messages)`;
+        existing.distinctSubjects.add(subjectKey);
+        existing.duplicateCount = existing.distinctSubjects.size;
+        existing.senderDisplayName = existing.duplicateCount > 1
+          ? `${existing.senderName} (${existing.duplicateCount} messages)`
+          : existing.senderName;
       } else {
+        item.distinctSubjects = new Set([subjectKey]);
         item.duplicateCount = 1;
         item.senderDisplayName = item.senderName;
         indexByKey.set(key, deduplicated.length);
@@ -116,21 +193,26 @@ const GmailService = (() => {
       }
     }
 
-    // 4. Corps et compte de destination uniquement pour les messages conservés
+    // 4. Corps, compte de destination, lien de désinscription et liens d'offres (messages conservés uniquement)
     for (const item of deduplicated) {
       const msg = item.msgObj;
+      const jobPlatform = EmailClassifier.isJobPlatform(item);
       let plainBody = '';
       try {
         plainBody = msg.getPlainBody() || '';
       } catch {}
       let rawHtml = '';
-      if (plainBody.trim().length < 25) {
+      if (plainBody.trim().length < 25 || jobPlatform) {
         try {
           rawHtml = msg.getBody() || '';
         } catch {}
       }
-      item.body = Utils.cleanEmailBody(plainBody, rawHtml);
+      item.body = Utils.cleanEmailBody(plainBody.trim().length >= 25 ? plainBody : '', rawHtml);
       item.account = detectAccount(msg);
+      item.senderEmail = senderAddress(item.from);
+      item.unsubscribeUrl = readUnsubscribeUrl(msg);
+      item.jobLinks = jobPlatform ? extractJobLinks(rawHtml) : [];
+      delete item.distinctSubjects;
       delete item.msgObj;
     }
 
@@ -139,6 +221,7 @@ const GmailService = (() => {
   };
 
   return {
-    fetchUnreadEmails
+    fetchUnreadEmails,
+    countUnreadFromLast30Days
   };
 })();

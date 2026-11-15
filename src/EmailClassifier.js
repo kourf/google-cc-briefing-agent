@@ -263,8 +263,38 @@ const EmailClassifier = (() => {
     };
   };
 
+  /** Nom de l'application tel qu'il apparaît dans les alertes de sécurité Google. */
+  const OWN_ASSISTANT_NAME = 'google cc briefing agent';
+
+  /**
+   * Alerte Google déclenchée par l'autorisation de votre propre assistant
+   * (ex. « Google CC Briefing Agent a obtenu l'accès à votre compte ») : information, jamais une action.
+   * @param {Object} email
+   * @returns {boolean}
+   */
+  const isOwnAssistantAlert = (email) => {
+    const from = String(email.from || '').toLowerCase();
+    const text = `${email.subject || ''} ${email.summary || ''} ${email.actionTitle || ''} ${email.body || ''}`.toLowerCase();
+    return /google\.com/.test(from) && text.includes(OWN_ASSISTANT_NAME);
+  };
+
+  /**
+   * E-mail provenant d'une plateforme d'emploi (offres à extraire pour la section dédiée).
+   * @param {Object} email
+   * @returns {boolean}
+   */
+  const isJobPlatform = (email) => {
+    const text = buildSearchText(email);
+    const linkedIn = classifyLinkedIn(text);
+    if (linkedIn) return linkedIn.kind === 'linkedin_job';
+    const jobsRule = getRules().find((r) => r.category === Config.EMAIL_CATEGORY.JOBS);
+    return Utils.containsKeyword(text, jobsRule.keywords);
+  };
+
   return {
     resolveCategory,
-    buildFallbackAnalysis
+    buildFallbackAnalysis,
+    isOwnAssistantAlert,
+    isJobPlatform
   };
 })();

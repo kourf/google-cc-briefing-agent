@@ -141,6 +141,34 @@ const Config = (() => {
   ]);
 
   /**
+   * Catégories regroupées en une seule ligne compacte « notifications sans importance ».
+   * @type {ReadonlyArray<string>}
+   */
+  const LOW_PRIORITY_EMAIL_CATEGORIES = Object.freeze([EMAIL_CATEGORY.SOCIAL, EMAIL_CATEGORY.SHOPPING, EMAIL_CATEGORY.NEWS]);
+
+  /**
+   * Profil de recherche d'emploi : sert à classer les offres du jour (comptabilité et finance en Suisse d'abord).
+   * @type {Readonly<Object>}
+   */
+  const JOB_PROFILE = Object.freeze({
+    keywords: [
+      'comptable', 'comptabilité', 'finance', 'financier', 'financière', 'fiduciaire', 'contrôleur', 'contrôleuse',
+      'controlling', 'controller', 'audit', 'auditeur', 'ifrs', 'trésorerie', 'accountant', 'accounting', 'treuhand',
+      'buchhalter', 'reporting', 'consolidation', 'fiscalité', 'paie', 'gestionnaire'
+    ],
+    swissLocations: [
+      'suisse', 'switzerland', 'schweiz', 'genève', 'geneve', 'geneva', 'lausanne', 'vaud', 'nyon', 'rolle', 'morges',
+      'montreux', 'vevey', 'yverdon', 'fribourg', 'neuchâtel', 'neuchatel', 'valais', 'sion', 'berne', 'bern', 'zurich',
+      'zürich', 'bâle', 'basel', 'lucerne', 'lugano', 'jura', 'carouge', 'meyrin', 'plan-les-ouates', 'romandie'
+    ],
+    maxOffers: 10
+  });
+
+  /** Seuil de suggestion de désabonnement : e-mails non lus du même expéditeur sur 30 jours. */
+  const UNSUBSCRIBE_MIN_UNREAD_30D = 3;
+  const UNSUBSCRIBE_MAX_SUGGESTIONS = 5;
+
+  /**
    * Anciens libellés encore susceptibles d'apparaître (historique, prompts antérieurs).
    * @type {Readonly<Object<string, string>>}
    */
@@ -341,6 +369,10 @@ const Config = (() => {
     NEWS_SOURCES,
     EMAIL_CATEGORY,
     EMAIL_CATEGORIES,
+    LOW_PRIORITY_EMAIL_CATEGORIES,
+    JOB_PROFILE,
+    UNSUBSCRIBE_MIN_UNREAD_30D,
+    UNSUBSCRIBE_MAX_SUGGESTIONS,
     NEWS_CATEGORIES,
     KNOWN_ACCOUNTS,
     getScriptProperty,

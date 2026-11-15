@@ -233,7 +233,12 @@ const GeminiService = (() => {
       '5. INTERDICTIONS : ne commence JAMAIS par "[Expéditeur] vous a envoyé un e-mail", n\'écris JAMAIS "Aucune action requise", aucune entité HTML (&amp;, &#039;), aucun symbole $, aucun emoji.',
       '',
       '6. TAXONOMIE STRICTE (choisis exactement un de ces libellés) :',
-      taxonomy
+      taxonomy,
+      '',
+      `7. OFFRES D'EMPLOI (uniquement pour la catégorie '${C.JOBS}') : remplis "jobOffers" avec CHAQUE offre présente dans l'e-mail :`,
+      '   "title" (intitulé du poste traduit en français, (m/w/d) -> (H/F)), "company" (entreprise qui recrute, vide si inconnue),',
+      '   "location" (ville exacte, vide si inconnue) et "linkIndex" (numéro "n" de l\'offre dans "offresDetectees" si elle y figure, sinon 0).',
+      '   N\'invente jamais une offre, une entreprise ou une ville absentes de l\'e-mail.'
     ].join('\n');
   };
 
@@ -252,7 +257,21 @@ const GeminiService = (() => {
         actionRequired: { type: 'BOOLEAN' },
         actionTitle: { type: 'STRING', description: "Format strict : '[Expéditeur] — [Sujet et enjeu précis]' ou vide" },
         deadline: { type: 'STRING', description: "Échéance tirée de l'e-mail (ex. '18/11 à 09h00') ou vide" },
-        estimatedMinutes: { type: 'INTEGER', description: "Durée estimée de l'action en minutes" }
+        estimatedMinutes: { type: 'INTEGER', description: "Durée estimée de l'action en minutes" },
+        jobOffers: {
+          type: 'ARRAY',
+          description: "Offres d'emploi contenues dans l'e-mail (catégorie Emploi & Carrière uniquement)",
+          items: {
+            type: 'OBJECT',
+            properties: {
+              title: { type: 'STRING' },
+              company: { type: 'STRING' },
+              location: { type: 'STRING' },
+              linkIndex: { type: 'INTEGER' }
+            },
+            required: ['title']
+          }
+        }
       },
       required: ['emailId', 'category', 'summary', 'actionRequired']
     }
@@ -272,9 +291,29 @@ const GeminiService = (() => {
       actionRequired: Boolean(item.actionRequired),
       actionTitle: Utils.sanitizeText(item.actionTitle) || (item.actionRequired ? 'Action requise' : ''),
       deadline: deadline && !/^(null|aucune?|none|n\/a)$/i.test(deadline) ? deadline : null,
-      estimatedMinutes: Number.isFinite(minutes) && minutes > 0 ? minutes : 5
+      estimatedMinutes: Number.isFinite(minutes) && minutes > 0 ? minutes : 5,
+      rawJobOffers: Array.isArray(item.jobOffers) ? item.jobOffers : []
     };
   };
+
+  /**
+   * Associe les offres extraites par l'IA aux liens directs détectés dans l'e-mail.
+   * @param {Object} msg - E-mail (avec jobLinks).
+   * @param {Array<Object>} rawOffers - Offres renvoyées par l'IA.
+   * @returns {Array<{title: string, company: string, location: string, url: string}>}
+   */
+  const attachJobOffers = (msg, rawOffers) =>
+    (rawOffers || [])
+      .map((o) => {
+        const link = (msg.jobLinks || [])[(parseInt(o.linkIndex, 10) || 0) - 1];
+        return {
+          title: Utils.sanitizeText(o.title),
+          company: Utils.sanitizeText(o.company),
+          location: Utils.sanitizeText(o.location),
+          url: link ? link.url : msg.webUrl
+        };
+      })
+      .filter((o) => o.title);
 
   /**
    * Analyse un lot d'e-mails en un seul appel.
@@ -291,7 +330,8 @@ const GeminiService = (() => {
         objet: Utils.sanitizeText(msg.subject),
         date: `${msg.dateFormatted} ${msg.timeFormatted}`,
         nombreMessages: msg.duplicateCount || 1,
-        contenuAbrege: Utils.sanitizeText(body.length > max ? `${body.substring(0, max)}...` : body)
+        contenuAbrege: Utils.sanitizeText(body.length > max ? `${body.substring(0, max)}...` : body),
+        offresDetectees: (msg.jobLinks || []).map((l, idx) => ({ n: idx + 1, intitule: l.text }))
       };
     });
 
@@ -299,7 +339,7 @@ const GeminiService = (() => {
       purpose: 'analyse des e-mails',
       prompt: `${buildEmailPrompt()}\n\nVoici les e-mails à analyser :\n${JSON.stringify(emailsPayload)}`,
       generationConfig: {
-        maxOutputTokens: Config.DEFAULTS.MAX_OUTPUT_TOKENS,
+        maxOutputTokens: 8192,
         responseMimeType: 'application/json',
         responseSchema: buildEmailSchema()
       },
@@ -362,7 +402,8 @@ const GeminiService = (() => {
       const analysis = analyzeBatch(batch) || {};
       for (const msg of batch) {
         if (analysis[msg.id]) {
-          results.push(Object.assign({}, msg, analysis[msg.id]));
+          const { rawJobOffers, ...fields } = analysis[msg.id];
+          results.push(Object.assign({}, msg, fields, { jobOffers: attachJobOffers(msg, rawJobOffers) }));
         } else {
           results.push(withFallback(msg));
           fallbackCount++;
@@ -440,10 +481,16 @@ const GeminiService = (() => {
       '2. IDENTITÉS ET FONCTIONS : chaque personne est citée avec prénom, nom ET fonction exacte (ex. "Antonio Guterres (le secrétaire général de l’ONU)").',
       '   Chaque sportif avec son club ET son poste exact (ex. "Senny Mayulu (le jeune milieu de terrain du PSG)").',
       '3. LIEUX PRÉCIS : donne TOUJOURS la ville ou commune exacte quand elle figure dans les sources (ex. "à Trappes, dans les Yvelines" et jamais "en banlieue parisienne").',
-      '   Interdiction des formules vagues ("accusations graves", "certains cas", "situation difficile"). Donne les noms, les chiffres, la raison et la conséquence.',
+      '   Interdiction des formules vagues ("accusations graves", "certains cas", "situation difficile", "des experts", "la communauté internationale", "les autorités", "plusieurs pays") :',
+      '   nomme TOUJOURS qui (personne, institution ou pays précis), donne les chiffres, la raison et la conséquence.',
       '4. FORMAT : 2 à 3 phrases denses par sujet — (1) qui, quoi, où ; (2) pourquoi ou polémique ; (3) impact ou suite.',
-      '5. FIDÉLITÉ : n’invente AUCUN fait absent des sources. Ne mélange jamais les détails de deux dépêches distinctes.',
-      '6. ZÉRO EMOJI.',
+      '5. UN SUJET = UNE DÉPÊCHE : ne fusionne JAMAIS deux événements sans lien dans un même titre ou résumé (ex. interdit : "Tensions diplomatiques et attaques de drones" mêlant la francophonie et l’Iran).',
+      '   Si une rubrique contient deux sujets importants, crée deux objets distincts (2 objets maximum par rubrique).',
+      '6. CLASSEMENT JUSTE : innovation d’entreprise, espace commercial (SpaceX…), IA, cybersécurité et produits numériques -> "T — Technologie, IA & Innovation" ;',
+      '   "Culture & Savoir" = cinéma, livres, musique, histoire, archéologie, découverte scientifique fondamentale (médecine, astronomie, biologie) ;',
+      '   cyberattaque contre une entreprise -> "T" ; climat et biodiversité -> "E — Environnement" ; procès et lois -> "L".',
+      '7. FIDÉLITÉ : n’invente AUCUN fait absent des sources.',
+      '8. ZÉRO EMOJI.',
       '',
       'LES 9 RUBRIQUES PESTEL+ (libellés EXACTS, dans cet ordre) :',
       categoryLines,
@@ -459,7 +506,7 @@ const GeminiService = (() => {
             '  listés sous le segment et sur les articles sources de la vidéo).'
           ].join('\n')
         : '- "segments" : renvoie un tableau VIDE (aucune vidéo HugoDécrypte disponible ce matin, n’invente rien).',
-      '- "categories" : un objet par rubrique, dans l’ordre ci-dessus, uniquement à partir des dépêches de la section [COMPLÉMENT D’ACTUALITÉS] et de leur corroboration presse, sans répéter un sujet déjà traité par HugoDécrypte sauf absence d’autre dépêche.',
+      '- "categories" : 1 à 2 objets par rubrique (un objet par dépêche), dans l’ordre ci-dessus, uniquement à partir des dépêches de la section [COMPLÉMENT D’ACTUALITÉS] et de leur corroboration presse, sans répéter un sujet déjà traité par HugoDécrypte sauf absence d’autre dépêche.',
       '  Champs : "categoryName" (libellé exact), "headline" (titre précis), "summary" (2 à 3 phrases).',
       '  Rubrique Culture & Savoir : une découverte scientifique ou historique, un film ou un livre expliqué concrètement (jamais le terme abstrait "médias").',
       '  Rubrique Faits divers : délit, crime, enquête ou accident marquant avec ville exacte et motif.'
@@ -642,7 +689,7 @@ const GeminiService = (() => {
       const target = Config.resolveNewsCategoryName(Utils.sanitizeText(rawCat.categoryName));
       const headline = Utils.sanitizeText(rawCat.headline);
       const summary = Utils.sanitizeText(rawCat.summary);
-      if (target && headline && summary) buckets[target].push({ headline, summary });
+      if (target && headline && summary && buckets[target].length < 2) buckets[target].push({ headline, summary });
     }
 
     const categories = [];
