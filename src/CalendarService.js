@@ -22,6 +22,9 @@ const CalendarService = (() => {
    */
   const nativeKey = (iCalUID, startMs) => `${iCalUID}|${startMs}`;
 
+  /** Longueur maximale de la description d'un créneau affichée dans le planning. */
+  const MAX_DESCRIPTION_LENGTH = 160;
+
   /**
    * Liens de visioconférence natifs (Google Meet ajouté via le bouton de l'agenda, ou tout
    * outil intégré via conferenceData), lus en UN seul appel au service avancé Calendar.
@@ -104,6 +107,16 @@ const CalendarService = (() => {
     const diffMinutes = Math.round((endTime.getTime() - startTime.getTime()) / 60000);
     const conferenceLink = findNativeLink(event, nativeLinks) || extractConferenceLink(event);
     const location = Utils.sanitizeText(event.getLocation() || '');
+    let description = '';
+    try {
+      description = Utils.sanitizeText(Utils.stripMarkup(event.getDescription() || ''))
+        .replace(/https?:\/\/\S+/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    } catch {}
+    if (description.length > MAX_DESCRIPTION_LENGTH) {
+      description = `${description.slice(0, MAX_DESCRIPTION_LENGTH).replace(/\s+\S*$/, '')}…`;
+    }
     let isRecurring = false;
     try {
       isRecurring = event.isRecurringEvent();
@@ -119,6 +132,7 @@ const CalendarService = (() => {
       timeFormatted: isAllDay ? 'Toute la journée' : `${Utils.formatTime(startTime)} - ${Utils.formatTime(endTime)}`,
       durationFormatted: isAllDay ? '' : Utils.formatDuration(diffMinutes),
       location,
+      description,
       isPhysical: Boolean(location && !conferenceLink && !/https?:\/\//i.test(location)),
       conferenceLink,
       calendarUrl: Utils.buildCalendarUrl(startTime)

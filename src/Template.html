@@ -61,25 +61,48 @@
     <? } ?>
 
     <!-- 1 bis. OFFRES D'EMPLOI DU JOUR (COMPTABILITÉ / FINANCE EN SUISSE EN PREMIER) -->
-    <? if (data.jobOffers && data.jobOffers.items.length > 0) { ?>
+    <? if (data.jobOffers && (data.jobOffers.items.length > 0 || data.jobOffers.otherEmails.length > 0)) { ?>
     <div style="margin-bottom: 20px;">
-      <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 10px;">
+      <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 4px;">
         Offres d'emploi du jour
+      </div>
+      <? if (data.jobOffers.items.length > 0) { ?>
+      <div style="font-size: 12px; color: #6B7280; margin-bottom: 10px;">
+        « Voir l’offre » ouvre l’annonce sur le site d’emploi ; « Voir l’e-mail » ouvre l’alerte reçue dans Gmail.
       </div>
       <ul style="margin: 0; padding-left: 20px; list-style-type: disc;">
         <? for (var jo = 0; jo < data.jobOffers.items.length; jo++) {
              var offer = data.jobOffers.items[jo];
         ?>
-        <li style="margin-bottom: 8px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
-          <a href="<?= offer.url ?>" target="_blank" rel="noopener noreferrer" style="color: #1D4ED8; font-weight: 700; text-decoration: none;"><?= offer.title ?></a><? if (offer.company) { ?> &mdash; <?= offer.company ?><? } ?><? if (offer.location) { ?> <span style="color: #6B7280;">(<?= offer.location ?>)</span><? } ?>
+        <li style="margin-bottom: 10px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
+          <strong><?= offer.title ?></strong><? if (offer.company) { ?> &mdash; <?= offer.company ?><? } ?><? if (offer.location) { ?> <span style="color: #6B7280;">(<?= offer.location ?>)</span><? } ?>
           <? if (offer.matchesProfile) { ?><span style="display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-left: 4px; background-color: #ECFDF5; color: #047857; border: 1px solid #A7F3D0;">Correspond à votre recherche</span><? } ?>
           <span style="color: #9CA3AF; font-size: 11.5px;"> &bull; via <?= offer.source ?></span>
+          <div style="margin-top: 4px;">
+            <? if (offer.directUrl) { ?><a href="<?= offer.directUrl ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 4px 8px; background-color: #ECFDF5; color: #047857; border: 1px solid #A7F3D0; border-radius: 4px; text-decoration: none; font-size: 11.5px; font-weight: 600; margin-right: 6px; white-space: nowrap;">Voir l’offre</a><? } ?><a href="<?= offer.emailUrl ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 4px 8px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-size: 11.5px; font-weight: 600; white-space: nowrap;">Voir l’e-mail</a>
+          </div>
         </li>
         <? } ?>
         <? if (data.jobOffers.extraCount > 0) { ?>
         <li style="font-size: 12.5px; color: #6B7280;">et <?= data.jobOffers.extraCount ?> autre(s) offre(s) dans vos alertes emploi</li>
         <? } ?>
       </ul>
+      <? } ?>
+      <? if (data.jobOffers.otherEmails.length > 0) { ?>
+      <div style="font-size: 13px; font-weight: 700; color: #374151; margin: 12px 0 6px 0;">
+        Autres e-mails liés à l’emploi :
+      </div>
+      <ul style="margin: 0; padding-left: 20px; list-style-type: circle;">
+        <? for (var je = 0; je < data.jobOffers.otherEmails.length; je++) {
+             var jItem = data.jobOffers.otherEmails[je];
+        ?>
+        <li style="margin-bottom: 8px; font-size: 13.5px; line-height: 1.5; color: #374151;">
+          <strong><?= jItem.sender ?></strong><? if (jItem.account) { ?><span style="display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-left: 4px; background-color: <?= jItem.account.bg ?>; color: <?= jItem.account.color ?>; border: 1px solid <?= jItem.account.border ?>;"><?= jItem.account.label ?></span><? } ?><strong> :</strong> <?!= Utils.formatSummaryHtml(jItem.summary) ?>
+          <a href="<?= jItem.webUrl ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 4px 8px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-size: 11.5px; font-weight: 600; margin-left: 6px; white-space: nowrap; vertical-align: middle;">Détails</a>
+        </li>
+        <? } ?>
+      </ul>
+      <? } ?>
     </div>
     <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
     <? } ?>
@@ -145,40 +168,45 @@
         Au planning du jour
       </div>
       <? if (data.routine) { ?>
-      <div style="font-size: 13px; color: #4B5563; margin: 0 0 10px 0; padding: 8px 12px; background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px;">
-        <strong>Journée type habituelle :</strong> <?= data.routine.count ?> créneaux<? if (data.routine.start) { ?> de <?= data.routine.start ?> à <?= data.routine.end ?><? } ?>
-        <span style="color: #6B7280;">(<?= data.routine.preview ?>)</span>
+      <div style="font-size: 12.5px; color: #4B5563; margin: 0 0 10px 0; padding: 8px 12px; background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px;">
+        <strong>Journée type :</strong> <?= data.routine.count ?> créneaux<? if (data.routine.start) { ?> de <?= data.routine.start ?> à <?= data.routine.end ?><? } ?>.
+        <?= data.todaySpecialCount > 0 ? data.todaySpecialCount + ' rendez-vous en dehors de votre journée type (en couleur ci-dessous).' : 'Aucun rendez-vous en dehors de votre journée type.' ?>
       </div>
       <? } ?>
       <? if (!data.todayEvents || data.todayEvents.length === 0) { ?>
       <div style="font-size: 13.5px; color: #6B7280; margin-left: 10px;">
-        <?= data.routine ? 'Aucun rendez-vous particulier en dehors de votre journée type.' : 'Aucun rendez-vous programmé aujourd’hui.' ?>
+        Aucun rendez-vous programmé aujourd’hui.
       </div>
       <? } else { ?>
-      <ul style="margin: 0; padding-left: 20px; list-style-type: disc;">
-        <? for (var t = 0; t < data.todayEvents.length; t++) { 
+      <table cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse: collapse;">
+        <? for (var t = 0; t < data.todayEvents.length; t++) {
              var ev = data.todayEvents[t];
         ?>
-        <li style="margin-bottom: 10px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
-          <strong><?= ev.timeFormatted ?> : <?= ev.title ?></strong><? if (ev.durationFormatted) { ?> <span style="color: #6B7280; font-size: 12.5px;">(<?= ev.durationFormatted ?>)</span><? } ?>
-          <a href="<?= ev.calendarUrl ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 4px 8px; background-color: #F3F4F6; color: #374151; border: 1px solid #E5E7EB; border-radius: 4px; text-decoration: none; font-size: 11.5px; font-weight: 600; margin-left: 6px; white-space: nowrap; vertical-align: middle;">Agenda</a>
-
-          <? if (ev.location || ev.conferenceLink) { ?>
-          <ul style="margin: 6px 0 0 0; padding-left: 20px; list-style-type: circle;">
+        <tr>
+          <td style="width: 92px; vertical-align: top; padding: 6px 8px 6px 0; font-size: 12px; color: <?= ev.highlight ? '#1D4ED8' : '#6B7280' ?>; font-weight: <?= ev.highlight ? '700' : '500' ?>; white-space: nowrap; border-bottom: 1px solid #F3F4F6;">
+            <?= ev.isAllDay ? 'Toute la journée' : ev.startFormatted + ' – ' + ev.endFormatted ?>
+          </td>
+          <td style="vertical-align: top; padding: 6px 0; font-size: 13.5px; line-height: 1.45; color: #1F2937; border-bottom: 1px solid #F3F4F6;<? if (ev.highlight) { ?> background-color: #EFF6FF;<? } ?>">
+            <? if (ev.strong) { ?><strong><?= ev.title ?></strong><? } else { ?><?= ev.title ?><? } ?><? if (ev.durationFormatted) { ?> <span style="color: #9CA3AF; font-size: 11.5px;">(<?= ev.durationFormatted ?>)</span><? } ?><? if (ev.highlight) { ?> <span style="display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-left: 4px; background-color: #DBEAFE; color: #1D4ED8; border: 1px solid #BFDBFE;">Rendez-vous</span><? } ?>
+            <? if (ev.description) { ?>
+            <div style="font-size: 12px; color: #6B7280; margin-top: 2px;"><?= ev.description ?></div>
+            <? } ?>
             <? if (ev.location) { ?>
-            <li style="font-size: 12.5px; color: #4B5563; margin-bottom: 4px;">Lieu : <?= ev.location ?></li>
+            <div style="font-size: 12px; color: #4B5563; margin-top: 2px;">Lieu : <?= ev.location ?></div>
             <? } ?>
             <? if (ev.conferenceLink) { ?>
-            <li style="font-size: 12.5px; color: #047857;">
+            <div style="font-size: 12px; color: #047857; margin-top: 4px;">
               Visioconférence :
-              <a href="<?= ev.conferenceLink ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 4px 8px; background-color: #ECFDF5; color: #047857; border: 1px solid #A7F3D0; border-radius: 4px; text-decoration: none; font-size: 11.5px; font-weight: 600; margin-left: 4px; white-space: nowrap; vertical-align: middle;">Rejoindre la réunion</a>
-            </li>
+              <a href="<?= ev.conferenceLink ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 3px 8px; background-color: #ECFDF5; color: #047857; border: 1px solid #A7F3D0; border-radius: 4px; text-decoration: none; font-size: 11.5px; font-weight: 600; margin-left: 4px; white-space: nowrap; vertical-align: middle;">Rejoindre la réunion</a>
+            </div>
             <? } ?>
-          </ul>
-          <? } ?>
-        </li>
+          </td>
+        </tr>
         <? } ?>
-      </ul>
+      </table>
+      <div style="margin-top: 8px;">
+        <a href="<?= data.calendarUrl ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 4px 8px; background-color: #F3F4F6; color: #374151; border: 1px solid #E5E7EB; border-radius: 4px; text-decoration: none; font-size: 11.5px; font-weight: 600;">Ouvrir l’agenda du jour</a>
+      </div>
       <? } ?>
 
       <? if ((!data.tomorrowEvents || data.tomorrowEvents.length === 0) && data.tomorrowRoutineCount > 0) { ?>
@@ -215,6 +243,11 @@
       <div style="font-size: 13.5px; line-height: 1.6; color: #374151; padding: 12px 16px; background-color: #F8FAFC; border-radius: 8px; border: 1px solid #E2E8F0;">
         <?!= data.weatherAdviceHtml ?>
       </div>
+      <? if (data.weatherLocationNote) { ?>
+      <div style="font-size: 11.5px; color: #9CA3AF; margin-top: 6px;">
+        <?= data.weatherLocationNote ?>
+      </div>
+      <? } ?>
     </div>
     <? } ?>
 

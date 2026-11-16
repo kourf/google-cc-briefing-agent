@@ -105,6 +105,45 @@ const GmailService = (() => {
   };
 
   /**
+   * Objet d'un e-mail de position envoyé par l'utilisateur, ex. « Position : Genève ».
+   * Ces e-mails servent uniquement à régler la ville de la météo : ils ne sont pas résumés.
+   */
+  const POSITION_SUBJECT = /^\s*(?:ma\s+)?position\s*(?:[:：-]\s*|\s+)([^\d:\s].{1,39}?)\s*[.!]*\s*$/i;
+
+  /** Durée de validité d'une position déclarée (jours). */
+  const POSITION_MAX_AGE_DAYS = 60;
+
+  /**
+   * Dernière position déclarée par l'utilisateur : e-mail dont l'objet est « Position : Ville »,
+   * envoyé depuis l'un de ses comptes (Config.KNOWN_ACCOUNTS). Lecture seule, non bloquant.
+   *
+   * @returns {{city: string, date: Date}|null}
+   */
+  const findDeclaredPosition = () => {
+    try {
+      const own = Config.KNOWN_ACCOUNTS.map((a) => a.email.toLowerCase());
+      const threads = GmailApp.search(`subject:position newer_than:${POSITION_MAX_AGE_DAYS}d -in:trash -in:spam`, 0, 15) || [];
+      if (threads.length === 0) return null;
+      let best = null;
+      for (const messages of GmailApp.getMessagesForThreads(threads)) {
+        for (const msg of messages || []) {
+          const match = String(msg.getSubject() || '').match(POSITION_SUBJECT);
+          if (!match || !own.includes(senderAddress(msg.getFrom()))) continue;
+          const date = msg.getDate();
+          if (!best || date.getTime() > best.date.getTime()) {
+            best = { city: Utils.sanitizeText(match[1]).trim(), date };
+          }
+        }
+      }
+      if (best) console.log(`Position déclarée : ${best.city} (${best.date.toISOString()}).`);
+      return best && best.city.length >= 2 ? best : null;
+    } catch (error) {
+      console.warn(`Position déclarée illisible : ${error.message}`);
+      return null;
+    }
+  };
+
+  /**
    * Clé de regroupement d'une campagne (même expéditeur + début d'objet identique).
    * @param {Object} item
    * @returns {string}
@@ -149,6 +188,7 @@ const GmailService = (() => {
         const fromRaw = msg.getFrom() || '';
         const subjectRaw = msg.getSubject() || '(Sans objet)';
         if (fromRaw.includes('calendar-notification@google.com') || /agenda quotidien/i.test(subjectRaw)) continue;
+        if (POSITION_SUBJECT.test(subjectRaw)) continue; // réglage de la ville météo, pas un e-mail à résumer
 
         seenMessageIds.add(msgId);
         rawMessages.push({
@@ -222,6 +262,7 @@ const GmailService = (() => {
 
   return {
     fetchUnreadEmails,
-    countUnreadFromLast30Days
+    countUnreadFromLast30Days,
+    findDeclaredPosition
   };
 })();

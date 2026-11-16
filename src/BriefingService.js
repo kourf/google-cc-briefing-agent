@@ -76,6 +76,7 @@ const BriefingService = (() => {
     const grouped = {};
     const seenGrouped = new Set();
     const rawOffers = [];
+    const jobEmails = [];
     const lowPriorityBySender = new Map();
 
     for (const email of emails) {
@@ -114,11 +115,28 @@ const BriefingService = (() => {
 
       const category = EmailClassifier.resolveCategory(email);
 
-      // 2. Offres d'emploi : section dédiée en tête (l'e-mail n'est pas répété plus bas).
+      // 2. Emploi : une seule section en tête. Les offres y sont listées une par une ; les autres
+      //    e-mails emploi (newsletters, alertes sans offre lisible) y figurent aussi, jamais en double plus bas.
       if (category === Config.EMAIL_CATEGORY.JOBS || EmailClassifier.isJobPlatform(email)) {
         const offers = offersFromEmail(email);
         if (offers.length > 0) {
-          offers.forEach((o) => rawOffers.push(Object.assign({}, o, { source: email.senderName, account: accountBadge(email) })));
+          offers.forEach((o) => {
+            const url = String(o.url || '');
+            const isDirect = /^https?:\/\//i.test(url) && url !== email.webUrl && !/(?:mail|accounts)\.google\.com/i.test(url);
+            rawOffers.push(Object.assign({}, o, {
+              source: email.senderName,
+              account: accountBadge(email),
+              directUrl: isDirect ? url : '',
+              emailUrl: webUrl
+            }));
+          });
+          continue;
+        }
+        if (category === Config.EMAIL_CATEGORY.JOBS) {
+          const jobKey = `${sender.toLowerCase()}::${Utils.normalizeSubject(subject)}`;
+          if (seenGrouped.has(jobKey)) continue;
+          seenGrouped.add(jobKey);
+          jobEmails.push({ sender, summary: Utils.sanitizeText(email.summary), account: accountBadge(email), webUrl });
           continue;
         }
       }
@@ -150,7 +168,7 @@ const BriefingService = (() => {
     const lowSenders = [...lowPriorityBySender.values()].sort((a, b) => b.count - a.count);
     return {
       urgentItems,
-      jobOffers: rankJobOffers(rawOffers),
+      jobOffers: Object.assign(rankJobOffers(rawOffers), { otherEmails: jobEmails }),
       sortedInfoGroups,
       lowPriority: { total: lowSenders.reduce((n, s) => n + s.count, 0), senders: lowSenders }
     };
@@ -247,8 +265,8 @@ const BriefingService = (() => {
   const MIN_ROUTINE_TO_COMPACT = 3;
 
   /**
-   * Agenda allégé : la journée type (créneaux qui reviennent chaque jour) tient en une ligne,
-   * seuls les rendez-vous inhabituels sont détaillés (aujourd'hui et demain).
+   * Agenda du jour détaillé créneau par créneau (journée type comprise). Les rendez-vous
+   * inhabituels sont mis en avant ; pour demain, seuls les rendez-vous inhabituels sont listés.
    *
    * @param {Object} agenda - { todayEvents, tomorrowEvents } (événements marqués isRoutine).
    * @returns {Object}
@@ -263,14 +281,18 @@ const BriefingService = (() => {
     const tomorrow = split(agenda.tomorrowEvents || []);
     const timed = today.routine.filter((e) => !e.isAllDay);
     const max = Config.DEFAULTS.MAX_TOMORROW_EVENTS;
+    const routineMode = today.routine.length > 0;
     return {
-      todaySpecial: today.special,
-      routine: today.routine.length > 0
+      // Tous les créneaux du jour, dans l'ordre ; « highlight » = rendez-vous en dehors de la journée type.
+      todayAll: (agenda.todayEvents || []).map((e) =>
+        Object.assign({}, e, { highlight: routineMode && !e.isRoutine, strong: !routineMode || !e.isRoutine })
+      ),
+      todaySpecialCount: today.special.length,
+      routine: routineMode
         ? {
             count: today.routine.length,
             start: timed.length ? timed[0].startFormatted : '',
-            end: timed.length ? timed[timed.length - 1].endFormatted : '',
-            preview: today.routine.slice(0, 5).map((e) => e.title).join(', ') + (today.routine.length > 5 ? '…' : '')
+            end: timed.length ? timed[timed.length - 1].endFormatted : ''
           }
         : null,
       tomorrowSpecial: tomorrow.special.slice(0, max),
@@ -339,7 +361,9 @@ const BriefingService = (() => {
       sortedInfoGroups,
       lowPriority,
       unsubscribeSuggestions,
-      todayEvents: agendaView.todaySpecial,
+      todayEvents: agendaView.todayAll,
+      todaySpecialCount: agendaView.todaySpecialCount,
+      calendarUrl: Utils.buildCalendarUrl(now),
       routine: agendaView.routine,
       tomorrowEvents: agendaView.tomorrowSpecial,
       tomorrowExtraCount: agendaView.tomorrowExtraCount,
@@ -348,6 +372,7 @@ const BriefingService = (() => {
       isCalm: stats.totalEmails === 0 && stats.todayEventsCount === 0,
       weatherAdviceHtml: weather ? weather.html : null,
       weatherAdviceText: weather ? weather.text : null,
+      weatherLocationNote: weather ? weather.locationNote : null,
       newsDigest,
       devOpsReport
     };
@@ -406,14 +431,22 @@ const BriefingService = (() => {
       lines.push('');
     }
 
-    if (data.jobOffers.items.length > 0) {
+    if (data.jobOffers.items.length > 0 || data.jobOffers.otherEmails.length > 0) {
       lines.push('=== OFFRES D’EMPLOI DU JOUR ===');
       for (const o of data.jobOffers.items) {
         const where = o.location ? ` (${o.location})` : '';
         const match = o.matchesProfile ? ' [correspond à votre recherche]' : '';
-        lines.push(`• ${o.title}${o.company ? ` — ${o.company}` : ''}${where}${match} — via ${o.source} — ${o.url}`);
+        lines.push(`• ${o.title}${o.company ? ` — ${o.company}` : ''}${where}${match} — via ${o.source}`);
+        if (o.directUrl) lines.push(`  Voir l’offre : ${o.directUrl}`);
+        lines.push(`  Voir l’e-mail : ${o.emailUrl}`);
       }
       if (data.jobOffers.extraCount > 0) lines.push(`• et ${data.jobOffers.extraCount} autre(s) offre(s) dans vos alertes emploi`);
+      if (data.jobOffers.otherEmails.length > 0) {
+        lines.push('Autres e-mails liés à l’emploi :');
+        for (const it of data.jobOffers.otherEmails) {
+          lines.push(`  - ${it.sender}${badge(it)} : ${md(it.summary)} — ${it.webUrl}`);
+        }
+      }
       lines.push('');
     }
 
@@ -439,15 +472,20 @@ const BriefingService = (() => {
     lines.push('=== AU PLANNING DU JOUR ===');
     if (data.routine) {
       const span = data.routine.start ? ` de ${data.routine.start} à ${data.routine.end}` : '';
-      lines.push(`Journée type habituelle : ${data.routine.count} créneaux${span} (${data.routine.preview})`);
+      const special = data.todaySpecialCount > 0
+        ? `${data.todaySpecialCount} rendez-vous en dehors de votre journée type (marqués « RDV »).`
+        : 'Aucun rendez-vous en dehors de votre journée type.';
+      lines.push(`Journée type : ${data.routine.count} créneaux${span}. ${special}`);
     }
-    if (data.todayEvents.length === 0) {
-      lines.push(data.routine ? 'Aucun rendez-vous particulier en dehors de votre journée type.' : 'Aucun rendez-vous programmé aujourd’hui.');
-    }
+    if (data.todayEvents.length === 0) lines.push('Aucun rendez-vous programmé aujourd’hui.');
     for (const ev of data.todayEvents) {
-      lines.push(`• ${ev.timeFormatted} : ${ev.title}${ev.location ? ` (${ev.location})` : ''}`);
+      const duration = ev.durationFormatted ? ` (${ev.durationFormatted})` : '';
+      lines.push(`• ${ev.timeFormatted} : ${ev.highlight ? '[RDV] ' : ''}${ev.title}${duration}`);
+      if (ev.description) lines.push(`  ${ev.description}`);
+      if (ev.location) lines.push(`  Lieu : ${ev.location}`);
       if (ev.conferenceLink) lines.push(`  Visioconférence : ${ev.conferenceLink}`);
     }
+    if (data.todayEvents.length > 0) lines.push(`Agenda du jour : ${data.calendarUrl}`);
     if (data.tomorrowEvents.length > 0) {
       lines.push('À anticiper demain :');
       for (const ev of data.tomorrowEvents) {
@@ -460,7 +498,9 @@ const BriefingService = (() => {
     lines.push('');
 
     if (data.weatherAdviceText) {
-      lines.push('=== MÉTÉO & CONSEIL VESTIMENTAIRE ===', data.weatherAdviceText, '');
+      lines.push('=== MÉTÉO & CONSEIL VESTIMENTAIRE ===', data.weatherAdviceText);
+      if (data.weatherLocationNote) lines.push(data.weatherLocationNote);
+      lines.push('');
     }
 
     if (data.newsDigest) {

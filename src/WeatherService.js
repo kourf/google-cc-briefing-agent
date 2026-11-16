@@ -99,8 +99,8 @@ const WeatherService = (() => {
   };
 
   /**
-   * Relevé météo structuré du jour. Si la ville de l'agenda est introuvable,
-   * repli automatique sur la ville par défaut (Annemasse).
+   * Relevé météo structuré du jour : ville de l'agenda, sinon dernière position envoyée par e-mail
+   * (« Position : Ville »), sinon ville par défaut (Annemasse).
    *
    * @param {Array<Object>} todayEvents
    * @returns {{city: string, minC: string, maxC: string, periods: Array<Object>}|null}
@@ -108,9 +108,17 @@ const WeatherService = (() => {
   const getWeatherReport = (todayEvents) => {
     const baseCity = Config.DEFAULTS.WEATHER_BASE_LOCATION;
     const agendaCity = detectCityFromAgenda(todayEvents);
-    const candidates = [...new Set([agendaCity ? toTitleCase(agendaCity) : null, baseCity].filter(Boolean))];
+    const declared = GmailService.findDeclaredPosition();
+    // Priorité : déplacement de l'agenda du jour > position envoyée par e-mail > ville par défaut.
+    const candidates = [];
+    const addCandidate = (city, source) => {
+      if (city && !candidates.some((c) => c.city.toLowerCase() === city.toLowerCase())) candidates.push({ city, source });
+    };
+    addCandidate(agendaCity ? toTitleCase(agendaCity) : null, 'agenda');
+    addCandidate(declared ? toTitleCase(declared.city) : null, 'position');
+    addCandidate(baseCity, 'default');
 
-    for (const city of candidates) {
+    for (const { city, source } of candidates) {
       const data = fetchWeather(city);
       const today = data && data.weather && data.weather[0];
       const hourly = today && today.hourly;
@@ -125,8 +133,15 @@ const WeatherService = (() => {
           : null;
       }).filter(Boolean);
       if (periods.length === 0) continue;
-      console.log(`Météo : ville retenue ${city}.`);
-      return { city, minC: today.mintempC, maxC: today.maxtempC, periods };
+      console.log(`Météo : ville retenue ${city} (${source}).`);
+      return {
+        city,
+        source,
+        positionDate: source === 'position' && declared ? declared.date : null,
+        minC: today.mintempC,
+        maxC: today.maxtempC,
+        periods
+      };
     }
     return null;
   };
@@ -240,8 +255,24 @@ const WeatherService = (() => {
       city: report.city,
       html,
       text: htmlToPlain(html),
+      locationNote: buildLocationNote(report),
       aiGenerated: Boolean(aiText)
     };
+  };
+
+  /**
+   * Phrase expliquant d'où vient la ville de la météo et comment la changer.
+   * @param {Object} report
+   * @returns {string}
+   */
+  const buildLocationNote = (report) => {
+    const howTo = 'Pour changer de ville, envoyez-vous un e-mail avec pour objet « Position : Ville » (ex. « Position : Genève »).';
+    if (report.source === 'agenda') return `Ville trouvée dans votre agenda du jour. ${howTo}`;
+    if (report.source === 'position') {
+      const when = report.positionDate ? Utilities.formatDate(report.positionDate, Config.DEFAULTS.TIMEZONE, 'dd/MM') : '';
+      return `Position que vous avez envoyée${when ? ` le ${when}` : ''}. ${howTo}`;
+    }
+    return `Ville par défaut. ${howTo}`;
   };
 
   return {

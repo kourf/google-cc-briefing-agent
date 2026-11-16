@@ -468,8 +468,13 @@ const Utils = (() => {
    * @returns {string}
    */
   const buildGmailUrl = (threadId) => {
-    if (!threadId) return 'https://mail.google.com/mail/u/0/#inbox';
-    return `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(String(threadId).trim())}`;
+    const target = threadId
+      ? `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(String(threadId).trim())}`
+      : 'https://mail.google.com/mail/u/0/#inbox';
+    // Gmail ouvre ses propres liens (mail.google.com) dans l'onglet courant, ce qui fait disparaître
+    // le briefing. En passant par la page de connexion Google (redirection immédiate si la session
+    // est ouverte), le lien est traité comme externe et s'ouvre dans un nouvel onglet.
+    return `https://accounts.google.com/ServiceLogin?service=mail&passive=true&continue=${encodeURIComponent(target)}`;
   };
 
   /**
