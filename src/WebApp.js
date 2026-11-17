@@ -65,7 +65,12 @@ const EmailDetailsPage = (() => {
         body = Utils.stripMarkup(msg.getBody() || '');
       } catch {}
     }
-    body = body.replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    body = body
+      .replace(/<\/?(?:a|span|b|strong|i|em|u|font)\b[^>]*>/gi, '') // balises HTML laissées dans la version texte
+      .replace(/\r/g, '')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
     return body.length > MAX_BODY_CHARS ? `${body.slice(0, MAX_BODY_CHARS)}\n\n[… texte coupé, ouvrez le mail dans Gmail pour la suite]` : body;
   };
 
