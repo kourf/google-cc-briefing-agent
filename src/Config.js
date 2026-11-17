@@ -66,6 +66,10 @@ const Config = (() => {
     MAX_LOOKBACK_HOURS: 48,
     MAX_TOMORROW_EVENTS: 5,
 
+    // Page « Détails » d'un e-mail (WebApp.js). Adresse /dev du déploiement @HEAD : toujours à jour
+    // avec le code poussé par clasp, et accessible uniquement au propriétaire du script (connexion Google).
+    DETAILS_PAGE_URL: 'https://script.google.com/macros/s/AKfycbzOU23ZJ5rFS7ZkI1fcdY0CurIlMd0MIDJBL_W3yyTu/dev',
+
     // Sections optionnelles
     WEATHER_BASE_LOCATION: 'Annemasse',
     WEATHER_ENABLED: true,

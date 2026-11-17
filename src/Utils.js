@@ -478,6 +478,20 @@ const Utils = (() => {
   };
 
   /**
+   * Lien « Détails » d'un e-mail : page privée de l'assistant (WebApp.js) qui affiche le mail
+   * complet, sur téléphone comme sur ordinateur (l'appli Gmail ignore les liens vers un mail précis).
+   * Repli sur le lien Gmail si la page n'est pas configurée.
+   *
+   * @param {string} threadId
+   * @returns {string}
+   */
+  const buildEmailDetailsUrl = (threadId) => {
+    const base = Config.DEFAULTS.DETAILS_PAGE_URL;
+    if (!base || !threadId) return buildGmailUrl(threadId);
+    return `${base}?id=${encodeURIComponent(String(threadId).trim())}`;
+  };
+
+  /**
    * URL de la vue « jour » de Google Calendar (évite les erreurs HTTP 500 des identifiants bruts).
    * @param {Date} date - Date de l'événement.
    * @returns {string}
@@ -594,6 +608,7 @@ const Utils = (() => {
     fetchUrlsSafely,
     okText,
     buildGmailUrl,
+    buildEmailDetailsUrl,
     buildCalendarUrl,
     formatDateFrench,
     formatTime,

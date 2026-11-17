@@ -15,6 +15,10 @@
     ]
   },
   "exceptionLogging": "STACKDRIVER",
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "MYSELF"
+  },
   "runtimeVersion": "V8",
   "oauthScopes": [
     "https://www.googleapis.com/auth/gmail.readonly",

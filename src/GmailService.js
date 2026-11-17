@@ -173,7 +173,7 @@ const GmailService = (() => {
           timestampSec,
           timeFormatted: Utils.formatTime(msgDate),
           dateFormatted: Utils.formatDateFrench(msgDate),
-          webUrl: Utils.buildGmailUrl(threadId),
+          webUrl: Utils.buildEmailDetailsUrl(threadId),
           msgObj: msg
         });
       }

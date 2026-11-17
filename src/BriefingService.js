@@ -82,7 +82,7 @@ const BriefingService = (() => {
     for (const email of emails) {
       const sender = Utils.sanitizeText(email.senderDisplayName || email.senderName);
       const subject = Utils.sanitizeText(email.subject);
-      const webUrl = email.webUrl || Utils.buildGmailUrl(email.threadId);
+      const webUrl = email.webUrl || Utils.buildEmailDetailsUrl(email.threadId);
 
       // 1. Alertes Google liées à votre propre assistant : simple information, jamais une action.
       if (EmailClassifier.isOwnAssistantAlert(email)) {
@@ -122,7 +122,7 @@ const BriefingService = (() => {
         if (offers.length > 0) {
           offers.forEach((o) => {
             const url = String(o.url || '');
-            const isDirect = /^https?:\/\//i.test(url) && url !== email.webUrl && !/(?:mail|accounts)\.google\.com/i.test(url);
+            const isDirect = /^https?:\/\//i.test(url) && url !== email.webUrl && !/(?:mail|accounts|script)\.google\.com/i.test(url);
             rawOffers.push(Object.assign({}, o, {
               source: email.senderName,
               account: accountBadge(email),
