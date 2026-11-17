@@ -65,21 +65,6 @@ const GmailService = (() => {
   };
 
   /**
-   * Lien https de désinscription (en-tête List-Unsubscribe), s'il existe.
-   * @param {GoogleAppsScript.Gmail.GmailMessage} msg
-   * @returns {string}
-   */
-  const readUnsubscribeUrl = (msg) => {
-    try {
-      const header = msg.getHeader('List-Unsubscribe') || '';
-      const https = header.match(/<(https:\/\/[^>]+)>/i);
-      return https ? https[1] : '';
-    } catch {
-      return '';
-    }
-  };
-
-  /**
    * Adresse e-mail de l'expéditeur (ex. "news@twistshake.com").
    * @param {string} fromRaw
    * @returns {string}
@@ -89,20 +74,6 @@ const GmailService = (() => {
     return m ? m[1].toLowerCase() : '';
   };
 
-  /**
-   * Nombre d'e-mails non lus reçus d'un expéditeur sur 30 jours (plafonné à 20).
-   * @param {string} address
-   * @returns {number}
-   */
-  const countUnreadFromLast30Days = (address) => {
-    if (!address) return 0;
-    try {
-      return GmailApp.search(`from:${address} is:unread newer_than:30d`, 0, 20).length;
-    } catch (error) {
-      console.warn(`Comptage des non-lus impossible pour ${address} : ${error.message}`);
-      return 0;
-    }
-  };
 
   /**
    * Objet d'un e-mail de position envoyé par l'utilisateur, ex. « Position : Genève ».
@@ -250,7 +221,6 @@ const GmailService = (() => {
       item.body = Utils.cleanEmailBody(plainBody.trim().length >= 25 ? plainBody : '', rawHtml);
       item.account = detectAccount(msg);
       item.senderEmail = senderAddress(item.from);
-      item.unsubscribeUrl = readUnsubscribeUrl(msg);
       item.jobLinks = jobPlatform ? extractJobLinks(rawHtml) : [];
       delete item.distinctSubjects;
       delete item.msgObj;
@@ -262,7 +232,6 @@ const GmailService = (() => {
 
   return {
     fetchUnreadEmails,
-    countUnreadFromLast30Days,
     findDeclaredPosition
   };
 })();

@@ -175,31 +175,6 @@ const BriefingService = (() => {
   };
 
   /**
-   * Désabonnements suggérés : expéditeurs de notifications sans importance qui proposent un lien
-   * de désinscription et accumulent des e-mails non lus sur 30 jours. Aucun clic automatique.
-   *
-   * @param {Array<Object>} emails
-   * @returns {Array<{name: string, unread: number, url: string}>}
-   */
-  const buildUnsubscribeSuggestions = (emails) => {
-    const candidates = new Map();
-    for (const email of emails) {
-      if (!email.unsubscribeUrl || !email.senderEmail || candidates.has(email.senderEmail)) continue;
-      if (EmailClassifier.isJobPlatform(email)) continue;
-      if (!Config.LOW_PRIORITY_EMAIL_CATEGORIES.includes(EmailClassifier.resolveCategory(email))) continue;
-      candidates.set(email.senderEmail, { name: Utils.sanitizeText(email.senderName), url: email.unsubscribeUrl });
-    }
-
-    const suggestions = [];
-    for (const [address, info] of [...candidates.entries()].slice(0, 8)) {
-      if (!Utils.hasTimeFor(Config.DEFAULTS.SEND_RESERVE_MS + 15000)) break;
-      const unread = GmailService.countUnreadFromLast30Days(address);
-      if (unread >= Config.UNSUBSCRIBE_MIN_UNREAD_30D) suggestions.push(Object.assign({ unread }, info));
-    }
-    return suggestions.sort((a, b) => b.unread - a.unread).slice(0, Config.UNSUBSCRIBE_MAX_SUGGESTIONS);
-  };
-
-  /**
    * Section météo (jamais bloquante).
    * @param {Array<Object>} todayEvents
    * @returns {Object|null}
@@ -336,13 +311,6 @@ const BriefingService = (() => {
     const weather = buildWeather(todayEvents);
     const newsDigest = buildNews();
 
-    let unsubscribeSuggestions = [];
-    try {
-      unsubscribeSuggestions = buildUnsubscribeSuggestions(emails);
-    } catch (e) {
-      console.warn(`Suggestions de désabonnement : ${e.message}`);
-    }
-
     let devOpsReport = null;
     try {
       devOpsReport = DevOpsAgentService.generateEngineerReport();
@@ -360,7 +328,6 @@ const BriefingService = (() => {
       jobOffers,
       sortedInfoGroups,
       lowPriority,
-      unsubscribeSuggestions,
       todayEvents: agendaView.todayAll,
       todaySpecialCount: agendaView.todaySpecialCount,
       calendarUrl: Utils.buildCalendarUrl(now),
@@ -450,7 +417,7 @@ const BriefingService = (() => {
       lines.push('');
     }
 
-    if (data.sortedInfoGroups.length > 0 || data.lowPriority.total > 0 || data.unsubscribeSuggestions.length > 0) {
+    if (data.sortedInfoGroups.length > 0 || data.lowPriority.total > 0) {
       lines.push('=== POUR INFORMATION (RÉCAPITULATIF DES E-MAILS REÇUS NON LUS) ===');
       for (const group of data.sortedInfoGroups) {
         lines.push(`• ${group.name} :`);
@@ -461,10 +428,6 @@ const BriefingService = (() => {
       if (data.lowPriority.total > 0) {
         const senders = data.lowPriority.senders.map((s) => (s.count > 1 ? `${s.name} (${s.count})` : s.name)).join(', ');
         lines.push(`• ${data.lowPriority.total} notification(s) sans importance : ${senders}.`);
-      }
-      if (data.unsubscribeSuggestions.length > 0) {
-        lines.push('• Désabonnements suggérés (e-mails jamais lus ces 30 derniers jours) :');
-        for (const s of data.unsubscribeSuggestions) lines.push(`  - ${s.name} — ${s.unread} non lus — ${s.url}`);
       }
       lines.push('');
     }

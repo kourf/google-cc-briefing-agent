@@ -164,9 +164,6 @@ const Config = (() => {
     maxOffers: 10
   });
 
-  /** Seuil de suggestion de désabonnement : e-mails non lus du même expéditeur sur 30 jours. */
-  const UNSUBSCRIBE_MIN_UNREAD_30D = 3;
-  const UNSUBSCRIBE_MAX_SUGGESTIONS = 5;
 
   /**
    * Anciens libellés encore susceptibles d'apparaître (historique, prompts antérieurs).
@@ -371,8 +368,6 @@ const Config = (() => {
     EMAIL_CATEGORIES,
     LOW_PRIORITY_EMAIL_CATEGORIES,
     JOB_PROFILE,
-    UNSUBSCRIBE_MIN_UNREAD_30D,
-    UNSUBSCRIBE_MAX_SUGGESTIONS,
     NEWS_CATEGORIES,
     KNOWN_ACCOUNTS,
     getScriptProperty,
