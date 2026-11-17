@@ -79,7 +79,7 @@ const GmailService = (() => {
    * Objet d'un e-mail de position envoyé par l'utilisateur, ex. « Position : Genève ».
    * Ces e-mails servent uniquement à régler la ville de la météo : ils ne sont pas résumés.
    */
-  const POSITION_SUBJECT = /^\s*(?:ma\s+)?position\s*(?:[:：-]\s*|\s+)([^\d:\s].{1,39}?)\s*[.!]*\s*$/i;
+  const POSITION_SUBJECT = /^\s*(?:ma\s+)?position\s*(?:[:：-]\s*|\s+)([^:\s].{1,39}?)\s*[.!]*\s*$/i;
 
   /** Durée de validité d'une position déclarée (jours). */
   const POSITION_MAX_AGE_DAYS = 60;
@@ -102,7 +102,9 @@ const GmailService = (() => {
           if (!match || !own.includes(senderAddress(msg.getFrom()))) continue;
           const date = msg.getDate();
           if (!best || date.getTime() > best.date.getTime()) {
-            best = { city: Utils.sanitizeText(match[1]).trim(), date };
+            // Code postal retiré (« Evreux 27000 » ou « 27000 Evreux » -> « Evreux »).
+            const city = Utils.sanitizeText(match[1]).replace(/\b\d{4,5}\b/g, ' ').replace(/\s{2,}/g, ' ').replace(/^[\s,-]+|[\s,-]+$/g, '');
+            if (/\p{L}{2,}/u.test(city)) best = { city, date };
           }
         }
       }
