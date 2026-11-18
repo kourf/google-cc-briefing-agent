@@ -50,8 +50,42 @@ const EmailDetailsPage = (() => {
       })
       .replace(/\r?\n/g, '<br>');
 
+  /** Ligne de liste, de séparation ou de citation : jamais recollée à la précédente. */
+  const STANDALONE_LINE = /^(?:[-•*–>]\s|\d{1,2}[.)]\s|[-=_*~]{3,}|>)/;
+  /** Fin de ligne qui termine une phrase ou un intitulé. */
+  const LINE_END = /[.!?:;»)\]]$/;
+  /** Une ligne au moins aussi longue a été coupée automatiquement (coupure habituelle : 70 à 78 caractères). */
+  const WRAPPED_LINE = 60;
+  /** Ligne moyenne recollée seulement si la suivante continue la phrase (minuscule en tête). */
+  const MIN_WRAPPED_LINE = 45;
+
   /**
-   * Corps lisible d'un message (texte brut, lignes vides en trop retirées).
+   * Recolle les phrases coupées par le retour à la ligne automatique des e-mails « texte »
+   * (coupure tous les ~70 caractères), sans toucher aux listes, signatures et lignes courtes.
+   * @param {string} text
+   * @returns {string}
+   */
+  const reflowParagraphs = (text) => {
+    const out = [];
+    for (const line of String(text || '').split('\n')) {
+      const current = line.trim();
+      const prev = out.length > 0 ? out[out.length - 1] : '';
+      const canJoin =
+        current !== '' &&
+        prev.trim() !== '' &&
+        !STANDALONE_LINE.test(current) &&
+        !STANDALONE_LINE.test(prev.trim()) &&
+        !LINE_END.test(prev.trim()) &&
+        !/https?:\/\/\S+$/i.test(prev.trim()) &&
+        (prev.trim().length >= WRAPPED_LINE || (prev.trim().length >= MIN_WRAPPED_LINE && /^\p{Ll}/u.test(current)));
+      if (canJoin) out[out.length - 1] = `${prev.replace(/\s+$/, '')} ${current}`;
+      else out.push(line);
+    }
+    return out.join('\n');
+  };
+
+  /**
+   * Corps lisible d'un message : texte brut, restes techniques retirés, phrases recollées.
    * @param {GoogleAppsScript.Gmail.GmailMessage} msg
    * @returns {string}
    */
@@ -67,8 +101,14 @@ const EmailDetailsPage = (() => {
     }
     body = body
       .replace(/<\/?(?:a|span|b|strong|i|em|u|font)\b[^>]*>/gi, '') // balises HTML laissées dans la version texte
+      .replace(/\[image:[^\]]*\]/gi, '') // emplacements d'images (« [image: Google] »)
+      .replace(/<(https?:\/\/[^>\s]+)>/gi, ' $1') // liens entourés de chevrons
+      .replace(/ /g, ' ')
       .replace(/\r/g, '')
       .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n[ \t]+/g, '\n');
+    body = reflowParagraphs(body)
+      .replace(/[ \t]{2,}/g, ' ')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
     return body.length > MAX_BODY_CHARS ? `${body.slice(0, MAX_BODY_CHARS)}\n\n[… texte coupé, ouvrez le mail dans Gmail pour la suite]` : body;

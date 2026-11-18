@@ -117,6 +117,89 @@ const GmailService = (() => {
   };
 
   /**
+   * Organisme d'une adresse : domaine sans sous-domaine technique
+   * (« cio35236.qonto.com » -> « qonto.com », « dgfip.finances.gouv.fr » -> « finances.gouv.fr »).
+   * @param {string} address
+   * @returns {string}
+   */
+  const organisationOf = (address) => {
+    const domain = String(address || '').split('@')[1] || String(address || '');
+    const parts = domain.toLowerCase().split('.').filter(Boolean);
+    if (parts.length <= 2) return parts.join('.');
+    const keep = /^(?:gouv|co|com|org|net|ac|asso)$/.test(parts[parts.length - 2]) ? 3 : 2;
+    return parts.slice(-keep).join('.');
+  };
+
+  /**
+   * Dossiers urgents en cours : fils rangés sous le libellé Config.DEFAULTS.URGENT_LABEL,
+   * regroupés par organisme (huissier, Qonto, Urssaf, impôts…), du plus récent au plus ancien.
+   * Lecture seule, non bloquant.
+   *
+   * @returns {{label: string, total: number, files: Array<Object>, extraCount: number}|null}
+   */
+  const getUrgentFiles = () => {
+    const labelName = Config.DEFAULTS.URGENT_LABEL;
+    try {
+      const label = GmailApp.getUserLabelByName(labelName);
+      if (!label) {
+        console.log(`Dossiers urgents : libellé « ${labelName} » introuvable.`);
+        return null;
+      }
+      const threads = label.getThreads(0, 40) || [];
+      if (threads.length === 0) return { label: labelName, total: 0, files: [], extraCount: 0 };
+
+      const own = Config.KNOWN_ACCOUNTS.map((a) => a.email.toLowerCase());
+      const allMessages = GmailApp.getMessagesForThreads(threads);
+      const byOrganisation = new Map();
+      threads.forEach((thread, i) => {
+        const messages = allMessages[i] || [];
+        if (messages.length === 0) return;
+        // Expéditeur = dernier message reçu d'un tiers (pas une de vos réponses).
+        const external = messages.slice().reverse().find((m) => !own.includes(senderAddress(m.getFrom()))) || messages[messages.length - 1];
+        const address = senderAddress(external.getFrom());
+        const key = organisationOf(address) || Utils.cleanSenderName(external.getFrom()).toLowerCase();
+        const lastDate = thread.getLastMessageDate();
+        const entry = byOrganisation.get(key) || { sender: '', count: 0, unread: 0, lastDate: null, subject: '', threadId: '' };
+        entry.count += 1;
+        if (thread.isUnread()) entry.unread += 1;
+        if (!entry.lastDate || lastDate.getTime() > entry.lastDate.getTime()) {
+          entry.lastDate = lastDate;
+          entry.sender = Utils.cleanSenderName(external.getFrom()) || key;
+          entry.subject = Utils.sanitizeText(thread.getFirstMessageSubject() || '(Sans objet)');
+          entry.threadId = thread.getId();
+        }
+        byOrganisation.set(key, entry);
+      });
+
+      // Ancienneté en jours calendaires (fuseau du script) : « aujourd'hui », « hier », « il y a N jours ».
+      const tz = Config.DEFAULTS.TIMEZONE;
+      const dayNumber = (d) => Math.floor(Date.parse(`${Utilities.formatDate(d, tz, 'yyyy-MM-dd')}T00:00:00Z`) / 86400000);
+      const today = dayNumber(new Date());
+      const ageLabel = (d) => {
+        const days = Math.max(0, today - dayNumber(d));
+        return days === 0 ? 'aujourd’hui' : days === 1 ? 'hier' : `il y a ${days} jours`;
+      };
+      const files = [...byOrganisation.values()]
+        .sort((a, b) => b.lastDate.getTime() - a.lastDate.getTime())
+        .map((e) => ({
+          sender: e.sender,
+          count: e.count,
+          unread: e.unread,
+          subject: e.subject,
+          lastDateFormatted: Utilities.formatDate(e.lastDate, tz, 'dd/MM/yyyy'),
+          ageLabel: ageLabel(e.lastDate),
+          webUrl: Utils.buildEmailDetailsUrl(e.threadId)
+        }));
+      const max = Config.DEFAULTS.MAX_URGENT_FILES;
+      console.log(`Dossiers urgents : ${threads.length} fil(s), ${files.length} organisme(s).`);
+      return { label: labelName, total: threads.length, files: files.slice(0, max), extraCount: Math.max(0, files.length - max) };
+    } catch (error) {
+      console.warn(`Dossiers urgents illisibles : ${error.message}`);
+      return null;
+    }
+  };
+
+  /**
    * Clé de regroupement d'une campagne (même expéditeur + début d'objet identique).
    * @param {Object} item
    * @returns {string}
@@ -234,6 +317,7 @@ const GmailService = (() => {
 
   return {
     fetchUnreadEmails,
-    findDeclaredPosition
+    findDeclaredPosition,
+    getUrgentFiles
   };
 })();

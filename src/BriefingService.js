@@ -296,6 +296,7 @@ const BriefingService = (() => {
 
     const { urgentItems, jobOffers, sortedInfoGroups, lowPriority } = organizeEmails(emails);
     const agendaView = summarizeAgenda(agenda);
+    const urgentFiles = GmailService.getUrgentFiles();
     const stats = {
       totalEmails: emails.length,
       urgentCount: urgentItems.length,
@@ -325,6 +326,7 @@ const BriefingService = (() => {
       recipientEmail,
       stats,
       urgentItems,
+      urgentFiles,
       jobOffers,
       sortedInfoGroups,
       lowPriority,
@@ -395,6 +397,17 @@ const BriefingService = (() => {
         if (item.summary) line += ` : ${md(item.summary)}`;
         lines.push(`${line} — ${item.webUrl}`);
       }
+      lines.push('');
+    }
+
+    if (data.urgentFiles && data.urgentFiles.files.length > 0) {
+      lines.push('=== DOSSIERS URGENTS EN COURS ===');
+      lines.push(`${data.urgentFiles.total} mail(s) rangé(s) dans « ${data.urgentFiles.label} ». Quand un dossier est réglé, retirez ce libellé dans Gmail.`);
+      for (const f of data.urgentFiles.files) {
+        const unread = f.unread > 0 ? `, ${f.unread} non lu(s)` : '';
+        lines.push(`• ${f.sender} — ${f.count} mail(s)${unread}, dernier le ${f.lastDateFormatted} (${f.ageLabel}) : « ${f.subject} » — ${f.webUrl}`);
+      }
+      if (data.urgentFiles.extraCount > 0) lines.push(`• et ${data.urgentFiles.extraCount} autre(s) dossier(s)`);
       lines.push('');
     }
 

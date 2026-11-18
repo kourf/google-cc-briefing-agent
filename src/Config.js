@@ -66,6 +66,10 @@ const Config = (() => {
     MAX_LOOKBACK_HOURS: 48,
     MAX_TOMORROW_EVENTS: 5,
 
+    // Rubrique « Dossiers urgents » : mails rangés sous ce libellé Gmail, regroupés par organisme.
+    URGENT_LABEL: 'À traiter/1. Urgent',
+    MAX_URGENT_FILES: 8,
+
     // Page « Détails » d'un e-mail (WebApp.js). Adresse /dev du déploiement @HEAD : toujours à jour
     // avec le code poussé par clasp, et accessible uniquement au propriétaire du script (connexion Google).
     DETAILS_PAGE_URL: 'https://script.google.com/macros/s/AKfycbzOU23ZJ5rFS7ZkI1fcdY0CurIlMd0MIDJBL_W3yyTu/dev',
