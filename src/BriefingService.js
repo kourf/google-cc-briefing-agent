@@ -102,7 +102,10 @@ const BriefingService = (() => {
         const key = Utils.normalizeSubject(email.actionTitle) || Utils.normalizeSubject(subject);
         if (seenUrgent.has(key)) continue;
         seenUrgent.add(key);
+        // Numéro à appeler : affiché seulement s'il est réellement écrit dans le mail.
+        const phoneOk = email.contactPhone && Utils.phoneInText(email.contactPhone, `${subject} ${email.body || ''}`) && Utils.telHref(email.contactPhone);
         urgentItems.push({
+          contact: phoneOk ? { phone: email.contactPhone, tel: Utils.telHref(email.contactPhone), hours: email.contactHours || '' } : null,
           timeEstimate: `${email.estimatedMinutes || 5} min`,
           actionTitle: Utils.sanitizeText(email.actionTitle),
           summary: Utils.sanitizeText(email.summary),
@@ -409,6 +412,7 @@ const BriefingService = (() => {
       for (const item of data.urgentItems) {
         let line = `• [${item.timeEstimate}] ${item.actionTitle}${badge(item)}`;
         if (item.deadline) line += ` (${item.deadline})`;
+        if (item.contact) line += ` — à appeler : ${item.contact.phone}${item.contact.hours ? ` (${item.contact.hours})` : ''}`;
         if (item.summary) line += ` : ${md(item.summary)}`;
         lines.push(`${line} — ${item.webUrl}`);
       }
@@ -464,6 +468,31 @@ const BriefingService = (() => {
         if (f.prochaineAction) {
           const due = f.deadline ? ` — avant le ${f.deadline.formatted} (${f.deadline.label})` : '';
           lines.push(`  À faire : ${f.prochaineAction}${due}`);
+        }
+        const hp = f.help;
+        if (hp) {
+          lines.push('  Comment faire :');
+          hp.etapes.forEach((s, n) => lines.push(`    ${n + 1}. ${s}`));
+          for (const c of hp.contacts) {
+            const bits = [
+              c.telephone ? `tél. ${c.telephone}${c.horaires ? ` (${c.horaires})` : ''}` : '',
+              c.email ? `e-mail ${c.email}` : '',
+              c.adresse ? `adresse ${c.adresse}` : '',
+              c.site ? `site ${c.site}` : ''
+            ].filter(Boolean);
+            lines.push(`    - ${c.nom}${c.role ? ` (${c.role})` : ''} : ${bits.join(' ; ')} [relevé dans les courriers du dossier]`);
+          }
+          if (hp.official) {
+            const o = hp.official;
+            lines.push(`    - ${o.name} : tél. ${o.phone}${o.phoneNote ? ` (${o.phoneNote})` : ''}, ${o.hours}${o.email ? ` ; e-mail ${o.email}` : ''}${o.online ? ` ; en ligne : ${o.online}` : ''} [source : ${o.source}]`);
+          }
+          if (hp.references) lines.push(`    À rappeler : ${hp.references}`);
+          const prepare = hp.aPreparer.length > 0 ? hp.aPreparer.join(' ; ') : (hp.official && hp.official.prepare) || '';
+          if (prepare) lines.push(`    À avoir sous la main : ${prepare}`);
+          if (hp.draft) {
+            lines.push(`    Mail prêt dans vos Brouillons Gmail : « ${hp.draft.subject} »${hp.draft.to ? `, à ${hp.draft.to}` : ' (destinataire à ajouter)'}. Relisez-le puis envoyez-le vous-même.`);
+            if (hp.draft.pointsAjoutes.length > 0) lines.push(`    J’y ai ajouté : ${hp.draft.pointsAjoutes.join(' ; ')}.`);
+          }
         }
         lines.push(`  Détails : ${f.webUrl}`);
       }

@@ -144,7 +144,7 @@ const GmailService = (() => {
    *
    * @param {Array<GoogleAppsScript.Gmail.GmailMessage>} chronological - Mails du dossier, du plus ancien au plus récent.
    * @param {Array<string>} own - Adresses de l'utilisateur.
-   * @returns {{messages: Array<Object>, pdfs: Array<{name: string, date: string, data: string}>}}
+   * @returns {{messages: Array<Object>, pdfs: Array<{name: string, date: string, data: string}>, addresses: Array<string>}}
    */
   const buildUrgentContext = (chronological, own) => {
     const tz = Config.DEFAULTS.TIMEZONE;
@@ -159,14 +159,36 @@ const GmailService = (() => {
       try {
         attachments = m.getAttachments({ includeInlineImages: false }).map((a) => a.getName());
       } catch {}
+      // Coordonnées lues dans TOUT le mail (la signature, souvent en bas, dépasse le texte abrégé).
+      const emailsInBody = [...new Set((body.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}/gi) || []).map((e) => e.toLowerCase()))]
+        .filter((e) => !own.includes(e))
+        .slice(0, 5);
       return {
         date: Utilities.formatDate(m.getDate(), tz, 'dd/MM/yyyy'),
         de: own.includes(senderAddress(m.getFrom())) ? 'Vous (Kouroufia)' : Utils.cleanSenderName(m.getFrom()),
         objet: Utils.sanitizeText(m.getSubject() || ''),
         texte: body.length > URGENT_CONTEXT_BODY_CHARS ? `${body.slice(0, URGENT_CONTEXT_BODY_CHARS)}…` : body,
+        telephonesDuMail: Utils.findPhones(body).slice(0, 5),
+        emailsDuMail: emailsInBody,
         piecesJointes: attachments
       };
     });
+
+    // Adresses où une réponse humaine est possible (expéditeur ou « Répondre à »), hors robots « noreply ».
+    const addresses = [];
+    for (const m of chronological.slice().reverse()) {
+      let replyTo = '';
+      try {
+        replyTo = m.getReplyTo() || '';
+      } catch {}
+      for (const raw of [replyTo, m.getFrom()]) {
+        const address = senderAddress(raw);
+        if (!address || own.includes(address) || addresses.includes(address)) continue;
+        if (/(?:no-?reply|ne-?pas-?repondre|donotreply|notification|mailer-daemon)/i.test(address)) continue;
+        addresses.push(address);
+      }
+      if (addresses.length >= 4) break;
+    }
 
     const pdfs = [];
     for (const m of chronological.slice().reverse()) {
@@ -185,7 +207,7 @@ const GmailService = (() => {
         });
       }
     }
-    return { messages, pdfs };
+    return { messages, pdfs, addresses };
   };
 
   /**

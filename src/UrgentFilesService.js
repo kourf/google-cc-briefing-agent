@@ -18,7 +18,7 @@ const UrgentFilesService = (() => {
   /** Préfixe des entrées de mémoire (une propriété du script par dossier). */
   const CACHE_PREFIX = 'URGENT_FILE::';
   /** Version des consignes d'analyse : la changer force une nouvelle analyse de tous les dossiers. */
-  const ANALYSIS_VERSION = 5;
+  const ANALYSIS_VERSION = 10;
   /** Un dossier reste marqué « Nouveau » pendant ce délai après l'arrivée d'un nouveau mail. */
   const NEW_BADGE_MS = 20 * 3600 * 1000;
   /** Au premier suivi (sans mémoire), un dossier est « Nouveau » si son dernier mail date de moins de 36 h. */
@@ -68,12 +68,146 @@ const UrgentFilesService = (() => {
    */
   const removeUnsupportedClaims = (text, sourceText) => {
     if (!text) return text;
-    const sentences = String(text).match(/[^.!?]+[.!?]*/g) || [String(text)];
+    // Découpe en phrases sur « . ! ? » suivis d'un espace (« impots.gouv.fr » reste intact).
+    const sentences = String(text).split(/(?<=[.!?])\s+/).filter(Boolean);
     const kept = sentences.filter((s) => {
       const lower = s.toLowerCase();
       return !SENSITIVE_WORDS.some((re) => re.test(lower) && !re.test(sourceText));
     });
     return kept.join(' ').replace(/\s+/g, ' ').trim();
+  };
+
+  /**
+   * Garde-fou des coordonnées : un téléphone ou un e-mail proposé par l'IA n'est gardé que s'il est
+   * écrit dans les mails du dossier (ou si le dossier contient des PDF, que seule l'IA sait lire).
+   * Les contacts sans aucune coordonnée, ou qui répètent la fiche officielle, sont retirés.
+   *
+   * @param {Array<Object>} contacts
+   * @param {{source: string, addresses: Array<string>, hasPdf: boolean, official: Object|null}} ctx
+   * @returns {Array<Object>}
+   */
+  const checkContacts = (contacts, ctx) =>
+    (contacts || [])
+      .map((raw) => {
+        // Valeurs de remplissage (« Non communiquée », « inconnu », « - ») = champ vide.
+        const c = {};
+        Object.keys(raw).forEach((k) => {
+          const v = String(raw[k] || '').trim();
+          c[k] = /^(?:non\s+communiqu[ée]e?s?|non\s+pr[ée]cis[ée]e?s?|inconnue?s?|aucune?|n\/?a|-+|\.+)$/i.test(v) ? '' : v;
+        });
+        // Ce qui répète la fiche officielle est retiré (elle est déjà affichée).
+        if (ctx.official && ctx.official.email && c.email === ctx.official.email.toLowerCase()) c.email = '';
+        return c;
+      })
+      .map((c) => {
+        const phoneOk = c.telephone && (ctx.hasPdf ? Utils.telHref(c.telephone) !== '' : Utils.phoneInText(c.telephone, ctx.source));
+        const emailValid = /^[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}$/i.test(c.email || '');
+        const emailOk = emailValid && (ctx.hasPdf || ctx.addresses.includes(c.email) || ctx.source.includes(c.email));
+        const samePhoneAsOfficial = ctx.official && Utils.phoneDigits(c.telephone) === Utils.phoneDigits(ctx.official.phone);
+        return Object.assign({}, c, {
+          telephone: phoneOk && !samePhoneAsOfficial ? c.telephone : '',
+          horaires: phoneOk ? c.horaires : '',
+          email: emailOk ? c.email : '',
+          site: /^(?:https?:\/\/)?[\w-]+(?:\.[\w-]+)+(?:\/\S*)?$/i.test(c.site || '') ? c.site : ''
+        });
+      })
+      // Un site seul ne suffit pas : il faut un moyen de joindre quelqu'un (téléphone, e-mail ou adresse).
+      .filter((c) => c.telephone || c.email || c.adresse);
+
+  /**
+   * Destinataire du brouillon : uniquement une adresse réellement liée au dossier, sinon vide
+   * (vous le choisirez vous-même, par exemple pour une messagerie sécurisée).
+   */
+  const checkRecipient = (address, ctx) => {
+    const a = String(address || '').toLowerCase();
+    if (!/^[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}$/.test(a)) return '';
+    if (/(?:no-?reply|ne-?pas-?repondre|donotreply|notification)/.test(a)) return '';
+    const official = ctx.official && ctx.official.email ? ctx.official.email.toLowerCase() : '';
+    return ctx.addresses.includes(a) || a === official || ctx.source.includes(a) || ctx.hasPdf ? a : '';
+  };
+
+  /** Empreinte du texte d'un brouillon (espaces ignorés) : sert à savoir si vous l'avez modifié. */
+  const bodyHash = (text) =>
+    Utilities.base64Encode(
+      Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, String(text || '').replace(/\s+/g, ''), Utilities.Charset.UTF_8)
+    );
+
+  /**
+   * Brouillon Gmail toujours présent (ni envoyé, ni supprimé) ?
+   * @param {string} id
+   * @returns {GoogleAppsScript.Gmail.GmailDraft|null}
+   */
+  const findDraft = (id) => {
+    if (!id) return null;
+    try {
+      return GmailApp.getDraft(id) || null;
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Crée (ou met à jour) le brouillon Gmail d'un dossier. Jamais envoyé automatiquement.
+   * Un brouillon que vous avez modifié n'est jamais écrasé.
+   *
+   * @param {Object|null} previous - Brouillon déjà créé pour ce dossier ({id, hash, …}).
+   * @param {{destinataire: string, objet: string, corps: string, pointsAjoutes: Array<string>}} wanted
+   * @returns {{draft: Object|null, pending: Object|null}} pending = à recréer plus tard (ex. autorisation manquante).
+   */
+  const saveDraft = (previous, wanted) => {
+    const describe = (id) => ({
+      id,
+      hash: bodyHash(wanted.corps),
+      to: wanted.destinataire,
+      subject: wanted.objet,
+      pointsAjoutes: wanted.pointsAjoutes,
+      savedAt: Date.now()
+    });
+    try {
+      const existing = previous && previous.id ? findDraft(previous.id) : null;
+      if (existing) {
+        let untouched = false;
+        try {
+          untouched = bodyHash(existing.getMessage().getPlainBody()) === previous.hash;
+        } catch {}
+        if (!untouched) return { draft: Object.assign({}, previous, { userEdited: true }), pending: null };
+        existing.update(wanted.destinataire || '', wanted.objet, wanted.corps);
+        return { draft: describe(previous.id), pending: null };
+      }
+      const created = GmailApp.createDraft(wanted.destinataire || '', wanted.objet, wanted.corps);
+      console.log(`Dossiers urgents : brouillon préparé (« ${wanted.objet} »).`);
+      return { draft: describe(created.getId()), pending: null };
+    } catch (error) {
+      console.warn(`Dossiers urgents : brouillon non créé — ${error.message}`);
+      return { draft: null, pending: wanted };
+    }
+  };
+
+  /**
+   * Partie « Comment faire » d'un dossier, prête pour l'affichage.
+   * @param {Object|null} analysis
+   * @param {Object|null} official
+   * @param {Object|null} draft
+   * @returns {Object|null}
+   */
+  const buildHelp = (analysis, official, draft) => {
+    // Liens prêts à l'emploi (chiffres et adresses déjà contrôlés : affichés tels quels dans le modèle).
+    const mailHref = (e) => (/^[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}$/i.test(e || '') ? `mailto:${e}` : '');
+    const contacts = ((analysis && analysis.contacts) || []).map((c) =>
+      Object.assign({}, c, { tel: Utils.telHref(c.telephone), mail: mailHref(c.email) })
+    );
+    const help = {
+      official: official ? Object.assign({}, official, { tel: Utils.telHref(official.phone), mail: mailHref(official.email) }) : null,
+      contacts,
+      references: (analysis && analysis.references) || '',
+      etapes: (analysis && analysis.etapes) || [],
+      aPreparer: (analysis && analysis.aPreparer) || [],
+      draft: draft
+        ? { to: draft.to || '', subject: draft.subject || '', pointsAjoutes: draft.pointsAjoutes || [], userEdited: Boolean(draft.userEdited) }
+        : null
+    };
+    const empty = !help.official && contacts.length === 0 && !help.references && help.etapes.length === 0 && !help.draft;
+    return empty ? null : help;
   };
 
   /**
@@ -131,15 +265,25 @@ const UrgentFilesService = (() => {
             organisme: s.file.sender,
             etatPrecedent: s.cache && s.cache.analysis ? s.cache.analysis.etat : '',
             messages: context.messages,
-            pdfs: context.pdfs
+            pdfs: context.pdfs,
+            addresses: context.addresses || [],
+            official: OfficialContacts.forKey(s.file.key)
           };
         });
         analyses = GeminiService.analyzeUrgentFiles(dossiers) || {};
-        // Garde-fou : pas d'affirmation sensible absente des mails (dossiers sans PDF uniquement).
         for (const d of dossiers) {
           const a = analyses[d.key];
-          if (!a || d.pdfs.length > 0) continue;
-          const source = d.messages.map((m) => `${m.objet} ${m.texte}`).join(' ').toLowerCase();
+          if (!a) continue;
+          const source = d.messages
+            .map((m) => `${m.objet} ${m.texte} ${(m.telephonesDuMail || []).join(' ')} ${(m.emailsDuMail || []).join(' ')}`)
+            .join(' ')
+            .toLowerCase();
+          // Garde-fou des coordonnées et du destinataire (jamais un numéro ou une adresse inventés).
+          const ctx = { source, addresses: d.addresses, hasPdf: d.pdfs.length > 0, official: d.official };
+          a.contacts = checkContacts(a.contacts, ctx);
+          if (a.brouillon) a.brouillon.destinataire = checkRecipient(a.brouillon.destinataire, ctx);
+          // Garde-fou : pas d'affirmation sensible absente des mails (dossiers sans PDF uniquement).
+          if (d.pdfs.length > 0) continue;
           a.etat = removeUnsupportedClaims(a.etat, source);
           a.changement = removeUnsupportedClaims(a.changement, source);
           a.prochaineAction = removeUnsupportedClaims(a.prochaineAction, source);
@@ -167,16 +311,49 @@ const UrgentFilesService = (() => {
       else if (currentMemory) firstSeenAt = now;
       else firstSeenAt = lastTime || now;
 
+      // Brouillon Gmail : préparé lors d'une nouvelle analyse, ou réessayé s'il n'avait pas pu être créé.
+      let draft = (cache && cache.draft) || null;
+      let pendingDraft = (cache && cache.pendingDraft) || null;
+      let draftJustSaved = false;
       if (fresh) {
+        pendingDraft = null;
+        if (fresh.brouillon) {
+          const saved = saveDraft(draft, fresh.brouillon);
+          draft = saved.draft;
+          pendingDraft = saved.pending;
+          draftJustSaved = Boolean(saved.draft);
+        } else {
+          draft = null; // plus de mail à envoyer : l'ancien brouillon éventuel reste dans Gmail, mais n'est plus proposé
+        }
+      } else if (allowAnalysis && pendingDraft && cache) {
+        const saved = saveDraft(draft, pendingDraft);
+        draft = saved.draft || draft;
+        pendingDraft = saved.pending;
+        draftJustSaved = Boolean(saved.draft);
+      }
+
+      if (fresh || draftJustSaved) {
+        // La mémoire garde l'analyse sans le texte du brouillon (déjà dans Gmail), sauf s'il reste à créer.
+        const stored = fresh ? Object.assign({}, fresh, { brouillon: null }) : cache.analysis;
         try {
           props.setProperty(
             CACHE_PREFIX + file.key,
-            JSON.stringify({ version: ANALYSIS_VERSION, fingerprint: file.fingerprint, firstSeenAt, analyzedAt: now, analysis: fresh })
+            JSON.stringify({
+              version: fresh ? ANALYSIS_VERSION : cache.version,
+              fingerprint: fresh ? file.fingerprint : cache.fingerprint,
+              firstSeenAt,
+              analyzedAt: fresh ? now : cache.analyzedAt,
+              analysis: stored,
+              draft,
+              pendingDraft
+            })
           );
         } catch (error) {
           console.warn(`Dossiers urgents : mémoire non enregistrée pour ${file.key} — ${error.message}`);
         }
       }
+      // Affiché seulement s'il est toujours dans vos Brouillons (ni envoyé, ni supprimé).
+      const visibleDraft = draft && (draftJustSaved || findDraft(draft.id)) ? draft : null;
 
       // « Nouveau » : le dernier mail a été vu récemment (ou, au premier suivi, reçu depuis moins de 36 h).
       const isNew = now - firstSeenAt < (currentMemory ? NEW_BADGE_MS : FIRST_RUN_NEW_MS);
@@ -198,7 +375,8 @@ const UrgentFilesService = (() => {
         montant: analysis ? analysis.montant : '',
         changement: isNew && analysis ? analysis.changement : '',
         deadline,
-        lastTime
+        lastTime,
+        help: level === 'regle' ? null : buildHelp(analysis, OfficialContacts.forKey(file.key), visibleDraft)
       });
       delete view.loadContext;
       delete view.lastDate;

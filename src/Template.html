@@ -144,6 +144,9 @@
           <span style="color: #6B7280; font-size: 12px;">[ <?= item.timeEstimate ?> ] &bull; </span>
           <strong><?= item.actionTitle ?></strong><? if (item.account) { ?><span style="display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-left: 4px; background-color: <?= item.account.bg ?>; color: <?= item.account.color ?>; border: 1px solid <?= item.account.border ?>;"><?= item.account.label ?></span><? } ?><? if (item.deadline) { ?> <span style="color: #4B5563;">(<?= item.deadline ?>)</span><? } ?><? if (item.summary) { ?> : <?!= Utils.formatSummaryHtml(item.summary) ?><? } ?>
           <a href="<?= item.webUrl ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 4px 8px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-size: 11.5px; font-weight: 600; margin-left: 6px; white-space: nowrap; vertical-align: middle;">Détails</a>
+          <? if (item.contact) { ?>
+          <div style="font-size: 12.5px; color: #374151; margin-top: 3px;">À appeler : <a href="<?!= item.contact.tel ?>" style="color: #1D4ED8; font-weight: 600; text-decoration: none;"><?= item.contact.phone ?></a><? if (item.contact.hours) { ?> &mdash; <?= item.contact.hours ?><? } ?> <span style="font-size: 11px; color: #9CA3AF;">(numéro écrit dans le mail)</span></div>
+          <? } ?>
         </li>
         <? } ?>
       </ul>
@@ -188,6 +191,45 @@
         <? } ?>
         <? if (file.stale) { ?>
         <div style="font-size: 11.5px; color: #9CA3AF; margin-top: 4px;">Un nouveau mail est arrivé mais n’a pas encore pu être analysé : ouvrez « Détails ».</div>
+        <? } ?>
+        <? var hp = file.help; if (hp) { ?>
+        <div style="margin-top: 8px; padding: 8px 10px; background-color: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 6px; font-size: 12.5px; color: #374151; line-height: 1.55;">
+          <div style="font-weight: 700; color: #111827; margin-bottom: 4px;">Comment faire</div>
+          <? if (hp.etapes.length > 0) { ?>
+          <ol style="margin: 0 0 6px 0; padding-left: 18px;">
+            <? for (var st = 0; st < hp.etapes.length; st++) { ?><li style="margin-bottom: 2px;"><?= hp.etapes[st] ?></li><? } ?>
+          </ol>
+          <? } ?>
+          <? for (var ct = 0; ct < hp.contacts.length; ct++) { var cc = hp.contacts[ct]; ?>
+          <div style="margin-bottom: 6px;">
+            <strong><?= cc.nom ?></strong><? if (cc.role) { ?> (<?= cc.role ?>)<? } ?>
+            <? if (cc.telephone) { ?><br>Téléphone : <? if (cc.tel) { ?><a href="<?!= cc.tel ?>" style="color: #1D4ED8; font-weight: 600; text-decoration: none;"><?= cc.telephone ?></a><? } else { ?><?= cc.telephone ?><? } ?><? if (cc.horaires) { ?> &mdash; <?= cc.horaires ?><? } ?><? } ?>
+            <? if (cc.email) { ?><br>E-mail : <? if (cc.mail) { ?><a href="<?!= cc.mail ?>" style="color: #1D4ED8; text-decoration: none;"><?= cc.email ?></a><? } else { ?><?= cc.email ?><? } ?><? } ?>
+            <? if (cc.adresse) { ?><br>Adresse : <?= cc.adresse ?><? } ?>
+            <? if (cc.site) { ?><br>Site : <?= cc.site ?><? } ?>
+            <br><span style="font-size: 11px; color: #9CA3AF;">Coordonnées relevées dans les mails et courriers de ce dossier.</span>
+          </div>
+          <? } ?>
+          <? if (hp.official) { var ofc = hp.official; ?>
+          <div style="margin-bottom: 6px;">
+            <strong><?= ofc.name ?></strong>
+            <br>Téléphone : <? if (ofc.tel) { ?><a href="<?!= ofc.tel ?>" style="color: #1D4ED8; font-weight: 600; text-decoration: none;"><?= ofc.phone ?></a><? } else { ?><?= ofc.phone ?><? } ?><? if (ofc.phoneNote) { ?> (<?= ofc.phoneNote ?>)<? } ?> &mdash; <?= ofc.hours ?>
+            <? if (ofc.email) { ?><br>E-mail : <? if (ofc.mail) { ?><a href="<?!= ofc.mail ?>" style="color: #1D4ED8; text-decoration: none;"><?= ofc.email ?></a><? } else { ?><?= ofc.email ?><? } ?><? } ?>
+            <? if (ofc.online) { ?><br>En ligne : <?= ofc.online ?><? } ?>
+            <br><span style="font-size: 11px; color: #9CA3AF;">Source : <?= ofc.source ?>.</span>
+          </div>
+          <? } ?>
+          <? if (hp.references) { ?><div style="margin-bottom: 3px;">À rappeler : <strong><?= hp.references ?></strong></div><? } ?>
+          <? if (hp.aPreparer.length > 0) { ?><div style="margin-bottom: 3px;">À avoir sous la main : <?= hp.aPreparer.join(' ; ') ?></div><? } else if (hp.official && hp.official.prepare) { ?><div style="margin-bottom: 3px;">À avoir sous la main : <?= hp.official.prepare ?></div><? } ?>
+          <? if (hp.draft) { ?>
+          <div style="margin-top: 6px; padding: 6px 8px; background-color: #ECFDF5; border: 1px solid #A7F3D0; border-radius: 4px;">
+            <strong>Mail prêt dans vos Brouillons Gmail</strong> : « <?= hp.draft.subject ?> »<? if (hp.draft.to) { ?>, à <?= hp.draft.to ?><? } else { ?> (destinataire à ajouter)<? } ?>.
+            <? if (hp.draft.pointsAjoutes.length > 0) { ?><br>J’y ai ajouté : <?= hp.draft.pointsAjoutes.join(' ; ') ?>.<? } ?>
+            <br><span style="font-size: 11.5px; color: #047857;"><? if (hp.draft.userEdited) { ?>Vous l’avez modifié : je n’y touche plus. <? } ?>Relisez-le, puis envoyez-le vous-même. Sur téléphone : Gmail &gt; menu &#9776; &gt; Brouillons.</span>
+            <br><a href="https://mail.google.com/mail/u/0/#drafts" target="_blank" rel="noopener noreferrer" style="display: inline-block; margin-top: 4px; padding: 3px 8px; background-color: #FFFFFF; color: #047857; border: 1px solid #A7F3D0; border-radius: 4px; text-decoration: none; font-size: 11.5px; font-weight: 600;">Ouvrir mes brouillons (ordinateur)</a>
+          </div>
+          <? } ?>
+        </div>
         <? } ?>
         <div style="margin-top: 6px;">
           <a href="<?= file.webUrl ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 3px 8px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-size: 11.5px; font-weight: 600; white-space: nowrap;">Détails du dernier mail</a>

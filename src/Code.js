@@ -70,6 +70,36 @@ function preparerDossiersUrgents() {
 }
 
 /**
+ * Affiche dans le journal ce que l'assistant a retenu pour chaque dossier urgent
+ * (contacts, étapes, brouillon). Lecture seule : n'envoie et ne modifie rien.
+ */
+function voirDossiersUrgents() {
+  const props = PropertiesService.getScriptProperties().getProperties();
+  Object.keys(props)
+    .filter((k) => k.indexOf('URGENT_FILE::') === 0)
+    .forEach((k) => {
+      try {
+        const c = JSON.parse(props[k]);
+        const a = c.analysis || {};
+        console.log(
+          [
+            `=== ${k.replace('URGENT_FILE::', '')} (version ${c.version}, niveau ${a.niveau}) ===`,
+            `À faire : ${a.prochaineAction || '-'}`,
+            `Contacts : ${JSON.stringify(a.contacts || [])}`,
+            `Références : ${a.references || '-'}`,
+            `Étapes : ${(a.etapes || []).join(' | ') || '-'}`,
+            `À préparer : ${(a.aPreparer || []).join(' | ') || '-'}`,
+            `Brouillon créé : ${c.draft ? `« ${c.draft.subject} » à ${c.draft.to || '(à choisir)'}` : 'non'}`,
+            `Brouillon en attente : ${c.pendingDraft ? `« ${c.pendingDraft.objet} » à ${c.pendingDraft.destinataire || '(à choisir)'}\n${c.pendingDraft.corps}\nAjouts : ${(c.pendingDraft.pointsAjoutes || []).join(' | ')}` : 'non'}`
+          ].join('\n')
+        );
+      } catch (error) {
+        console.warn(`${k} illisible : ${error.message}`);
+      }
+    });
+}
+
+/**
  * Installe l'analyse automatique des dossiers urgents toutes les 2 heures (une seule fois),
  * puis lance une première analyse. N'envoie aucun e-mail.
  * @returns {boolean}

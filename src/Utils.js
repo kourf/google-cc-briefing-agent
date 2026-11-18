@@ -585,6 +585,61 @@ const Utils = (() => {
   const withDe = (word) => (/^[aeiouyhàâéèêëîïôöûüœAEIOUYHÀÂÉÈÊËÎÏÔÖÛÜŒ]/.test(String(word || '')) ? `d’${word}` : `de ${word}`);
 
   /**
+   * Chiffres d'un numéro de téléphone français, au format national (« +33 1 76… » -> « 0176… »).
+   * @param {string} phone
+   * @returns {string}
+   */
+  const phoneDigits = (phone) => {
+    let d = String(phone || '').replace(/\D/g, '');
+    if (d.startsWith('0033')) d = `0${d.slice(4)}`;
+    else if (d.startsWith('33') && d.length === 11) d = `0${d.slice(2)}`;
+    return d;
+  };
+
+  /**
+   * Lien « tel: » cliquable sur téléphone (« 02 32 33 99 10 » -> « tel:+33232339910 », « 3698 » -> « tel:3698 »).
+   * @param {string} phone
+   * @returns {string} Chaîne vide si le numéro est illisible.
+   */
+  const telHref = (phone) => {
+    const d = phoneDigits(phone);
+    if (d.length === 10 && d.startsWith('0')) return `tel:+33${d.slice(1)}`;
+    return d.length >= 4 && d.length <= 15 ? `tel:${d}` : '';
+  };
+
+  /**
+   * Vrai si le numéro figure bel et bien dans le texte source (espaces, points et +33 ignorés).
+   * Garde-fou : un numéro proposé par l'IA n'est affiché que s'il est écrit dans les mails.
+   * @param {string} phone
+   * @param {string} sourceText
+   * @returns {boolean}
+   */
+  const phoneInText = (phone, sourceText) => {
+    const d = phoneDigits(phone);
+    if (d.length < 4) return false;
+    const flat = String(sourceText || '')
+      .replace(/(?:\+|00)33\s*\(?0?\)?\s*(?=\d)/g, '0')
+      .replace(/(\d)[\s.\-  ]+(?=\d)/g, '$1');
+    return flat.includes(d);
+  };
+
+  /**
+   * Numéros de téléphone français à 10 chiffres présents dans un texte.
+   * @param {string} text
+   * @returns {Array<string>}
+   */
+  const findPhones = (text) => {
+    const found = String(text || '').match(/(?:\+33\s?\(?0?\)?\s?[1-9]|\b0[1-9])(?:[\s.\-]?\d{2}){4}\b/g) || [];
+    const seen = new Set();
+    return found.map((p) => p.trim()).filter((p) => {
+      const d = phoneDigits(p);
+      if (d.length !== 10 || seen.has(d)) return false;
+      seen.add(d);
+      return true;
+    });
+  };
+
+  /**
    * Masque les secrets dans les journaux.
    * @param {string} str
    * @returns {string}
@@ -619,6 +674,10 @@ const Utils = (() => {
     buildGmailUrl,
     buildEmailDetailsUrl,
     dayNumber,
+    phoneDigits,
+    telHref,
+    phoneInText,
+    findPhones,
     buildCalendarUrl,
     formatDateFrench,
     formatTime,

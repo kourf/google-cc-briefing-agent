@@ -222,6 +222,7 @@ const GeminiService = (() => {
       "   - 'actionTitle' au format strict '[Expéditeur / Organisme] — [Sujet précis et enjeu]' (ex. 'CAF — Justificatif de ressources à transmettre', 'Qare — Consultation médicale de suivi').",
       "   - 'deadline' : date et heure précises tirées de l'e-mail (ex. '18/11 à 09h00', 'Aujourd'hui 18h') ou null. N'invente JAMAIS une date absente de l'e-mail.",
       "   - 'summary' : l'instruction concrète en 1 phrase active (quoi faire et pourquoi).",
+      "   - 'contactPhone' : si l'action consiste à appeler quelqu'un, le numéro à composer recopié EXACTEMENT depuis l'e-mail (voir 'telephonesDuMail'), sinon vide. 'contactHours' : les horaires d'appel s'ils sont écrits dans l'e-mail, sinon vide. N'invente JAMAIS un numéro ou un horaire.",
       '',
       `3. PLATEFORMES D'EMPLOI : tout e-mail de Michael Page, Meteojob, HelloWork, Apec, Indeed ou mentionnant 'Finance & Accounting', 'Fiduciaire', 'Comptable', 'Treuhand' va dans '${C.JOBS}'.`,
       '',
@@ -258,6 +259,8 @@ const GeminiService = (() => {
         actionTitle: { type: 'STRING', description: "Format strict : '[Expéditeur] — [Sujet et enjeu précis]' ou vide" },
         deadline: { type: 'STRING', description: "Échéance tirée de l'e-mail (ex. '18/11 à 09h00') ou vide" },
         estimatedMinutes: { type: 'INTEGER', description: "Durée estimée de l'action en minutes" },
+        contactPhone: { type: 'STRING', description: "Numéro à appeler, recopié de l'e-mail, ou vide" },
+        contactHours: { type: 'STRING', description: "Horaires d'appel écrits dans l'e-mail, ou vide" },
         jobOffers: {
           type: 'ARRAY',
           description: "Offres d'emploi contenues dans l'e-mail (catégorie Emploi & Carrière uniquement)",
@@ -292,6 +295,8 @@ const GeminiService = (() => {
       actionTitle: Utils.sanitizeText(item.actionTitle) || (item.actionRequired ? 'Action requise' : ''),
       deadline: deadline && !/^(null|aucune?|none|n\/a)$/i.test(deadline) ? deadline : null,
       estimatedMinutes: Number.isFinite(minutes) && minutes > 0 ? minutes : 5,
+      contactPhone: Utils.sanitizeText(item.contactPhone || ''),
+      contactHours: Utils.sanitizeText(item.contactHours || ''),
       rawJobOffers: Array.isArray(item.jobOffers) ? item.jobOffers : []
     };
   };
@@ -331,6 +336,7 @@ const GeminiService = (() => {
         date: `${msg.dateFormatted} ${msg.timeFormatted}`,
         nombreMessages: msg.duplicateCount || 1,
         contenuAbrege: Utils.sanitizeText(body.length > max ? `${body.substring(0, max)}...` : body),
+        telephonesDuMail: Utils.findPhones(body).slice(0, 4),
         offresDetectees: (msg.jobLinks || []).map((l, idx) => ({ n: idx + 1, intitule: l.text }))
       };
     });
@@ -736,7 +742,24 @@ const GeminiService = (() => {
     '- "echeance" : date limite de cette prochaine action au format AAAA-MM-JJ, sinon chaîne vide. Obligatoire dès qu’une date ou un jour du mois est écrit : pour un paiement mensuel « au plus tard le 30 du mois », donne la prochaine date à venir (ex. nous sommes le 18/11 -> 2026-11-30). Reprends aussi cette date dans "prochaineAction".',
     '- "montant" : somme encore due (ex. « 1 161,20 € »), sinon chaîne vide.',
     '- "niveau" : "urgent" (paiement ou réponse exigé, poursuites, saisie, échéance proche), "a_surveiller" (risque ou relance sans date proche), "en_attente" (vous attendez une réponse, rien à faire), "regle" (dette payée ou annulée, dossier clos).',
-    '- "changement" : ce que le mail ou le courrier le plus récent apporte de nouveau par rapport à "etatPrecedent" (1 phrase). Si "etatPrecedent" est vide : chaîne vide.'
+    '- "changement" : ce que le mail ou le courrier le plus récent apporte de nouveau par rapport à "etatPrecedent" (1 phrase). Si "etatPrecedent" est vide : chaîne vide.',
+    '',
+    'ACCOMPAGNEMENT (aider Kouroufia à conclure le dossier facilement) :',
+    '- "contacts" : 0 à 2 personnes ou services à joindre pour CE dossier (ex. le gestionnaire nommé dans le courrier). Coordonnées recopiées EXACTEMENT telles qu’écrites dans les mails ("texte", "telephonesDuMail", "emailsDuMail") ou les PDF : "nom", "role" (ex. « gestionnaire du dossier »), "telephone", "horaires", "email", "adresse" (adresse postale complète), "site". Champ vide si l’information n’est pas écrite : n’invente ni ne devine JAMAIS un numéro, une adresse ou un horaire. N’y mets pas les adresses « noreply » ni le "contactOfficiel" (déjà connu).',
+    '- "references" : numéros à rappeler en contactant l’organisme (n° de dossier, référence du courrier, n° de compte, SIREN), tels qu’écrits ; vide sinon.',
+    '- "etapes" : 2 à 4 étapes concrètes dans l’ordre, une seule action par étape (ex. « Appelez Mme Martin au 01 23 45 67 89 pour demander le RIB du cabinet »). Liste vide si le dossier est réglé ou s’il faut seulement attendre.',
+    '- "aPreparer" : 0 à 4 choses à avoir sous la main (référence, RIB, justificatif, courrier reçu…).',
+    '- Dans "prochaineAction" et "etapes", écris les dates au format JJ/MM/AAAA (jamais AAAA-MM-JJ).',
+    '- "brouillon" : sois proactif. Rédige un message (necessaire = true) dès qu’un écrit aide à avancer ou à conclure : demander un RIB ou IBAN pour payer, confirmer un échéancier accepté, demander un délai ou un paiement en plusieurs fois, demander une confirmation écrite ou un justificatif, relancer une demande sans réponse. Si l’organisme passe par une messagerie en ligne, rédige-le quand même (destinataire vide) : Kouroufia le copiera. necessaire = false seulement si le dossier est réglé ou s’il faut simplement attendre une réponse récente.',
+    '  * "destinataire" : une adresse de "adressesConnues", "contactOfficiel.email" ou écrite dans un mail ou un PDF du dossier, la plus adaptée à une réponse humaine ; vide s’il faut passer par une messagerie en ligne.',
+    '  * "objet" : précis, avec la référence du dossier si elle existe.',
+    '  * "corps" : vouvoiement, poli et clair, 100 à 220 mots, sauts de ligne entre les paragraphes. Commence par « Madame, Monsieur, » (ou le nom de l’interlocuteur s’il est connu). Rappelle les références, pose les questions utiles, demande une confirmation écrite. Termine par « Cordialement, » puis le nom de Kouroufia tel qu’il est écrit dans les courriers (sinon « Kouroufia »). Aucun texte entre crochets à compléter.',
+    '  * Prudence : n’invente aucun fait ; ne reconnais pas une dette que Kouroufia conteste dans ses mails ; ne propose aucun montant ni aucune date de paiement que Kouroufia ou l’organisme n’ont pas déjà écrits. Ne prends AUCUN engagement de payer ou d’agir à la place de Kouroufia (pas de « je vais régler », « je vais déclarer ») : tu peux demander le montant exact, un RIB, un délai ou un paiement en plusieurs fois, ou confirmer ce que l’organisme a déjà accepté par écrit.',
+    '  * Pas de brouillon (necessaire = false) si la démarche se fait entièrement sur un site (déclaration, création d’espace) et qu’aucune question utile n’est à poser : les étapes suffisent.',
+    '  * Le genre de Kouroufia est inconnu : évite tout adjectif ou participe accordé qui se rapporte à Kouroufia (ex. « conscient(e) », « désolé(e) ») en tournant la phrase autrement.',
+    '  * Mise en forme : sépare les paragraphes par une ligne vide (\\n\\n) : la formule d’appel seule sur sa ligne, puis 2 ou 3 paragraphes, puis « Cordialement, » et le nom sur la ligne suivante.',
+    '  * Si le dernier mail vient de « Vous (Kouroufia) », un brouillon n’est utile que pour une relance polie, et seulement si la réponse tarde (plus de 7 jours).',
+    '  * "pointsAjoutes" : 1 à 4 éléments utiles que tu as ajoutés et auxquels Kouroufia n’aurait peut-être pas pensé (ex. « rappel du numéro de dossier », « demande de confirmation écrite », « demande du RIB pour le virement »).'
   ].join('\n');
 
   /**
@@ -754,11 +777,73 @@ const GeminiService = (() => {
         echeance: { type: 'STRING' },
         montant: { type: 'STRING' },
         niveau: { type: 'STRING', enum: [...URGENT_LEVELS] },
-        changement: { type: 'STRING' }
+        changement: { type: 'STRING' },
+        contacts: {
+          type: 'ARRAY',
+          items: {
+            type: 'OBJECT',
+            properties: {
+              nom: { type: 'STRING' },
+              role: { type: 'STRING' },
+              telephone: { type: 'STRING' },
+              horaires: { type: 'STRING' },
+              email: { type: 'STRING' },
+              adresse: { type: 'STRING' },
+              site: { type: 'STRING' }
+            },
+            required: ['nom', 'role', 'telephone', 'horaires', 'email', 'adresse', 'site']
+          }
+        },
+        references: { type: 'STRING' },
+        etapes: { type: 'ARRAY', items: { type: 'STRING' } },
+        aPreparer: { type: 'ARRAY', items: { type: 'STRING' } },
+        brouillon: {
+          type: 'OBJECT',
+          properties: {
+            necessaire: { type: 'BOOLEAN' },
+            destinataire: { type: 'STRING' },
+            objet: { type: 'STRING' },
+            corps: { type: 'STRING' },
+            pointsAjoutes: { type: 'ARRAY', items: { type: 'STRING' } }
+          },
+          // Tous obligatoires : sinon le modèle répond « necessaire » sans écrire le texte.
+          required: ['necessaire', 'destinataire', 'objet', 'corps', 'pointsAjoutes'],
+          propertyOrdering: ['necessaire', 'destinataire', 'objet', 'corps', 'pointsAjoutes']
+        }
       },
-      required: ['key', 'etat', 'prochaineAction', 'echeance', 'montant', 'niveau', 'changement']
+      required: ['key', 'etat', 'prochaineAction', 'echeance', 'montant', 'niveau', 'changement', 'contacts', 'references', 'etapes', 'aPreparer', 'brouillon']
     }
   });
+
+  /** Texte sur plusieurs lignes nettoyé ligne par ligne (les sauts de ligne du brouillon sont conservés). */
+  const sanitizeMultiline = (text) =>
+    String(text || '')
+      .replace(/\r\n?/g, '\n')
+      .split('\n')
+      .map((line) => Utils.sanitizeText(line))
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+  /**
+   * Mise en page d'un mail resté sur une seule ligne : formule d'appel seule, ligne vide avant
+   * la formule de politesse, nom sur sa propre ligne.
+   */
+  const layoutLetter = (text) => {
+    let t = String(text || '');
+    if (/\n/.test(t)) return t;
+    t = t.replace(/^((?:Madame,\s*Monsieur|Madame|Monsieur|Bonjour)(?:\s+[^\s,]+){0,3},)\s*/i, '$1\n\n');
+    t = t.replace(/\s*((?:Je vous remercie|Dans l’attente|Dans l'attente)[^.]*\.)\s*/i, '\n\n$1\n\n');
+    t = t.replace(/\s*(Cordialement,|Bien cordialement,|Veuillez agréer[^.]*\.)\s*/i, '\n\n$1\n');
+    return t.replace(/\n{3,}/g, '\n\n').trim();
+  };
+
+  /** Liste de textes courts nettoyés. */
+  const cleanList = (list, max) =>
+    (Array.isArray(list) ? list : [])
+      .map((s) => Utils.sanitizeText(s || ''))
+      .filter(Boolean)
+      .slice(0, max);
 
   /**
    * Analyse IA des dossiers urgents (mails + PDF joints, en un seul appel).
@@ -773,6 +858,10 @@ const GeminiService = (() => {
       key: d.key,
       organisme: d.organisme,
       etatPrecedent: d.etatPrecedent || '',
+      adressesConnues: d.addresses || [],
+      contactOfficiel: d.official
+        ? { nom: d.official.name, telephone: d.official.phone, horaires: d.official.hours, email: d.official.email || '', enLigne: d.official.online || '' }
+        : null,
       mails: d.messages,
       pdfJoints: d.pdfs.map((p) => `${p.name} (reçu le ${p.date})`)
     }));
@@ -788,7 +877,7 @@ const GeminiService = (() => {
       purpose: 'suivi des dossiers urgents',
       prompt: parts,
       generationConfig: {
-        maxOutputTokens: 4096,
+        maxOutputTokens: 12288,
         responseMimeType: 'application/json',
         responseSchema: buildUrgentFilesSchema()
       },
@@ -799,13 +888,38 @@ const GeminiService = (() => {
     const map = {};
     for (const item of parsed) {
       if (!item || !item.key) continue;
+      const rawDraft = item.brouillon || {};
+      console.log(`Dossier ${item.key} : brouillon ${rawDraft.necessaire ? `proposé (${String(rawDraft.corps || '').length} caractères)` : 'non proposé'}.`);
       map[item.key] = {
         etat: Utils.sanitizeText(item.etat || ''),
         prochaineAction: Utils.sanitizeText(item.prochaineAction || ''),
         echeance: /^\d{4}-\d{2}-\d{2}$/.test(String(item.echeance || '').trim()) ? String(item.echeance).trim() : '',
         montant: Utils.sanitizeText(item.montant || ''),
         niveau: URGENT_LEVELS.includes(item.niveau) ? item.niveau : 'a_surveiller',
-        changement: Utils.sanitizeText(item.changement || '')
+        changement: Utils.sanitizeText(item.changement || ''),
+        contacts: (Array.isArray(item.contacts) ? item.contacts : []).slice(0, 2).map((c) => ({
+          nom: Utils.sanitizeText((c && c.nom) || ''),
+          role: Utils.sanitizeText((c && c.role) || ''),
+          telephone: Utils.sanitizeText((c && c.telephone) || ''),
+          horaires: Utils.sanitizeText((c && c.horaires) || ''),
+          email: String((c && c.email) || '').trim().toLowerCase(),
+          adresse: Utils.sanitizeText((c && c.adresse) || ''),
+          site: Utils.sanitizeText((c && c.site) || '')
+        })),
+        references: Utils.sanitizeText(item.references || ''),
+        etapes: cleanList(item.etapes, 4),
+        aPreparer: cleanList(item.aPreparer, 4),
+        brouillon: (() => {
+          const b = item.brouillon || {};
+          const corps = layoutLetter(sanitizeMultiline(b.corps));
+          if (!b.necessaire || corps.length < 40) return null;
+          return {
+            destinataire: String(b.destinataire || '').trim().toLowerCase(),
+            objet: Utils.sanitizeText(b.objet || '') || 'Suivi de mon dossier',
+            corps,
+            pointsAjoutes: cleanList(b.pointsAjoutes, 4)
+          };
+        })()
       };
     }
     return map;
