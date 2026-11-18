@@ -503,6 +503,15 @@ const Utils = (() => {
   };
 
   /**
+   * Numéro du jour calendaire d'une date dans le fuseau du script (pour compter des jours entiers :
+   * « aujourd'hui », « hier », « dans 12 jours »), insensible aux heures et aux changements d'heure.
+   * @param {Date} date
+   * @returns {number}
+   */
+  const dayNumber = (date) =>
+    Math.floor(Date.parse(`${Utilities.formatDate(date, Config.DEFAULTS.TIMEZONE, 'yyyy-MM-dd')}T00:00:00Z`) / 86400000);
+
+  /**
    * Date française élégante (ex. "Samedi 14 novembre 2026").
    * @param {Date} date
    * @returns {string}
@@ -609,6 +618,7 @@ const Utils = (() => {
     okText,
     buildGmailUrl,
     buildEmailDetailsUrl,
+    dayNumber,
     buildCalendarUrl,
     formatDateFrench,
     formatTime,

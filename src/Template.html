@@ -66,25 +66,46 @@
       <div style="font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 4px;">
         Dossiers urgents en cours
       </div>
-      <div style="font-size: 12px; color: #6B7280; margin-bottom: 10px;">
-        <?= data.urgentFiles.total ?> mail<?= data.urgentFiles.total > 1 ? 's' : '' ?> rangé<?= data.urgentFiles.total > 1 ? 's' : '' ?> dans « <?= data.urgentFiles.label ?> ». Quand un dossier est réglé, retirez ce libellé dans Gmail : il disparaîtra du briefing suivant.
+      <? if (data.urgentFiles.newCount > 0 || data.urgentFiles.urgentCount > 0) { ?>
+      <div style="font-size: 13px; color: #991B1B; font-weight: 600; margin-bottom: 6px;">
+        <? if (data.urgentFiles.newCount > 0) { ?><?= data.urgentFiles.newCount ?> dossier<?= data.urgentFiles.newCount > 1 ? 's ont' : ' a' ?> bougé depuis le dernier briefing. <? } ?><? if (data.urgentFiles.urgentCount > 0) { ?><?= data.urgentFiles.urgentCount ?> demande<?= data.urgentFiles.urgentCount > 1 ? 'nt' : '' ?> une action rapide.<? } ?>
       </div>
-      <ul style="margin: 0; padding-left: 20px; list-style-type: disc;">
-        <? for (var uf = 0; uf < data.urgentFiles.files.length; uf++) {
-             var file = data.urgentFiles.files[uf];
-        ?>
-        <li style="margin-bottom: 9px; font-size: 13.5px; line-height: 1.5; color: #1F2937;">
-          <strong><?= file.sender ?></strong> &mdash; <?= file.count ?> mail<?= file.count > 1 ? 's' : '' ?>, dernier le <?= file.lastDateFormatted ?> <span style="color: #6B7280;">(<?= file.ageLabel ?>)</span><? if (file.unread > 0) { ?><span style="display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-left: 4px; background-color: #FEF2F2; color: #B91C1C; border: 1px solid #FECACA;"><?= file.unread ?> non lu<?= file.unread > 1 ? 's' : '' ?></span><? } ?>
-          <div style="font-size: 12.5px; color: #4B5563;">
-            « <?= file.subject ?> »
-            <a href="<?= file.webUrl ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 3px 8px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-size: 11.5px; font-weight: 600; margin-left: 6px; white-space: nowrap; vertical-align: middle;">Détails</a>
-          </div>
-        </li>
+      <? } ?>
+      <div style="font-size: 12px; color: #6B7280; margin-bottom: 10px;">
+        <?= data.urgentFiles.total ?> mail<?= data.urgentFiles.total > 1 ? 's' : '' ?> rangé<?= data.urgentFiles.total > 1 ? 's' : '' ?> dans « <?= data.urgentFiles.label ?> », relus chaque matin (PDF joints compris). Quand un dossier est réglé, retirez ce libellé dans Gmail : il disparaîtra du briefing suivant.
+      </div>
+      <? for (var uf = 0; uf < data.urgentFiles.files.length; uf++) {
+           var file = data.urgentFiles.files[uf];
+           var ls = file.levelStyle;
+      ?>
+      <div style="margin-bottom: 10px; padding: 10px 12px; border: 1px solid <?= ls.border ?>; border-left: 4px solid <?= ls.color ?>; border-radius: 6px; background-color: #FFFFFF;">
+        <div style="font-size: 13.5px; line-height: 1.5; color: #1F2937;">
+          <span style="display: inline-block; font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 4px; margin-right: 4px; background-color: <?= ls.bg ?>; color: <?= ls.color ?>; border: 1px solid <?= ls.border ?>;"><?= file.levelLabel ?></span><? if (file.isNew) { ?><span style="display: inline-block; font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 4px; margin-right: 4px; background-color: #7C3AED; color: #FFFFFF;">Nouveau</span><? } ?>
+          <strong><?= file.sender ?></strong>
+          <span style="color: #6B7280; font-size: 12px;">&mdash; <?= file.count ?> mail<?= file.count > 1 ? 's' : '' ?>, dernier <?= file.ageLabel ?> (<?= file.lastDateFormatted ?>)<? if (file.unread > 0) { ?>, <?= file.unread ?> non lu<?= file.unread > 1 ? 's' : '' ?><? } ?></span>
+        </div>
+        <? if (file.changement) { ?>
+        <div style="font-size: 12.5px; color: #5B21B6; margin-top: 4px;"><strong>Ce qui a changé :</strong> <?= file.changement ?></div>
         <? } ?>
-        <? if (data.urgentFiles.extraCount > 0) { ?>
-        <li style="font-size: 12.5px; color: #6B7280;">et <?= data.urgentFiles.extraCount ?> autre(s) dossier(s)</li>
+        <? if (file.etat) { ?>
+        <div style="font-size: 12.5px; color: #374151; margin-top: 4px;"><strong>Où on en est :</strong> <?= file.etat ?><? if (file.montant) { ?> <span style="white-space: nowrap;">(reste dû : <strong><?= file.montant ?></strong>)</span><? } ?></div>
+        <? } else { ?>
+        <div style="font-size: 12.5px; color: #4B5563; margin-top: 4px;">« <?= file.subject ?> »</div>
         <? } ?>
-      </ul>
+        <? if (file.prochaineAction) { ?>
+        <div style="font-size: 12.5px; color: #111827; margin-top: 4px;"><strong>À faire :</strong> <?= file.prochaineAction ?><? if (file.deadline) { ?> <span style="font-weight: 700; color: <?= file.deadline.days <= 7 ? '#B91C1C' : '#B45309' ?>; white-space: nowrap;">avant le <?= file.deadline.formatted ?> (<?= file.deadline.label ?>)</span><? } ?></div>
+        <? } ?>
+        <? if (file.stale) { ?>
+        <div style="font-size: 11.5px; color: #9CA3AF; margin-top: 4px;">Un nouveau mail est arrivé mais n’a pas encore pu être analysé : ouvrez « Détails ».</div>
+        <? } ?>
+        <div style="margin-top: 6px;">
+          <a href="<?= file.webUrl ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 3px 8px; background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; text-decoration: none; font-size: 11.5px; font-weight: 600; white-space: nowrap;">Détails du dernier mail</a>
+        </div>
+      </div>
+      <? } ?>
+      <? if (data.urgentFiles.extraCount > 0) { ?>
+      <div style="font-size: 12.5px; color: #6B7280;">et <?= data.urgentFiles.extraCount ?> autre(s) dossier(s)</div>
+      <? } ?>
     </div>
     <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
     <? } ?>

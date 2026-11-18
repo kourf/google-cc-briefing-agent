@@ -67,7 +67,7 @@ const GeminiService = (() => {
    *
    * @param {string} model - Modèle ciblé.
    * @param {string} apiKey - Clé API.
-   * @param {string} prompt - Texte complet envoyé.
+   * @param {string|Array<Object>} prompt - Texte complet envoyé, ou liste de « parts » (texte + PDF joints).
    * @param {Object} generationOverrides - Paramètres de génération spécifiques.
    * @returns {string} Texte du premier candidat.
    * @throws {Error} Erreur portant `statusCode` (0 = réseau).
@@ -75,7 +75,7 @@ const GeminiService = (() => {
   const requestModel = (model, apiKey, prompt, generationOverrides) => {
     const url = `${Config.DEFAULTS.GEMINI_API_BASE_URL}/${model}:generateContent`;
     const payload = {
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      contents: [{ role: 'user', parts: Array.isArray(prompt) ? prompt : [{ text: prompt }] }],
       generationConfig: buildGenerationConfig(model, generationOverrides)
     };
 
@@ -712,6 +712,105 @@ const GeminiService = (() => {
   // 4. Diagnostic
   // ---------------------------------------------------------------------------
 
+  // ---------------------------------------------------------------------------
+  // 4. Suivi des dossiers urgents (huissier, impôts, Urssaf, banque…)
+  // ---------------------------------------------------------------------------
+
+  /** Niveaux d'alerte possibles d'un dossier. */
+  const URGENT_LEVELS = Object.freeze(['urgent', 'a_surveiller', 'en_attente', 'regle']);
+
+  /**
+   * Consignes de l'analyse des dossiers urgents.
+   * @param {string} todayIso - Date du jour (AAAA-MM-JJ).
+   * @returns {string}
+   */
+  const buildUrgentFilesPrompt = (todayIso) => [
+    `Tu es l'assistant administratif personnel de Kouroufia. Nous sommes le ${todayIso}.`,
+    'Pour CHAQUE dossier fourni (identifié par "key"), lis tous ses mails ET les PDF joints qui portent sa clé, puis dis où en est le dossier.',
+    'Règles :',
+    '- Français très simple, phrases courtes, aucun jargon (si un mot juridique est indispensable, explique-le entre parenthèses).',
+    '- Uniquement des faits écrits noir sur blanc dans les mails ou les PDF. N’ajoute aucune conséquence ni supposition (les mots « bloqué », « clôturé », « payé », « annulé » sont interdits s’ils ne figurent pas tels quels dans un mail ou un PDF ; une menace comme « pourra clôturer » reste une menace). Montants exacts avec « € », dates exactes.',
+    '- Un dossier ne concerne que son organisme : ne mélange pas deux dettes différentes (ex. une saisie des impôts reçue via la banque reste une dette envers les impôts, pas envers la banque ; dis-le clairement).',
+    '- "etat" : 1 à 2 phrases sur la situation actuelle du dossier (la plus récente, pas l’historique complet).',
+    '- "prochaineAction" : ce que Kouroufia doit faire maintenant, concrètement (qui contacter, quoi payer, quoi envoyer). Si rien : « Rien à faire pour l’instant ».',
+    '- "echeance" : date limite de cette prochaine action au format AAAA-MM-JJ, sinon chaîne vide. Pour un paiement mensuel, donne la prochaine date de paiement.',
+    '- "montant" : somme encore due (ex. « 1 161,20 € »), sinon chaîne vide.',
+    '- "niveau" : "urgent" (paiement ou réponse exigé, poursuites, saisie, échéance proche), "a_surveiller" (risque ou relance sans date proche), "en_attente" (vous attendez une réponse, rien à faire), "regle" (dette payée ou annulée, dossier clos).',
+    '- "changement" : ce que le mail ou le courrier le plus récent apporte de nouveau par rapport à "etatPrecedent" (1 phrase). Si "etatPrecedent" est vide : chaîne vide.'
+  ].join('\n');
+
+  /**
+   * Schéma JSON de la réponse (un objet par dossier).
+   * @returns {Object}
+   */
+  const buildUrgentFilesSchema = () => ({
+    type: 'ARRAY',
+    items: {
+      type: 'OBJECT',
+      properties: {
+        key: { type: 'STRING' },
+        etat: { type: 'STRING' },
+        prochaineAction: { type: 'STRING' },
+        echeance: { type: 'STRING' },
+        montant: { type: 'STRING' },
+        niveau: { type: 'STRING', enum: [...URGENT_LEVELS] },
+        changement: { type: 'STRING' }
+      },
+      required: ['key', 'etat', 'prochaineAction', 'echeance', 'montant', 'niveau', 'changement']
+    }
+  });
+
+  /**
+   * Analyse IA des dossiers urgents (mails + PDF joints, en un seul appel).
+   *
+   * @param {Array<{key: string, organisme: string, etatPrecedent: string, messages: Array<Object>, pdfs: Array<Object>}>} dossiers
+   * @returns {Object<string, Object>|null} key -> analyse, ou null si l'IA est indisponible.
+   */
+  const analyzeUrgentFiles = (dossiers) => {
+    if (!dossiers || dossiers.length === 0) return {};
+    const todayIso = Utilities.formatDate(new Date(), Config.DEFAULTS.TIMEZONE, 'yyyy-MM-dd');
+    const summary = dossiers.map((d) => ({
+      key: d.key,
+      organisme: d.organisme,
+      etatPrecedent: d.etatPrecedent || '',
+      mails: d.messages,
+      pdfJoints: d.pdfs.map((p) => `${p.name} (reçu le ${p.date})`)
+    }));
+    const parts = [{ text: `${buildUrgentFilesPrompt(todayIso)}\n\nDossiers :\n${JSON.stringify(summary)}` }];
+    for (const d of dossiers) {
+      for (const pdf of d.pdfs) {
+        parts.push({ text: `PDF joint du dossier "${d.key}" : ${pdf.name} (reçu le ${pdf.date})` });
+        parts.push({ inlineData: { mimeType: 'application/pdf', data: pdf.data } });
+      }
+    }
+
+    const text = generate({
+      purpose: 'suivi des dossiers urgents',
+      prompt: parts,
+      generationConfig: {
+        maxOutputTokens: 4096,
+        responseMimeType: 'application/json',
+        responseSchema: buildUrgentFilesSchema()
+      },
+      minRemainingMs: Config.DEFAULTS.RESERVE_AFTER_EMAILS_MS
+    });
+    const parsed = parseJson(text);
+    if (!Array.isArray(parsed)) return null;
+    const map = {};
+    for (const item of parsed) {
+      if (!item || !item.key) continue;
+      map[item.key] = {
+        etat: Utils.sanitizeText(item.etat || ''),
+        prochaineAction: Utils.sanitizeText(item.prochaineAction || ''),
+        echeance: /^\d{4}-\d{2}-\d{2}$/.test(String(item.echeance || '').trim()) ? String(item.echeance).trim() : '',
+        montant: Utils.sanitizeText(item.montant || ''),
+        niveau: URGENT_LEVELS.includes(item.niveau) ? item.niveau : 'a_surveiller',
+        changement: Utils.sanitizeText(item.changement || '')
+      };
+    }
+    return map;
+  };
+
   /**
    * Teste la connexion au modèle principal (utilisé par diagnostiquerBriefing).
    * @returns {{ok: boolean, model: string, detail: string}}
@@ -733,6 +832,7 @@ const GeminiService = (() => {
     analyzeEmails,
     generateWeatherAdvice,
     generateNewsDigest,
+    analyzeUrgentFiles,
     pingPrimaryModel
   };
 })();

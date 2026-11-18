@@ -296,7 +296,15 @@ const BriefingService = (() => {
 
     const { urgentItems, jobOffers, sortedInfoGroups, lowPriority } = organizeEmails(emails);
     const agendaView = summarizeAgenda(agenda);
-    const urgentFiles = GmailService.getUrgentFiles();
+    let urgentFiles = null;
+    try {
+      urgentFiles = UrgentFilesService.enrich(GmailService.getUrgentFiles());
+      if (urgentFiles && urgentFiles.files.length > 0) {
+        DevOpsAgentService.recordCheck(`vos dossiers urgents (${urgentFiles.files.length} suivis)`, 15);
+      }
+    } catch (e) {
+      console.warn(`Dossiers urgents : ${e.message}`);
+    }
     const stats = {
       totalEmails: emails.length,
       urgentCount: urgentItems.length,
@@ -402,10 +410,19 @@ const BriefingService = (() => {
 
     if (data.urgentFiles && data.urgentFiles.files.length > 0) {
       lines.push('=== DOSSIERS URGENTS EN COURS ===');
+      if (data.urgentFiles.newCount > 0) lines.push(`${data.urgentFiles.newCount} dossier(s) ont bougé depuis le dernier briefing.`);
       lines.push(`${data.urgentFiles.total} mail(s) rangé(s) dans « ${data.urgentFiles.label} ». Quand un dossier est réglé, retirez ce libellé dans Gmail.`);
       for (const f of data.urgentFiles.files) {
         const unread = f.unread > 0 ? `, ${f.unread} non lu(s)` : '';
-        lines.push(`• ${f.sender} — ${f.count} mail(s)${unread}, dernier le ${f.lastDateFormatted} (${f.ageLabel}) : « ${f.subject} » — ${f.webUrl}`);
+        lines.push(`• [${f.levelLabel.toUpperCase()}]${f.isNew ? ' [NOUVEAU]' : ''} ${f.sender} — ${f.count} mail(s)${unread}, dernier ${f.ageLabel} (${f.lastDateFormatted})`);
+        if (f.changement) lines.push(`  Ce qui a changé : ${f.changement}`);
+        if (f.etat) lines.push(`  Où on en est : ${f.etat}${f.montant ? ` (reste dû : ${f.montant})` : ''}`);
+        else lines.push(`  « ${f.subject} »`);
+        if (f.prochaineAction) {
+          const due = f.deadline ? ` — avant le ${f.deadline.formatted} (${f.deadline.label})` : '';
+          lines.push(`  À faire : ${f.prochaineAction}${due}`);
+        }
+        lines.push(`  Détails : ${f.webUrl}`);
       }
       if (data.urgentFiles.extraCount > 0) lines.push(`• et ${data.urgentFiles.extraCount} autre(s) dossier(s)`);
       lines.push('');

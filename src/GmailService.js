@@ -130,6 +130,64 @@ const GmailService = (() => {
     return parts.slice(-keep).join('.');
   };
 
+  /** Nombre de mails récents d'un dossier transmis à l'analyse IA. */
+  const URGENT_CONTEXT_MESSAGES = 6;
+  /** Longueur maximale du texte de chaque mail transmis à l'analyse IA. */
+  const URGENT_CONTEXT_BODY_CHARS = 1500;
+  /** PDF joints transmis à l'analyse IA (les plus récents), et taille maximale de chacun. */
+  const URGENT_MAX_PDFS = 2;
+  const URGENT_MAX_PDF_BYTES = 3 * 1024 * 1024;
+
+  /**
+   * Contenu d'un dossier pour l'analyse IA : derniers mails (texte abrégé) et PDF joints les plus récents
+   * (les lettres d'huissier ou des impôts ne sont souvent que dans le PDF).
+   *
+   * @param {Array<GoogleAppsScript.Gmail.GmailMessage>} chronological - Mails du dossier, du plus ancien au plus récent.
+   * @param {Array<string>} own - Adresses de l'utilisateur.
+   * @returns {{messages: Array<Object>, pdfs: Array<{name: string, date: string, data: string}>}}
+   */
+  const buildUrgentContext = (chronological, own) => {
+    const tz = Config.DEFAULTS.TIMEZONE;
+    const recent = chronological.slice(-URGENT_CONTEXT_MESSAGES);
+    const messages = recent.map((m) => {
+      let body = '';
+      try {
+        body = m.getPlainBody() || '';
+      } catch {}
+      body = Utils.sanitizeText(body.replace(/\s+/g, ' '));
+      let attachments = [];
+      try {
+        attachments = m.getAttachments({ includeInlineImages: false }).map((a) => a.getName());
+      } catch {}
+      return {
+        date: Utilities.formatDate(m.getDate(), tz, 'dd/MM/yyyy'),
+        de: own.includes(senderAddress(m.getFrom())) ? 'Vous (Kouroufia)' : Utils.cleanSenderName(m.getFrom()),
+        objet: Utils.sanitizeText(m.getSubject() || ''),
+        texte: body.length > URGENT_CONTEXT_BODY_CHARS ? `${body.slice(0, URGENT_CONTEXT_BODY_CHARS)}…` : body,
+        piecesJointes: attachments
+      };
+    });
+
+    const pdfs = [];
+    for (const m of chronological.slice().reverse()) {
+      if (pdfs.length >= URGENT_MAX_PDFS) break;
+      let attachments = [];
+      try {
+        attachments = m.getAttachments({ includeInlineImages: false });
+      } catch {}
+      for (const a of attachments) {
+        if (pdfs.length >= URGENT_MAX_PDFS) break;
+        if (!/pdf/i.test(a.getContentType()) || a.getSize() > URGENT_MAX_PDF_BYTES) continue;
+        pdfs.push({
+          name: a.getName(),
+          date: Utilities.formatDate(m.getDate(), tz, 'dd/MM/yyyy'),
+          data: Utilities.base64Encode(a.getBytes())
+        });
+      }
+    }
+    return { messages, pdfs };
+  };
+
   /**
    * Dossiers urgents en cours : fils rangés sous le libellé Config.DEFAULTS.URGENT_LABEL,
    * regroupés par organisme (huissier, Qonto, Urssaf, impôts…), du plus récent au plus ancien.
@@ -159,8 +217,9 @@ const GmailService = (() => {
         const address = senderAddress(external.getFrom());
         const key = organisationOf(address) || Utils.cleanSenderName(external.getFrom()).toLowerCase();
         const lastDate = thread.getLastMessageDate();
-        const entry = byOrganisation.get(key) || { sender: '', count: 0, unread: 0, lastDate: null, subject: '', threadId: '' };
+        const entry = byOrganisation.get(key) || { key, sender: '', count: 0, unread: 0, lastDate: null, subject: '', threadId: '', messages: [] };
         entry.count += 1;
+        messages.forEach((m) => entry.messages.push(m));
         if (thread.isUnread()) entry.unread += 1;
         if (!entry.lastDate || lastDate.getTime() > entry.lastDate.getTime()) {
           entry.lastDate = lastDate;
@@ -173,26 +232,34 @@ const GmailService = (() => {
 
       // Ancienneté en jours calendaires (fuseau du script) : « aujourd'hui », « hier », « il y a N jours ».
       const tz = Config.DEFAULTS.TIMEZONE;
-      const dayNumber = (d) => Math.floor(Date.parse(`${Utilities.formatDate(d, tz, 'yyyy-MM-dd')}T00:00:00Z`) / 86400000);
-      const today = dayNumber(new Date());
+      const today = Utils.dayNumber(new Date());
       const ageLabel = (d) => {
-        const days = Math.max(0, today - dayNumber(d));
+        const days = Math.max(0, today - Utils.dayNumber(d));
         return days === 0 ? 'aujourd’hui' : days === 1 ? 'hier' : `il y a ${days} jours`;
       };
-      const files = [...byOrganisation.values()]
-        .sort((a, b) => b.lastDate.getTime() - a.lastDate.getTime())
-        .map((e) => ({
+      const max = Config.DEFAULTS.MAX_URGENT_FILES;
+      const sorted = [...byOrganisation.values()].sort((a, b) => b.lastDate.getTime() - a.lastDate.getTime());
+      const files = sorted.slice(0, max).map((e) => {
+        const chronological = e.messages.sort((a, b) => a.getDate().getTime() - b.getDate().getTime());
+        const newest = chronological[chronological.length - 1];
+        return {
+          key: e.key,
           sender: e.sender,
           count: e.count,
           unread: e.unread,
           subject: e.subject,
+          lastDate: e.lastDate,
           lastDateFormatted: Utilities.formatDate(e.lastDate, tz, 'dd/MM/yyyy'),
           ageLabel: ageLabel(e.lastDate),
-          webUrl: Utils.buildEmailDetailsUrl(e.threadId)
-        }));
-      const max = Config.DEFAULTS.MAX_URGENT_FILES;
-      console.log(`Dossiers urgents : ${threads.length} fil(s), ${files.length} organisme(s).`);
-      return { label: labelName, total: threads.length, files: files.slice(0, max), extraCount: Math.max(0, files.length - max) };
+          webUrl: Utils.buildEmailDetailsUrl(e.threadId),
+          // Empreinte : change dès qu'un nouveau mail arrive dans le dossier (sert à la mémoire d'un jour sur l'autre).
+          fingerprint: newest ? `${newest.getId()}|${chronological.length}` : '',
+          // Lu seulement si le dossier doit être (ré)analysé : évite de relire mails et PDF chaque matin.
+          loadContext: () => buildUrgentContext(chronological, own)
+        };
+      });
+      console.log(`Dossiers urgents : ${threads.length} fil(s), ${sorted.length} organisme(s).`);
+      return { label: labelName, total: threads.length, files, extraCount: Math.max(0, sorted.length - max) };
     } catch (error) {
       console.warn(`Dossiers urgents illisibles : ${error.message}`);
       return null;
