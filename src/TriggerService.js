@@ -10,6 +10,9 @@
 const TriggerService = (() => {
   const TRIGGER_FUNCTION_NAME = 'runDailyBriefing';
   const WATCHDOG_FUNCTION_NAME = 'watchdogSafetyCheck';
+  /** Analyse des dossiers urgents (mails + PDF), toutes les 2 heures, hors briefing (accord de l'utilisateur du 18/11/2026). */
+  const URGENT_FILES_FUNCTION_NAME = 'preparerDossiersUrgents';
+  const URGENT_FILES_EVERY_HOURS = 2;
   const LEGACY_FUNCTION_NAMES = Object.freeze(['runBriefing', 'runBriefingPrecise']);
 
   /**
@@ -87,6 +90,7 @@ const TriggerService = (() => {
     const targetDate = calculateNextTargetDate();
     ScriptApp.newTrigger(TRIGGER_FUNCTION_NAME).timeBased().at(targetDate).inTimezone(tz).create();
     console.log(`Prochain briefing programmé le ${Utilities.formatDate(targetDate, tz, 'dd/MM/yyyy à HH:mm:ss')} (${tz}).`);
+    ensureUrgentFilesTrigger(); // réinstallé automatiquement s'il a disparu
     return targetDate;
   };
 
@@ -105,10 +109,28 @@ const TriggerService = (() => {
     console.log(`Watchdog quotidien installé à ${Config.DEFAULTS.WATCHDOG_HOUR}h00 (${tz}).`);
   };
 
-  /** Installe l'architecture complète : 06:00:00 exact + watchdog 07h00. */
+  /**
+   * Installe (une seule fois) l'analyse des dossiers urgents toutes les 2 heures. Elle tourne dans sa
+   * propre exécution : même lente, elle ne peut ni retarder ni bloquer l'envoi du briefing de 06:00.
+   * @returns {boolean} true si le déclencheur existe (déjà présent ou créé).
+   */
+  const ensureUrgentFilesTrigger = () => {
+    try {
+      if (ScriptApp.getProjectTriggers().some((t) => t.getHandlerFunction() === URGENT_FILES_FUNCTION_NAME)) return true;
+      ScriptApp.newTrigger(URGENT_FILES_FUNCTION_NAME).timeBased().everyHours(URGENT_FILES_EVERY_HOURS).create();
+      console.log(`Analyse des dossiers urgents programmée toutes les ${URGENT_FILES_EVERY_HOURS} heures.`);
+      return true;
+    } catch (error) {
+      console.warn(`Analyse des dossiers urgents non programmée : ${error.message}`);
+      return false;
+    }
+  };
+
+  /** Installe l'architecture complète : 06:00:00 exact + watchdog 07h00 + dossiers urgents (toutes les 2 h). */
   const setupAllTriggers = () => {
     setupDailyTrigger();
     setupWatchdogTrigger();
+    ensureUrgentFilesTrigger();
   };
 
   /**
@@ -121,12 +143,13 @@ const TriggerService = (() => {
       type: t.getEventType() ? String(t.getEventType()) : 'CLOCK'
     }));
 
-  /** @returns {{hasMain: boolean, hasWatchdog: boolean}} État des deux déclencheurs indispensables. */
+  /** @returns {{hasMain: boolean, hasWatchdog: boolean, hasUrgentFiles: boolean}} État des déclencheurs. */
   const getTriggerHealth = () => {
     const handlers = getTriggersSummary().map((t) => t.handler);
     return {
       hasMain: handlers.includes(TRIGGER_FUNCTION_NAME),
-      hasWatchdog: handlers.includes(WATCHDOG_FUNCTION_NAME)
+      hasWatchdog: handlers.includes(WATCHDOG_FUNCTION_NAME),
+      hasUrgentFiles: handlers.includes(URGENT_FILES_FUNCTION_NAME)
     };
   };
 
@@ -139,6 +162,7 @@ const TriggerService = (() => {
   return {
     setupDailyTrigger,
     setupAllTriggers,
+    ensureUrgentFilesTrigger,
     getTriggersSummary,
     getTriggerHealth,
     calculateNextTargetDate,

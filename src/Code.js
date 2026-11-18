@@ -70,6 +70,18 @@ function preparerDossiersUrgents() {
 }
 
 /**
+ * Installe l'analyse automatique des dossiers urgents toutes les 2 heures (une seule fois),
+ * puis lance une première analyse. N'envoie aucun e-mail.
+ * @returns {boolean}
+ */
+function installerAnalyseDossiers() {
+  const ok = TriggerService.ensureUrgentFilesTrigger();
+  console.log(ok ? 'Analyse automatique des dossiers urgents : active (toutes les 2 heures).' : 'Installation impossible.');
+  if (ok) preparerDossiersUrgents();
+  return ok;
+}
+
+/**
  * Essai de la rubrique du vendredi (« Bilan de la semaine ») un autre jour.
  * Même fonctionnement que runBriefingNow, sans toucher au suivi de production.
  * @returns {Object}
