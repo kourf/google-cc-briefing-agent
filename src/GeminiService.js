@@ -733,7 +733,7 @@ const GeminiService = (() => {
     '- Un dossier ne concerne que son organisme : ne mélange pas deux dettes différentes (ex. une saisie des impôts reçue via la banque reste une dette envers les impôts, pas envers la banque ; dis-le clairement).',
     '- "etat" : 1 à 2 phrases sur la situation actuelle du dossier (la plus récente, pas l’historique complet).',
     '- "prochaineAction" : ce que Kouroufia doit faire maintenant, concrètement (qui contacter, quoi payer, quoi envoyer). Si rien : « Rien à faire pour l’instant ».',
-    '- "echeance" : date limite de cette prochaine action au format AAAA-MM-JJ, sinon chaîne vide. Pour un paiement mensuel, donne la prochaine date de paiement.',
+    '- "echeance" : date limite de cette prochaine action au format AAAA-MM-JJ, sinon chaîne vide. Obligatoire dès qu’une date ou un jour du mois est écrit : pour un paiement mensuel « au plus tard le 30 du mois », donne la prochaine date à venir (ex. nous sommes le 18/11 -> 2026-11-30). Reprends aussi cette date dans "prochaineAction".',
     '- "montant" : somme encore due (ex. « 1 161,20 € »), sinon chaîne vide.',
     '- "niveau" : "urgent" (paiement ou réponse exigé, poursuites, saisie, échéance proche), "a_surveiller" (risque ou relance sans date proche), "en_attente" (vous attendez une réponse, rien à faire), "regle" (dette payée ou annulée, dossier clos).',
     '- "changement" : ce que le mail ou le courrier le plus récent apporte de nouveau par rapport à "etatPrecedent" (1 phrase). Si "etatPrecedent" est vide : chaîne vide.'

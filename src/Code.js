@@ -26,9 +26,11 @@ function runPreflightChecks_() {
 /**
  * Chaîne complète : e-mails -> agenda -> analyse IA -> assemblage et envoi.
  * @param {number} sinceSec - Début de la période analysée (secondes UNIX).
+ * @param {Object} [options]
+ * @param {string|null} [options.weeklyMode] - Force la rubrique hebdomadaire (« friday », « sunday ») pour un essai.
  * @returns {Object} Résultat de BriefingService.buildAndSendBriefing.
  */
-function executeBriefingPipeline_(sinceSec) {
+function executeBriefingPipeline_(sinceSec, options) {
   console.log(`Période analysée depuis : ${new Date(sinceSec * 1000).toISOString()}`);
 
   const rawEmails = GmailService.fetchUnreadEmails(sinceSec);
@@ -48,11 +50,45 @@ function executeBriefingPipeline_(sinceSec) {
   }
 
   const enrichedEmails = GeminiService.analyzeEmails(rawEmails);
-  return BriefingService.buildAndSendBriefing({
-    emails: enrichedEmails,
-    agenda,
-    recipientEmail: Config.getRecipientEmail()
-  });
+  const params = { emails: enrichedEmails, agenda, recipientEmail: Config.getRecipientEmail() };
+  if (options && options.weeklyMode !== undefined) params.weeklyMode = options.weeklyMode;
+  return BriefingService.buildAndSendBriefing(params);
+}
+
+/**
+ * Analyse IA des « Dossiers urgents » (mails + PDF joints) et mise à jour de leur mémoire.
+ * Tourne à part du briefing : même si l'IA est lente, l'envoi de 06:00 n'est jamais retardé,
+ * il relit simplement la dernière analyse enregistrée. N'envoie aucun e-mail.
+ * @returns {number} Nombre de dossiers suivis.
+ */
+function preparerDossiersUrgents() {
+  console.log('=== Préparation des dossiers urgents ===');
+  const result = UrgentFilesService.enrich(GmailService.getUrgentFiles(), { analyze: true });
+  const count = result && result.files ? result.files.length : 0;
+  console.log(`=== ${count} dossier(s) urgent(s) à jour ===`);
+  return count;
+}
+
+/**
+ * Essai de la rubrique du vendredi (« Bilan de la semaine ») un autre jour.
+ * Même fonctionnement que runBriefingNow, sans toucher au suivi de production.
+ * @returns {Object}
+ */
+function testerBilanVendredi() {
+  console.log('=== Essai : bilan du vendredi ===');
+  runPreflightChecks_();
+  return executeBriefingPipeline_(Math.floor(Date.now() / 1000) - Config.getTestLookbackHours() * 3600, { weeklyMode: 'friday' });
+}
+
+/**
+ * Essai de la rubrique du dimanche (« Votre semaine à venir ») un autre jour.
+ * Même fonctionnement que runBriefingNow, sans toucher au suivi de production.
+ * @returns {Object}
+ */
+function testerSemaineDimanche() {
+  console.log('=== Essai : semaine à venir du dimanche ===');
+  runPreflightChecks_();
+  return executeBriefingPipeline_(Math.floor(Date.now() / 1000) - Config.getTestLookbackHours() * 3600, { weeklyMode: 'sunday' });
 }
 
 /**

@@ -31,6 +31,97 @@
 
     <hr style="border: 0; border-top: 1px solid #E5E7EB; margin: 20px 0;">
 
+    <!-- 0. RENDEZ-VOUS HEBDOMADAIRE : VENDREDI (BILAN) / DIMANCHE (SEMAINE À VENIR) -->
+    <? if (data.weeklyReview) {
+         var wr = data.weeklyReview;
+         var isFri = wr.kind === 'friday';
+         var wBg = isFri ? '#F0FDF4' : '#EFF6FF';
+         var wBorder = isFri ? '#BBF7D0' : '#BFDBFE';
+         var wColor = isFri ? '#166534' : '#1E40AF';
+    ?>
+    <div style="margin-bottom: 20px; padding: 14px 16px; background-color: <?= wBg ?>; border: 1px solid <?= wBorder ?>; border-radius: 10px;">
+      <div style="font-size: 16px; font-weight: 800; color: <?= wColor ?>; margin-bottom: 2px;"><?= wr.title ?></div>
+      <div style="font-size: 12px; color: #4B5563; margin-bottom: 2px;"><?= wr.period ?></div>
+      <div style="font-size: 12.5px; color: #374151; font-style: italic; margin-bottom: 10px;"><?= wr.intro ?></div>
+
+      <? if (isFri) { ?>
+      <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 10px;">
+        <tr>
+          <td align="center" style="padding: 6px; background-color: #FFFFFF; border: 1px solid <?= wBorder ?>; border-radius: 6px;"><div style="font-size: 18px; font-weight: 800; color: <?= wColor ?>;"><?= wr.emails ?></div><div style="font-size: 11px; color: #6B7280;">e-mails analysés</div></td>
+          <td width="8"></td>
+          <td align="center" style="padding: 6px; background-color: #FFFFFF; border: 1px solid <?= wBorder ?>; border-radius: 6px;"><div style="font-size: 18px; font-weight: 800; color: <?= wColor ?>;"><?= wr.actionsCount ?></div><div style="font-size: 11px; color: #6B7280;">actions demandées</div></td>
+          <td width="8"></td>
+          <td align="center" style="padding: 6px; background-color: #FFFFFF; border: 1px solid <?= wBorder ?>; border-radius: 6px;"><div style="font-size: 18px; font-weight: 800; color: <?= wColor ?>;"><?= wr.offers ?></div><div style="font-size: 11px; color: #6B7280;">offres d’emploi</div></td>
+        </tr>
+      </table>
+      <? if (wr.journalNote) { ?><div style="font-size: 11.5px; color: #6B7280; margin-bottom: 8px;"><?= wr.journalNote ?></div><? } ?>
+
+      <? if (wr.movedFiles.length > 0) { ?>
+      <div style="font-size: 13px; font-weight: 700; color: #111827; margin: 8px 0 4px 0;">Dossiers qui ont bougé cette semaine</div>
+      <ul style="margin: 0; padding-left: 20px;">
+        <? for (var mf = 0; mf < wr.movedFiles.length; mf++) { var m = wr.movedFiles[mf]; ?>
+        <li style="font-size: 12.5px; color: #374151; margin-bottom: 4px;"><span style="display: inline-block; font-size: 10px; font-weight: 700; padding: 0 5px; border-radius: 4px; background-color: <?= m.levelStyle.bg ?>; color: <?= m.levelStyle.color ?>; border: 1px solid <?= m.levelStyle.border ?>;"><?= m.levelLabel ?></span> <strong><?= m.sender ?></strong> : <?= m.etat ?></li>
+        <? } ?>
+      </ul>
+      <? } ?>
+
+      <? if (wr.actions.length > 0) { ?>
+      <div style="font-size: 13px; font-weight: 700; color: #111827; margin: 10px 0 4px 0;">Actions demandées cette semaine</div>
+      <ul style="margin: 0; padding-left: 20px;">
+        <? for (var wa = 0; wa < wr.actions.length; wa++) { var act = wr.actions[wa]; ?>
+        <li style="font-size: 12.5px; color: #374151; margin-bottom: 3px;"><?= act.title ?><? if (act.deadline) { ?> <span style="color: #6B7280;">(<?= act.deadline ?>)</span><? } ?></li>
+        <? } ?>
+      </ul>
+      <? } ?>
+
+      <? if (wr.bestOffers.length > 0) { ?>
+      <div style="font-size: 13px; font-weight: 700; color: #111827; margin: 10px 0 4px 0;">Meilleures offres d’emploi de la semaine</div>
+      <ul style="margin: 0; padding-left: 20px;">
+        <? for (var wo = 0; wo < wr.bestOffers.length; wo++) { var bo = wr.bestOffers[wo]; ?>
+        <li style="font-size: 12.5px; color: #374151; margin-bottom: 3px;"><? if (bo.url) { ?><a href="<?= bo.url ?>" target="_blank" rel="noopener noreferrer" style="color: #1D4ED8; text-decoration: none; font-weight: 600;"><?= bo.title ?></a><? } else { ?><?= bo.title ?><? } ?><? if (bo.company) { ?> &mdash; <?= bo.company ?><? } ?></li>
+        <? } ?>
+      </ul>
+      <? } ?>
+      <? } else { ?>
+
+      <div style="font-size: 13px; font-weight: 700; color: #111827; margin: 0 0 4px 0;">Vos rendez-vous de la semaine</div>
+      <? if (wr.days.length === 0) { ?>
+      <div style="font-size: 12.5px; color: #6B7280;">Aucun rendez-vous en dehors de votre journée type<? if (wr.routineCount > 0) { ?> (<?= wr.routineCount ?> créneaux habituels)<? } ?>.</div>
+      <? } else { ?>
+      <? for (var wd = 0; wd < wr.days.length; wd++) { var day = wr.days[wd]; ?>
+      <div style="font-size: 12.5px; font-weight: 700; color: <?= wColor ?>; margin: 6px 0 2px 0;"><?= day.label ?></div>
+      <ul style="margin: 0; padding-left: 20px;">
+        <? for (var we = 0; we < day.events.length; we++) { var dev = day.events[we]; ?>
+        <li style="font-size: 12.5px; color: #374151; margin-bottom: 2px;"><span style="color: #6B7280;"><?= dev.time ?></span> &mdash; <strong><?= dev.title ?></strong><? if (dev.location) { ?> <span style="color: #6B7280;">(<?= dev.location ?>)</span><? } ?><? if (dev.conferenceLink) { ?> <a href="<?= dev.conferenceLink ?>" target="_blank" rel="noopener noreferrer" style="color: #047857;">visio</a><? } ?></li>
+        <? } ?>
+      </ul>
+      <? } ?>
+      <? if (wr.routineCount > 0) { ?><div style="font-size: 11.5px; color: #6B7280; margin-top: 4px;">Plus vos <?= wr.routineCount ?> créneaux de journée type.</div><? } ?>
+      <? } ?>
+
+      <? if (wr.toPush.length > 0) { ?>
+      <div style="font-size: 13px; font-weight: 700; color: #111827; margin: 10px 0 4px 0;">Dossiers à faire avancer cette semaine</div>
+      <ul style="margin: 0; padding-left: 20px;">
+        <? for (var tp = 0; tp < wr.toPush.length; tp++) { var push = wr.toPush[tp]; ?>
+        <li style="font-size: 12.5px; color: #374151; margin-bottom: 3px;"><strong><?= push.sender ?></strong> : <?= push.action ?></li>
+        <? } ?>
+      </ul>
+      <? } ?>
+      <? } ?>
+
+      <? if (wr.deadlines.length > 0) { ?>
+      <div style="font-size: 13px; font-weight: 700; color: #991B1B; margin: 10px 0 4px 0;"><?= isFri ? 'À ne pas oublier' : 'Échéances de la semaine' ?></div>
+      <ul style="margin: 0; padding-left: 20px;">
+        <? for (var dl = 0; dl < wr.deadlines.length; dl++) { var dd = wr.deadlines[dl]; ?>
+        <li style="font-size: 12.5px; color: #374151; margin-bottom: 3px;"><strong style="color: <?= dd.overdue ? '#B91C1C' : '#111827' ?>;"><?= dd.date ?> (<?= dd.label ?>)</strong> &mdash; <?= dd.sender ?> : <?= dd.action ?><? if (dd.montant) { ?> <span style="color: #6B7280;">(<?= dd.montant ?>)</span><? } ?></li>
+        <? } ?>
+      </ul>
+      <? } else { ?>
+      <div style="font-size: 12.5px; color: #374151; margin-top: 10px;"><?= isFri ? 'Aucune échéance proche : bon week-end !' : 'Aucune échéance cette semaine.' ?></div>
+      <? } ?>
+    </div>
+    <? } ?>
+
     <!-- ÉTAT ZÉRO E-MAIL NON LU -->
     <? if (data.hasZeroEmails) { ?>
     <div style="margin-bottom: 20px; padding: 14px 18px; background-color: #F8FAFC; border-radius: 8px; border: 1px solid #E2E8F0; color: #334155; font-size: 14px; font-weight: 500; line-height: 1.5;">

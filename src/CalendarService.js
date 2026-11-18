@@ -199,7 +199,41 @@ const CalendarService = (() => {
     return { todayEvents, tomorrowEvents };
   };
 
+  /**
+   * Rendez-vous d'une période (semaine à venir), journée type exclue : les créneaux récurrents
+   * (ou portant le même intitulé qu'un créneau récurrent) sont seulement comptés.
+   *
+   * @param {Date} start
+   * @param {Date} end
+   * @returns {{events: Array<Object>, routineCount: number}}
+   */
+  const getUpcomingEvents = (start, end) => {
+    const cal = CalendarApp.getDefaultCalendar();
+    if (!cal) return { events: [], routineCount: 0 };
+    const nativeLinks = fetchNativeConferenceLinks(start, end);
+    const all = cal
+      .getEvents(start, end)
+      .map((event) => formatEvent(event, nativeLinks))
+      .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+    // Journée type : créneaux récurrents, ou même intitulé présent au moins 3 jours différents.
+    const routineTitles = new Set(all.filter((e) => e.isRecurring).map((e) => e.title.toLowerCase()));
+    const daysByTitle = new Map();
+    const tz = Config.DEFAULTS.TIMEZONE;
+    all.forEach((e) => {
+      const key = e.title.toLowerCase();
+      if (!daysByTitle.has(key)) daysByTitle.set(key, new Set());
+      daysByTitle.get(key).add(Utilities.formatDate(e.startTime, tz, 'yyyy-MM-dd'));
+    });
+    daysByTitle.forEach((days, title) => {
+      if (days.size >= 3) routineTitles.add(title);
+    });
+    const events = all.filter((e) => !e.isRecurring && !routineTitles.has(e.title.toLowerCase()));
+    console.log(`Semaine à venir : ${events.length} rendez-vous, ${all.length - events.length} créneaux habituels.`);
+    return { events, routineCount: all.length - events.length };
+  };
+
   return {
-    getAgenda
+    getAgenda,
+    getUpcomingEvents
   };
 })();

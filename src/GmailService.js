@@ -287,7 +287,8 @@ const GmailService = (() => {
    * @returns {Array<Object>} E-mails structurés et dédupliqués (le plus récent d'abord).
    */
   const fetchUnreadEmails = (afterTimestampSec) => {
-    const query = `is:unread in:inbox -in:spam -in:trash -from:calendar-notification@google.com -subject:"agenda quotidien" after:${Math.floor(afterTimestampSec)}`;
+    // Les briefings précédents (envoyés à soi-même) ne sont jamais résumés comme des e-mails à traiter.
+    const query = `is:unread in:inbox -in:spam -in:trash -from:calendar-notification@google.com -subject:"agenda quotidien" -subject:"Mon Briefing Quotidien" after:${Math.floor(afterTimestampSec)}`;
     console.log(`Recherche Gmail : ${query}`);
 
     const threads = GmailApp.search(query, 0, Config.DEFAULTS.MAX_THREADS) || [];
@@ -310,7 +311,7 @@ const GmailService = (() => {
 
         const fromRaw = msg.getFrom() || '';
         const subjectRaw = msg.getSubject() || '(Sans objet)';
-        if (fromRaw.includes('calendar-notification@google.com') || /agenda quotidien/i.test(subjectRaw)) continue;
+        if (fromRaw.includes('calendar-notification@google.com') || /agenda quotidien|Mon Briefing Quotidien/i.test(subjectRaw)) continue;
         if (POSITION_SUBJECT.test(subjectRaw)) continue; // réglage de la ville météo, pas un e-mail à résumer
 
         seenMessageIds.add(msgId);

@@ -18,7 +18,7 @@ const UrgentFilesService = (() => {
   /** Préfixe des entrées de mémoire (une propriété du script par dossier). */
   const CACHE_PREFIX = 'URGENT_FILE::';
   /** Version des consignes d'analyse : la changer force une nouvelle analyse de tous les dossiers. */
-  const ANALYSIS_VERSION = 4;
+  const ANALYSIS_VERSION = 5;
   /** Un dossier reste marqué « Nouveau » pendant ce délai après l'arrivée d'un nouveau mail. */
   const NEW_BADGE_MS = 20 * 3600 * 1000;
   /** Au premier suivi (sans mémoire), un dossier est « Nouveau » si son dernier mail date de moins de 36 h. */
@@ -100,9 +100,14 @@ const UrgentFilesService = (() => {
    *
    * @param {{label: string, total: number, files: Array<Object>, extraCount: number}|null} urgent
    *   Résultat de GmailService.getUrgentFiles().
+   * @param {Object} [options]
+   * @param {boolean} [options.analyze=false] - Lance l'analyse IA des dossiers qui ont bougé. Le briefing
+   *   ne l'active jamais (lecture de la mémoire seulement) : l'analyse, plus longue, tourne dans
+   *   preparerDossiersUrgents() pour ne jamais retarder ni bloquer l'envoi du briefing.
    * @returns {Object|null} Même objet, dossiers enrichis et triés, prêt pour l'affichage.
    */
-  const enrich = (urgent) => {
+  const enrich = (urgent, options) => {
+    const allowAnalysis = Boolean(options && options.analyze);
     if (!urgent || !urgent.files || urgent.files.length === 0) return urgent;
     const props = PropertiesService.getScriptProperties();
     const now = Date.now();
@@ -117,7 +122,7 @@ const UrgentFilesService = (() => {
     // 2. Analyse IA, uniquement pour les dossiers qui ont bougé (un seul appel, PDF compris).
     const toAnalyze = states.filter((s) => s.changed);
     let analyses = {};
-    if (toAnalyze.length > 0) {
+    if (allowAnalysis && toAnalyze.length > 0) {
       try {
         const dossiers = toAnalyze.map((s) => {
           const context = s.file.loadContext();
@@ -149,7 +154,8 @@ const UrgentFilesService = (() => {
     const files = states.map(({ file, cache, changed }) => {
       const fresh = analyses[file.key] || null;
       let analysis = fresh || (cache && cache.analysis) || null;
-      const stale = Boolean(changed && !fresh && analysis); // nouveau mail pas encore analysé
+      // Nouveau mail pas encore analysé (une simple mise à jour des consignes ne compte pas).
+      const stale = Boolean(!fresh && analysis && cache && cache.fingerprint !== file.fingerprint);
       // Moment où le dernier mail du dossier a été vu pour la première fois par l'assistant :
       // - même mail que dans la mémoire : date déjà notée ;
       // - mémoire à jour mais mail différent : un nouveau mail vient d'arriver, donc maintenant ;

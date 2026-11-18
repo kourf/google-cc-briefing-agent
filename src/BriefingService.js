@@ -305,6 +305,11 @@ const BriefingService = (() => {
     } catch (e) {
       console.warn(`Dossiers urgents : ${e.message}`);
     }
+
+    // Journal du jour, puis rendez-vous hebdomadaire (vendredi : bilan ; dimanche : semaine à venir).
+    WeeklyReviewService.record({ totalEmails: emails.length, urgentItems, jobOffers, urgentFiles });
+    const weeklyMode = params.weeklyMode !== undefined ? params.weeklyMode : WeeklyReviewService.modeFor(now);
+    const weeklyReview = WeeklyReviewService.build({ mode: weeklyMode, urgentFiles });
     const stats = {
       totalEmails: emails.length,
       urgentCount: urgentItems.length,
@@ -335,6 +340,7 @@ const BriefingService = (() => {
       stats,
       urgentItems,
       urgentFiles,
+      weeklyReview,
       jobOffers,
       sortedInfoGroups,
       lowPriority,
@@ -355,9 +361,10 @@ const BriefingService = (() => {
     };
 
     const plural = stats.urgentCount > 1 ? 's' : '';
+    const weeklyPrefix = weeklyReview ? `${weeklyReview.title} • ` : '';
     const emailSubject = stats.urgentCount > 0
-      ? `(${stats.urgentCount} action${plural} requise${plural}) Mon Briefing Quotidien • ${dateTitle}`
-      : `Mon Briefing Quotidien • ${dateTitle}`;
+      ? `(${stats.urgentCount} action${plural} requise${plural}) ${weeklyPrefix}Mon Briefing Quotidien • ${dateTitle}`
+      : `${weeklyPrefix}Mon Briefing Quotidien • ${dateTitle}`;
 
     const htmlBody = renderTemplate(templateData);
     const plainTextBody = renderPlainText(templateData);
@@ -404,6 +411,42 @@ const BriefingService = (() => {
         if (item.deadline) line += ` (${item.deadline})`;
         if (item.summary) line += ` : ${md(item.summary)}`;
         lines.push(`${line} — ${item.webUrl}`);
+      }
+      lines.push('');
+    }
+
+    if (data.weeklyReview) {
+      const w = data.weeklyReview;
+      lines.push(`=== ${w.title.toUpperCase()} ===`, w.intro, w.period);
+      if (w.kind === 'friday') {
+        if (w.journalNote) lines.push(w.journalNote);
+        lines.push(`Cette semaine : ${w.emails} e-mail(s) analysé(s), ${w.actionsCount} action(s) demandée(s), ${w.offers} offre(s) d’emploi reçue(s).`);
+        if (w.movedFiles.length > 0) {
+          lines.push('Dossiers qui ont bougé :');
+          w.movedFiles.forEach((f) => lines.push(`  - [${f.levelLabel}] ${f.sender} : ${f.etat}`));
+        }
+        if (w.actions.length > 0) {
+          lines.push('Actions demandées cette semaine :');
+          w.actions.forEach((a) => lines.push(`  - ${a.title}${a.deadline ? ` (${a.deadline})` : ''}`));
+        }
+        if (w.bestOffers.length > 0) {
+          lines.push('Meilleures offres de la semaine :');
+          w.bestOffers.forEach((o) => lines.push(`  - ${o.title}${o.company ? ` — ${o.company}` : ''}${o.url ? ` — ${o.url}` : ''}`));
+        }
+      } else {
+        if (w.days.length === 0) lines.push('Aucun rendez-vous en dehors de votre journée type.');
+        w.days.forEach((d) => {
+          lines.push(`${d.label} :`);
+          d.events.forEach((ev) => lines.push(`  - ${ev.time} : ${ev.title}${ev.location ? ` (${ev.location})` : ''}`));
+        });
+        if (w.toPush.length > 0) {
+          lines.push('Dossiers à faire avancer :');
+          w.toPush.forEach((f) => lines.push(`  - ${f.sender} : ${f.action}`));
+        }
+      }
+      if (w.deadlines.length > 0) {
+        lines.push(w.kind === 'friday' ? 'À ne pas oublier :' : 'Échéances de la semaine :');
+        w.deadlines.forEach((d) => lines.push(`  - ${d.date} (${d.label}) — ${d.sender} : ${d.action}${d.montant ? ` (${d.montant})` : ''}`));
       }
       lines.push('');
     }
