@@ -229,6 +229,31 @@ const UrgentFilesService = (() => {
     return { formatted: Utilities.formatDate(date, Config.DEFAULTS.TIMEZONE, 'dd/MM/yyyy'), label, days };
   };
 
+  const MONTHS_FR = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre',
+    'octobre', 'novembre', 'décembre'];
+
+  /**
+   * Retire de « À faire » la date limite que le briefing affiche déjà juste à côté
+   * (« au plus tard le 30/11/2026 », « avant le 30 novembre »…), pour ne pas l'écrire deux fois.
+   *
+   * @param {string} text - Prochaine action rédigée par l'IA.
+   * @param {string} iso - Échéance AAAA-MM-JJ.
+   * @returns {string}
+   */
+  const withoutDeadline = (text, iso) => {
+    if (!text || !/^\d{4}-\d{2}-\d{2}$/.test(iso || '')) return text || '';
+    const [y, m, d] = iso.split('-');
+    const day = String(Number(d));
+    const date = `(?<![\\d/])(?:${d}|${day})(?:\\s*\\/\\s*${m}(?:\\s*\\/\\s*${y})?|\\s+${MONTHS_FR[Number(m) - 1]}(?:\\s+${y})?)(?!\\d)`;
+    const re = new RegExp(`[,;]?\\s*(?:au plus tard|avant|d['’]ici|jusqu['’]au|pour)?\\s*(?:le\\s+)?${date}`, 'gi');
+    const out = text.replace(re, '')
+      .replace(/\s+([.,;:])/g, '$1')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+      .replace(/[\s.,;:]+$/, '');
+    return out.length >= 10 ? out : text;
+  };
+
   /**
    * Enrichit les dossiers urgents (analyse IA + mémoire + alertes) et les trie par priorité.
    *
@@ -371,7 +396,8 @@ const UrgentFilesService = (() => {
         isNew,
         stale,
         etat: analysis ? analysis.etat : '',
-        prochaineAction: analysis ? analysis.prochaineAction : '',
+        prochaineAction: !analysis ? ''
+          : (deadline ? withoutDeadline(analysis.prochaineAction, analysis.echeance) : analysis.prochaineAction),
         montant: analysis ? analysis.montant : '',
         changement: isNew && analysis ? analysis.changement : '',
         deadline,
